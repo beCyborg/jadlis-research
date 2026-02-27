@@ -1,0 +1,12 @@
+{
+  "description": "jadlis-research plugin hooks",
+  "hooks": {
+    "SessionStart": [],
+    "PreToolUse": [],
+    "PostToolUse": [],
+    "SubagentStop": [],
+    "PostToolUseFailure": [],
+    "Stop": [],
+    "SessionEnd": []
+  }
+}

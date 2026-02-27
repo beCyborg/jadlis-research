@@ -1,0 +1,12 @@
+{
+  "name": "jadlis-research",
+  "version": "0.1.0",
+  "description": "Multi-source parallel research plugin for Claude Code",
+  "author": {
+    "name": "beCyborg"
+  },
+  "repository": "https://github.com/beCyborg/jadlis-research",
+  "license": "MIT",
+  "homepage": "https://github.com/beCyborg/jadlis-research",
+  "keywords": ["research", "academic", "exa", "firecrawl", "mcp", "deep-research"]
+}
