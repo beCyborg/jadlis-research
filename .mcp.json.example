@@ -1,3 +1,94 @@
 {
-  "mcpServers": {}
+  "$schema": "https://raw.githubusercontent.com/anthropics/claude-code/main/schemas/mcp-config.schema.json",
+  "mcpServers": {
+    "semantic-scholar": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/akapet00/semantic-scholar-mcp",
+        "semantic-scholar-mcp"
+      ],
+      "env": {
+        "SEMANTIC_SCHOLAR_API_KEY": "${SEMANTIC_SCHOLAR_API_KEY}"
+      }
+    },
+    "openalex": {
+      "command": "npx",
+      "args": ["-y", "openalex-research-mcp"],
+      "env": {
+        "OPENALEX_EMAIL": "${OPENALEX_EMAIL}",
+        "OPENALEX_API_KEY": "${OPENALEX_API_KEY}"
+      }
+    },
+    "pubmed": {
+      "command": "npx",
+      "args": ["-y", "@cyanheads/pubmed-mcp-server"],
+      "env": {
+        "NCBI_EMAIL": "${NCBI_EMAIL}",
+        "NCBI_API_KEY": "${NCBI_API_KEY}"
+      }
+    },
+    "arxiv": {
+      "command": "uvx",
+      "args": ["arxiv-mcp-server"]
+    },
+    "crossref": {
+      "command": "uvx",
+      "args": ["crossref-cite-mcp"],
+      "env": {
+        "CROSSREF_MAILTO": "${CROSSREF_MAILTO}"
+      }
+    },
+    "paper-download": {
+      "command": "uvx",
+      "args": ["paper-download-mcp"],
+      "env": {
+        "PAPER_DOWNLOAD_EMAIL": "${PAPER_DOWNLOAD_EMAIL}"
+      }
+    },
+    "hn": {
+      "command": "uvx",
+      "args": ["mcp-hn"]
+    },
+    "substack": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "git+https://github.com/dkyazzentwatwa/substack_mcp",
+        "python",
+        "-m",
+        "substack_mcp.mcp_server"
+      ]
+    },
+    "twitter": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/6551Team/opentwitter-mcp",
+        "opentwitter-mcp"
+      ],
+      "env": {
+        "OPENTWITTER_API_KEY": "${OPENTWITTER_API_KEY}"
+      }
+    },
+    "google-maps": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-google-maps"],
+      "env": {
+        "GOOGLE_MAPS_API_KEY": "${GOOGLE_MAPS_API_KEY}"
+      }
+    },
+    "serpapi": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/vendors/serpapi-mcp", "src/server.py"],
+      "env": {
+        "SERPAPI_KEY": "${SERPAPI_KEY}"
+      }
+    },
+    "xpoz": {
+      "type": "streamable-http",
+      "url": "https://mcp.xpoz.ai/mcp"
+    }
+  }
 }
