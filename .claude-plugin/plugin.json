@@ -1,12 +1,23 @@
 {
   "name": "jadlis-research",
-  "version": "0.1.0",
-  "description": "Multi-source parallel research plugin for Claude Code",
+  "version": "0.9.0",
+  "description": "Deep multi-source parallel research pipeline — academic papers, web, communities, social media. 14+ data sources, 6 specialized workers.",
   "author": {
     "name": "beCyborg"
   },
+  "homepage": "https://github.com/beCyborg/jadlis-research",
   "repository": "https://github.com/beCyborg/jadlis-research",
   "license": "MIT",
-  "homepage": "https://github.com/beCyborg/jadlis-research",
-  "keywords": ["research", "academic", "exa", "firecrawl", "mcp", "deep-research"]
+  "keywords": [
+    "research",
+    "academic",
+    "scientific",
+    "exa",
+    "firecrawl",
+    "semantic-scholar",
+    "deep-research",
+    "mcp",
+    "arxiv",
+    "pubmed"
+  ]
 }

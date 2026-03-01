@@ -1,0 +1,18 @@
+{
+  "name": "jadlis-research",
+  "owner": {
+    "name": "beCyborg"
+  },
+  "metadata": {
+    "description": "Deep multi-source research pipeline for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "jadlis-research",
+      "source": "./",
+      "description": "Deep multi-source parallel research pipeline — academic papers, web, communities, social media. 14+ data sources, 6 specialized workers.",
+      "category": "productivity",
+      "tags": ["research", "academic", "exa", "firecrawl", "semantic-scholar", "arxiv", "pubmed", "deep-research"]
+    }
+  ]
+}
