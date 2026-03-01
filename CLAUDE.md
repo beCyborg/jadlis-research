@@ -1,4 +1,4 @@
-# jadlis-research v0.1.0
+# jadlis-research v0.2.0
 
 Deep research plugin for Claude Code.
 GitHub: https://github.com/beCyborg/jadlis-research
@@ -7,6 +7,8 @@ GitHub: https://github.com/beCyborg/jadlis-research
 
 ```
 User Query ($ARGUMENTS)
+    ↓
+[pre-research (Exa)]         →  inline context (not saved)
     ↓
 [query-understanding skill]  →  query-analysis.md (scratchpad)
     ↓
@@ -30,13 +32,14 @@ Worker        Worker      Worker (direct)   Worker*        Worker*
 
 ### Stage Descriptions
 
+- **Pre-research (Stage 1)** (`pre-research`): 1-2 quick Exa searches (`web_search_exa`) for surface-level context about the query topic. Executed before query-understanding to give the skill richer context for decomposition. Results are NOT saved to scratchpad — passed inline to query-understanding. Queries are simple and broad (topic + 2-3 keywords, `numResults: 5` max).
 - **Query Understanding**: MECE decomposition of the query, query expansion (3-5 reformulations per search dimension)
 - **Source Routing**: Determines which research tracks to activate based on query characteristics
 - **Academic Worker**: Searches Semantic Scholar, OpenAlex, PubMed, arXiv for scientific literature
 - **Community Worker**: Searches Reddit and Hacker News for community insights and discussions
-- **Expert Worker**: Uses Exa semantic search for expert-level content, blogs, and opinion pieces
-- **Native-Web Worker**: Uses Firecrawl for web scraping when direct page content is needed
-- **Verification Worker**: Cross-validates facts across sources, checks citations, ensures triangulation (minimum 2-3 independent sources per claim)
+- **Expert Worker**: Searches expert blogs, technical reports, whitepapers, and deep-dive content. Tools: Exa `web_search_exa` (with or without `category: "research paper"`), Firecrawl `firecrawl_scrape` for content extraction. Spawned when source-routing assigns the expert track. Scratchpad output: `expert-track.md`. NOT for Reddit, HN, Twitter, newsletters (community-worker territory). Strategy: depth over breadth — fewer sources, more extraction; recognizes expert authors, avoids SEO content. `memory: user` — learns across sessions.
+- **Native-Web Worker**: General web search for documentation, news, official sources, mainstream content; cross-validates findings from other workers. Tools: Exa `web_search_exa` (no category filters — broadest search), Firecrawl for key source extraction. Spawned **ALWAYS** — runs on every research query regardless of routing decision. Scratchpad output: `native-web-track.md`. NOT for Reddit/Twitter/academic databases. Strategy: breadth over depth; always includes a search for contradicting viewpoints; prioritizes Tier 1 sources (official docs, government, established media). `memory: user` — learns across sessions.
+- **Verification Worker**: Quality gate — reads all track scratchpads, cross-verifies findings, identifies contradictions, unverified claims, and coverage gaps. Tools: Exa and Firecrawl for targeted verification only (not bulk search). Spawned when `verification_required: true` in `routing-decision.md`. Stateless: NO `memory:` — findings are session-specific. `maxTurns: 30`. Output format (strict): Verified Claims, Contradictions, Unverified Claims, Gaps, Overall Assessment (passed/partial/failed). Scratchpad output: `verification-report.md`.
 - **Research Synthesis**: Produces structured Markdown report: TLDR → main conclusions → detailed findings → sources with citations
 
 ## Pipeline Skills
@@ -57,6 +60,25 @@ ${CLAUDE_PROJECT_DIR}/.scratchpads/${CLAUDE_SESSION_ID}/<filename>.md
 ```
 
 `CLAUDE_PROJECT_DIR` is the **user's project directory** (not the plugin root). Users should add `.scratchpads/` to their project `.gitignore`.
+
+### Scratchpad File Mapping
+
+| Worker / Skill | Filename | Written by |
+|----------------|----------|------------|
+| query-understanding skill | `query-analysis.md` | Pipeline skill |
+| source-routing skill | `routing-decision.md` | Pipeline skill |
+| academic-worker | `academic-track.md` | Agent |
+| community-worker | `community-track.md` | Agent |
+| expert-worker | `expert-track.md` | Agent |
+| native-web-worker | `native-web-track.md` | Agent |
+| social-media-worker | `social-media-track.md` | Agent |
+| verification-worker | `verification-report.md` | Agent |
+| research-synthesis skill | `report.md` | Pipeline skill |
+
+All paths are relative to: `${CLAUDE_PROJECT_DIR}/.scratchpads/${CLAUDE_SESSION_ID}/`
+
+The orchestrator (Stage 7.5) copies `report.md` to the user-facing location:
+`{CWD}/research/{topic-summary}-{DD-MM-YYYY}.md`
 
 ## Data Sources
 
@@ -140,6 +162,27 @@ Use `exit 2` for deterministic blocking, NOT JSON `decision:block`.
 - All parallel workers: `model: opus`, `permissionMode: dontAsk`
 - Haiku model is forbidden for workers (insufficient reasoning for research tasks)
 
+### Retry Policy (Worker Failures)
+
+When a worker Task fails (MCP error, timeout, other):
+
+1. Retry immediately up to **3 times** — no sleep delay (delays waste orchestrator turns)
+2. After 3 failures, present AskUserQuestion:
+   - "Continue with partial results" -> proceed to synthesis noting the gap
+   - "Retry failed worker" -> one more attempt before continuing with partial results
+3. Retry state is tracked per worker to prevent infinite loops
+4. If ALL workers fail -> surface error, do NOT proceed to synthesis (never report with zero findings)
+
+### Abort Escape Hatch
+
+To abandon a research run mid-pipeline without completing synthesis:
+
+1. Create the file: `${CLAUDE_PROJECT_DIR}/.scratchpads/${CLAUDE_SESSION_ID}/.abort`
+2. The `stop-pipeline-check.sh` hook detects this file and allows Claude to stop cleanly
+3. Without this file, the Stop hook will block stopping if track files exist but report.md is missing
+
+The orchestrator (`skills/deep-research/SKILL.md`) creates `.abort` automatically when the user selects "Cancel" via AskUserQuestion during the pipeline.
+
 ## Skills DMI Strategy
 
 **FIX-010 context:** Setting `disable-model-invocation: true` on a skill prevents agents from loading that skill via their `skills:` frontmatter list. This is undocumented CC behavior.
@@ -197,13 +240,16 @@ Export all keys in `~/.zshrc` — MCP servers fail to start if env vars are miss
 
 ## Source Routing Notes
 
-| Worker | Integrated into pipeline | Sprint |
-|--------|--------------------------|--------|
-| academic-worker | Yes | 03 |
-| community-worker | Yes | 04 |
-| social-media-worker | **No — direct invocation only** | 05 (integration: 07) |
+| Worker | Track | Integrated into pipeline | Sprint |
+|--------|-------|--------------------------|--------|
+| academic-worker | academic | Yes | 03 |
+| community-worker | community | Yes | 04 |
+| social-media-worker | local | **Sprint 07 (partial)** — spawned by orchestrator override; source-routing not yet updated | 05 (integration: 07) |
+| expert-worker | expert | **Sprint 07** — spawned by orchestrator override; source-routing not yet updated | 07 |
+| native-web-worker | native-web | **Sprint 07** — always spawned regardless of routing | 07 |
+| verification-worker | — | **Sprint 07** — spawned when `verification_required: true` in routing-decision.md | 07 |
 
-`social-media-worker` can be invoked directly but is NOT yet launched by the pipeline. Source-routing includes it as `direct-only` status. Full pipeline integration is planned for sprint 07.
+Note: source-routing skill currently marks expert, native-web, and local tracks as "not-implemented". The sprint 07 orchestrator (`skills/deep-research/SKILL.md`) compensates by injecting overrides at Stage 5.5 — spawning these workers regardless of routing status and passing all scratchpad files explicitly to synthesis.
 
 ## Known CC Limitations
 
@@ -216,13 +262,23 @@ Export all keys in `~/.zshrc` — MCP servers fail to start if env vars are miss
 | SubagentStop empty query | Internal `prompt_suggestion` agent triggers SubagentStop with empty `agent_type` | Guard in stop hook required |
 | enabledPlatforms TypeError | CC startup bug | No functional impact |
 
-## Hooks (sprint 06)
+## Hooks (sprint 07)
 
-Two enforcement hooks added in sprint 06:
+All hooks are defined in `hooks/hooks.json`. Sprint 07 replaces the minimal sprint 06 hooks with a complete set.
 
-| Hook | Event | Script | Behavior |
-|------|-------|--------|----------|
-| MCP Error Recovery | `PostToolUseFailure` | `scripts/mcp-error-recovery.sh` | Counts failures per MCP server per session. After ≥3 failures, returns prompt instructing Claude to switch to fallback chain per shared-protocols. Non-blocking (exit 0). |
-| Scratchpad Size Guard | `PostToolUse` (Write to `.scratchpads/`) | `scripts/scratchpad-size-guard.sh` | Warns when a scratchpad file exceeds 80 lines. Does NOT block — budget is advisory (exit 0). |
-
-See `hooks/hooks.json` for the full hook definitions.
+| # | Event | Matcher | Script | Purpose |
+|---|-------|---------|--------|---------|
+| 1 | SessionStart | `startup` | `session-init.sh` | API key checks, Reddit health probe, scratchpad cleanup (7d), Firecrawl credit cross-session check |
+| 2 | SessionStart | `compact` | `post-compact-state.sh` | Re-inject scratchpad state lost during compaction |
+| 3 | PreToolUse | `WebSearch\|WebFetch` | `websearch-gate.sh` | Block native web tools; allow as emergency fallback if Exa fails >= 3 times |
+| 4 | PreToolUse | `mcp__..._firecrawl__(scrape\|map\|crawl\|extract\|check_crawl_status)` | `firecrawl-circuit-breaker.sh` | Block if credits exhausted; block blocked domains (LinkedIn, Facebook, Instagram, Twitter/X, TikTok) |
+| 5 | PreToolUse | `Agent` | `task-background-check.sh` | Block background Task calls — MCP tools are unavailable in background agents |
+| 6 | PreToolUse | `mcp__..._firecrawl__firecrawl_search` | `firecrawl-search-block.sh` | Hard block — use Exa for search, not Firecrawl search |
+| 7 | PreToolUse | `mcp__..._exa__.*` | `exa-validation.sh` | Block `numResults > 25`, invalid categories (e.g., "github"), deprecated params |
+| 8 | PreToolUse | `mcp__..._openalex__.*` | `openalex-validation.sh` | Block `per_page > 200`, invalid sort params |
+| 9 | PreToolUse | `mcp__..._arxiv__.*` | `arxiv-throttle.sh` | Enforce ArXiv rate limits: 5s minimum, 15s after 429 errors. Deny-then-suggest, no sleep |
+| 10 | PostToolUse | `Write` to `.scratchpads/` | `scratchpad-size-guard.sh` | Warn when scratchpad file exceeds 80 lines (advisory, non-blocking) |
+| 11 | SubagentStop | `(jadlis-research:)?...-worker` | `subagent-stop-check.sh` | Verify worker wrote its scratchpad; collect metrics; guards for empty agent_type and stop_hook_active |
+| 12 | PostToolUseFailure | `mcp__.*` | `mcp-error-recovery.sh` | Circuit breaker: Firecrawl credits->cache, Exa billing->counter, ArXiv 429->cooldown, Reddit->skip |
+| 13 | PostToolUseFailure | `Read` | `read-error-recovery.sh` | On MaxFileReadToken error, suggest chunked reading with offset/limit |
+| 14 | Stop | (none) | `stop-pipeline-check.sh` | Block stop if track files exist but report.md is missing; `.abort` file as escape hatch |
