@@ -1,7 +1,74 @@
-# jadlis-research v0.2.0
+# jadlis-research v0.9.0
 
 Deep research plugin for Claude Code.
 GitHub: https://github.com/beCyborg/jadlis-research
+
+## Installation
+
+### Via Marketplace (recommended)
+
+```
+/plugin marketplace add beCyborg/jadlis-research
+/plugin install jadlis-research@jadlis-research
+```
+
+Then run the setup wizard:
+
+```
+/jadlis-research:setup
+```
+
+### Manual (--plugin-dir)
+
+```
+git clone https://github.com/beCyborg/jadlis-research
+claude --plugin-dir /path/to/jadlis-research
+```
+
+## Setup and Configuration
+
+### `/jadlis-research:setup` (interactive wizard)
+
+Run this after installation to configure API keys and validate MCP servers:
+
+```
+/jadlis-research:setup
+```
+
+The wizard guides you through:
+1. **Phase 1:** Detects which keys are already configured (reads `~/.jadlis-research/env` and env)
+2. **Phase 2:** Core keys — Exa and Firecrawl (required for full functionality)
+3. **Phase 3:** Recommended keys — Semantic Scholar, PubMed, OpenAlex (multiSelect)
+4. **Phase 4:** Optional keys — Twitter, Google Maps, SerpAPI, CrossRef, Paper Download (multiSelect)
+5. **Phase 5:** Free sources info (arXiv, HN, Substack require no keys; Xpoz uses OAuth)
+6. **Phase 6:** Health check — ToolSearch + minimal tool call per configured service
+7. **Phase 7:** Writes `source ~/.jadlis-research/env` to `~/.zshrc` (once, dedup); sets permissions; updates marker file
+8. **Phase 8:** Summary table of all service statuses
+
+**Security:** Keys are stored in `~/.jadlis-research/env` (chmod 600). The wizard never echoes the full key — only confirms "received key (length N)".
+
+The wizard can be re-run at any time to reconfigure or add new keys. Already-configured keys are skipped.
+
+### Manual Key Configuration
+
+If you prefer not to use the wizard, export keys in `~/.zshrc`:
+
+```bash
+export EXA_API_KEY='your-key-here'
+export FIRECRAWL_API_KEY='your-key-here'
+# ... other keys
+```
+
+Or write them directly to `~/.jadlis-research/env` using the managed block format:
+
+```bash
+# >>> jadlis-research managed env >>>
+export EXA_API_KEY='your-key-here'
+export FIRECRAWL_API_KEY='your-key-here'
+# <<< jadlis-research managed env <<<
+```
+
+Then add `source ~/.jadlis-research/env` to your `~/.zshrc`.
 
 ## Pipeline Architecture
 
@@ -119,7 +186,7 @@ Accessible directly (not yet integrated into source-routing pipeline — see spr
 
 `.mcp.json` is gitignored. Copy `.mcp.json.example` to `.mcp.json` and configure servers.
 
-**serpapi local server:** Clone `serpapi/serpapi-mcp` into `vendors/serpapi-mcp/` and run `uv sync`. See setup guide (section 08). Do NOT use the hosted remote endpoint (API key in URL path = security risk).
+**serpapi:** Local vendor setup is not supported in marketplace distribution. SerpAPI support is deferred to a future version (no npm/PyPI package available). Remove the serpapi entry from your `.mcp.json` if you encounter issues.
 
 ## Conventions
 
@@ -189,7 +256,7 @@ The orchestrator (`skills/deep-research/SKILL.md`) creates `.abort` automaticall
 
 | Skill Role | Examples | `user-invocable` | `disable-model-invocation` |
 |-----------|----------|-----------------|--------------------------|
-| User-facing | `/research` entry point | default (omit) | `true` |
+| User-facing | `/research`, `/setup` | default (omit) | `true` |
 | Agent-loaded | scientific-research, exa-search, firecrawl-extraction, community-research, shared-protocols | `false` | **DO NOT SET** |
 | Pipeline-only | query-understanding, source-routing, research-synthesis | `false` | `true` |
 
@@ -227,19 +294,24 @@ Note: `firecrawl_search` is blocked even among plugin Firecrawl tools — use Ex
 
 ## Env Vars
 
-Export all keys in `~/.zshrc` — MCP servers fail to start if env vars are missing at CC launch.
+Recommended: run `/jadlis-research:setup` to configure keys interactively. The wizard writes keys to `~/.jadlis-research/env` and sets up shell sourcing automatically.
 
-| Var | Source | Split |
-|-----|--------|-------|
-| `EXA_API_KEY` | exa.ai | 02 |
-| `FIRECRAWL_API_KEY` | firecrawl.dev | 02 |
-| `NCBI_API_KEY` | ncbi.nlm.nih.gov | 03 |
-| `GOOGLE_MAPS_API_KEY` | Google Cloud Console → APIs & Services → Credentials | 05 |
-| `SERPAPI_KEY` | serpapi.com → Account → API Key | 05 |
+For manual setup, export all keys in `~/.zshrc` before launching Claude Code — MCP servers read env vars at startup and will fail to start if vars are missing.
 
-**Xpoz:** No env var. Uses OAuth 2.1 (Google). Token is cached after first browser auth flow.
+| Var | Source | Tier | Split |
+|-----|--------|------|-------|
+| `EXA_API_KEY` | exa.ai | Core (required) | 02 |
+| `FIRECRAWL_API_KEY` | firecrawl.dev | Core (required) | 02 |
+| `NCBI_API_KEY` | ncbi.nlm.nih.gov/account | Recommended | 03 |
+| `OPENTWITTER_API_KEY` | opentwitter API | Optional | 04 |
+| `GOOGLE_MAPS_API_KEY` | Google Cloud Console | Optional | 05 |
+| `SERPAPI_KEY` | serpapi.com | Optional (deferred) | 05 |
 
-**Google Maps API Key restrictions:** When creating the key, set restrictions to "None" or "IP addresses". HTTP referrer restrictions block MCP server requests (CLI usage).
+**Xpoz (Instagram):** No env var. Uses OAuth 2.1 (Google). Token is cached after first browser auth flow.
+
+**Free sources (no key needed):** arXiv, Hacker News, Substack, OpenAlex, Reddit, Semantic Scholar.
+
+**Google Maps API Key restrictions:** Set restrictions to "None" or "IP addresses". HTTP referrer restrictions block MCP server requests (CLI usage).
 
 ## Source Routing Notes
 
@@ -271,7 +343,7 @@ All hooks are defined in `hooks/hooks.json`. Sprint 07 replaces the minimal spri
 
 | # | Event | Matcher | Script | Purpose |
 |---|-------|---------|--------|---------|
-| 1 | SessionStart | `startup` | `session-init.sh` | API key checks, Reddit health probe, scratchpad cleanup (7d), Firecrawl credit cross-session check |
+| 1 | SessionStart | `startup` | `session-init.sh` | First-run/upgrade detection (prompt to run `/jadlis-research:setup`); source `~/.jadlis-research/env`; API key checks; Reddit health probe; scratchpad cleanup (7d); Firecrawl credit cross-session check |
 | 2 | SessionStart | `compact` | `post-compact-state.sh` | Re-inject scratchpad state lost during compaction |
 | 3 | PreToolUse | `WebSearch\|WebFetch` | `websearch-gate.sh` | Block native web tools; allow as emergency fallback if Exa fails >= 3 times |
 | 4 | PreToolUse | `mcp__..._firecrawl__(scrape\|map\|crawl\|extract\|check_crawl_status)` | `firecrawl-circuit-breaker.sh` | Block if credits exhausted; block blocked domains (LinkedIn, Facebook, Instagram, Twitter/X, TikTok) |
