@@ -71,6 +71,9 @@ Skip extraction immediately. Record `[SKIPPED: blocked domain — {domain}]`.
 | `quora.com` | Login walls |
 | `medium.com` | Paywall |
 | `linkedin.com` | Login walls |
+| `instagram.com` | Hard-blocked by Firecrawl policy |
+| `maps.google.com` | Not supported (dynamic JS, anti-bot) |
+| `tiktok.com` | Hard-blocked by Firecrawl policy |
 
 ## Fallback Chain
 

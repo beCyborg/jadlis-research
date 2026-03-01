@@ -33,7 +33,26 @@ User → /research → Query Understanding → Source Routing
 - **Verification Worker**: Cross-validates facts across sources, checks citations, ensures triangulation (minimum 2-3 independent sources per claim)
 - **Research Synthesis**: Produces structured Markdown report: TLDR → main conclusions → detailed findings → sources with citations
 
-## MCP Servers (Planned)
+## Data Sources
+
+### Academic Worker
+- Semantic Scholar, OpenAlex, PubMed, arXiv
+
+### Community Worker
+- Reddit, Hacker News, GitHub, Substack, Twitter
+
+### Social Media Worker (sprint 05)
+Accessible directly (not yet integrated into source-routing pipeline — see sprint 06/07):
+- **Google Maps** — place search, geocoding, directions, place details (MCP: google-maps)
+- **Google Maps Reviews** — structured reviews via SerpAPI google_maps_reviews engine (MCP: serpapi)
+- **Instagram** — posts, profiles, hashtags, engagement metrics (MCP: xpoz)
+- **TikTok** (deferred) — trends, content, creators (MCP: xpoz) — Xpoz TikTok tools insufficient at time of implementation
+
+### Expert / Web Workers
+- Exa (semantic search, web fallback)
+- Firecrawl (page content extraction)
+
+## MCP Servers
 
 | Server | Purpose | Env Var | Split |
 |--------|---------|---------|-------|
@@ -44,8 +63,16 @@ User → /research → Query Understanding → Source Routing
 | arxiv | Preprints | — | 03 |
 | openalex | Open academic data | — | 03 |
 | reddit | Community discussions | — (HTTP) | 04 |
+| hn | Hacker News stories and comments | — | 04 |
+| substack | Newsletter content | — | 04 |
+| twitter | Twitter/X search and tweets | `${OPENTWITTER_API_KEY}` | 04 |
+| google-maps | Place search, geocoding, directions, place details | `${GOOGLE_MAPS_API_KEY}` | 05 |
+| serpapi | Google Maps reviews (google_maps_reviews engine) | `${SERPAPI_KEY}` | 05 |
+| xpoz | Instagram + TikTok data (OAuth 2.1, streamable-http) | OAuth (no env var) | 05 |
 
 `.mcp.json` is gitignored. Copy `.mcp.json.example` to `.mcp.json` and configure servers.
+
+**serpapi local server:** Clone `serpapi/serpapi-mcp` into `vendors/serpapi-mcp/` and run `uv sync`. See setup guide (section 08). Do NOT use the hosted remote endpoint (API key in URL path = security risk).
 
 ## Conventions
 
@@ -126,6 +153,32 @@ All workers must include these in `disallowedTools`:
 - `mcp__claude_ai_Firecrawl__firecrawl_extract`
 
 Note: `firecrawl_search` is forbidden even among plugin Firecrawl tools — use Exa for search.
+
+## Env Vars
+
+Export all keys in `~/.zshrc` — MCP servers fail to start if env vars are missing at CC launch.
+
+| Var | Source | Split |
+|-----|--------|-------|
+| `EXA_API_KEY` | exa.ai | 02 |
+| `FIRECRAWL_API_KEY` | firecrawl.dev | 02 |
+| `NCBI_API_KEY` | ncbi.nlm.nih.gov | 03 |
+| `GOOGLE_MAPS_API_KEY` | Google Cloud Console → APIs & Services → Credentials | 05 |
+| `SERPAPI_KEY` | serpapi.com → Account → API Key | 05 |
+
+**Xpoz:** No env var. Uses OAuth 2.1 (Google). Token is cached after first browser auth flow.
+
+**Google Maps API Key restrictions:** When creating the key, set restrictions to "None" or "IP addresses". HTTP referrer restrictions block MCP server requests (CLI usage).
+
+## Source Routing Notes
+
+| Worker | Integrated into pipeline | Sprint |
+|--------|--------------------------|--------|
+| academic-worker | Yes | 03 |
+| community-worker | Yes | 04 |
+| social-media-worker | **No — direct invocation only** | 05 (integration: 06/07) |
+
+`social-media-worker` can be invoked directly but is NOT yet in the source-routing skill's routing table. Integration into the pipeline is planned for sprint 06/07.
 
 ## Known CC Limitations
 
