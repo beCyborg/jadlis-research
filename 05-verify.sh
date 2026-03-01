@@ -43,7 +43,8 @@ grep -q "^user-invocable: false" "$SKILL" && pass "user-invocable: false" || fai
 grep -q "allowed-tools:" "$SKILL" && pass "allowed-tools present" || fail "allowed-tools missing"
 grep -q "mcp__plugin_jadlis-research_google-maps__" "$SKILL" && pass "Google Maps MCP namespace" || fail "Google Maps MCP namespace missing"
 grep -q "mcp__plugin_jadlis-research_serpapi__" "$SKILL" && pass "SerpAPI tool referenced" || fail "SerpAPI tool missing"
-grep -q "mcp__claude_ai_Exa__web_search_exa" "$SKILL" && pass "Exa fallback referenced" || fail "Exa fallback missing"
+grep -q "mcp__plugin_jadlis-research_exa__web_search_exa" "$SKILL" && pass "Exa fallback (new ns)" || fail "Exa fallback missing"
+! grep -q "mcp__claude_ai_Exa__web_search_exa" "$SKILL" && pass "No old Exa ns" || fail "Old Exa ns still present"
 grep -q "data_id" "$SKILL" && pass "data_id documented" || fail "data_id missing"
 grep -q "place_id" "$SKILL" && pass "place_id documented" || fail "place_id missing"
 grep -qi "yelp.com\|tripadvisor.com" "$SKILL" && pass "fallback chain documented" || fail "fallback chain missing"
@@ -120,7 +121,8 @@ grep -q "jadlis-research:instagram" "$AGENT" && pass "instagram skill listed" ||
 grep -q "google-maps" "$AGENT" && pass "google-maps in mcpServers" || fail "google-maps missing from mcpServers"
 grep -q "serpapi" "$AGENT" && pass "serpapi in mcpServers" || fail "serpapi missing from mcpServers"
 grep -q "xpoz" "$AGENT" && pass "xpoz in mcpServers" || fail "xpoz missing from mcpServers"
-grep -q "mcp__claude_ai_Firecrawl__firecrawl_scrape" "$AGENT" && pass "Firecrawl explicitly blocked" || fail "Firecrawl not blocked"
+grep -q "mcp__claude_ai_Firecrawl__firecrawl_scrape" "$AGENT" && pass "Firecrawl explicitly blocked (old ns)" || fail "Firecrawl not blocked (old ns)"
+grep -q "mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape" "$AGENT" && pass "Firecrawl explicitly blocked (new ns)" || fail "Firecrawl not blocked (new ns)"
 ! grep -q "mcp__claude_ai_Firecrawl__\*" "$AGENT" && pass "no wildcard Firecrawl blocks" || fail "wildcard Firecrawl block found"
 ! grep -q "^  - mcp__claude_ai_Exa__web_search_exa" "$AGENT" && pass "Exa not in disallowedTools" || fail "Exa blocked (needed as fallback)"
 grep -q "WebSearch" "$AGENT" && pass "WebSearch blocked" || fail "WebSearch not blocked"
@@ -208,6 +210,53 @@ if test -d "$PLUGIN/skills/tiktok"; then
     && pass "no hardcoded keys in tiktok skill" \
     || fail "SECURITY: hardcoded key in tiktok skill"
 fi
+
+# -----------------------------------------------
+echo ""
+echo "=== Section 13: MCP Migration ==="
+
+# Skills: no old namespace in allowed-tools
+for s in exa-search firecrawl-extraction google-maps instagram reddit github hacker-news twitter substack; do
+  ! grep "^allowed-tools:" "skills/$s/SKILL.md" | grep -q "mcp__claude_ai_Exa__\|mcp__claude_ai_Firecrawl__" \
+    && pass "skills/$s: no old namespace in allowed-tools" \
+    || fail "skills/$s: old namespace in allowed-tools"
+done
+
+# firecrawl-extraction: firecrawl_search not in allowed-tools
+! grep "^allowed-tools:" skills/firecrawl-extraction/SKILL.md | grep -q "firecrawl_search" \
+  && pass "firecrawl_search not in firecrawl-extraction allowed-tools" \
+  || fail "firecrawl_search in firecrawl-extraction allowed-tools"
+
+# firecrawl-extraction: firecrawl_browser present
+grep "^allowed-tools:" skills/firecrawl-extraction/SKILL.md | grep -q "firecrawl_browser" \
+  && pass "firecrawl_browser in firecrawl-extraction allowed-tools" \
+  || fail "firecrawl_browser missing from firecrawl-extraction allowed-tools"
+
+# Agents: both namespaces in disallowedTools (4 uniform workers)
+for a in academic-worker expert-worker native-web-worker verification-worker; do
+  grep -q "mcp__claude_ai_Exa__web_search_exa" "agents/$a.md" \
+    && pass "agents/$a: old Exa ns in disallowedTools" \
+    || fail "agents/$a: old Exa ns missing from disallowedTools"
+  grep -q "mcp__plugin_jadlis-research_exa__web_search_exa" "agents/$a.md" \
+    && pass "agents/$a: new Exa ns in disallowedTools" \
+    || fail "agents/$a: new Exa ns missing from disallowedTools"
+done
+
+# CLAUDE.md: correct heading
+grep -q "Blocked claude.ai tools" CLAUDE.md \
+  && pass "CLAUDE.md heading correct" \
+  || fail "CLAUDE.md heading incorrect"
+grep -q "mcp__plugin_jadlis-research" CLAUDE.md \
+  && pass "Plugin namespace documented in CLAUDE.md" \
+  || fail "Plugin namespace not in CLAUDE.md"
+
+# .mcp.json: exa and firecrawl servers
+jq -e '.mcpServers.exa' .mcp.json > /dev/null 2>&1 \
+  && pass ".mcp.json: exa server present" \
+  || fail ".mcp.json: exa server missing"
+jq -e '.mcpServers.firecrawl' .mcp.json > /dev/null 2>&1 \
+  && pass ".mcp.json: firecrawl server present" \
+  || fail ".mcp.json: firecrawl server missing"
 
 # -----------------------------------------------
 echo ""

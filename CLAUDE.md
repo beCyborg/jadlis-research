@@ -193,16 +193,19 @@ The orchestrator (`skills/deep-research/SKILL.md`) creates `.abort` automaticall
 | Agent-loaded | scientific-research, exa-search, firecrawl-extraction, community-research, shared-protocols | `false` | **DO NOT SET** |
 | Pipeline-only | query-understanding, source-routing, research-synthesis | `false` | `true` |
 
-## Forbidden Tools (for workers)
+## Blocked claude.ai tools (safety net)
 
-All workers must include these in `disallowedTools`:
+These tools must remain in `disallowedTools` for all workers as a safety net. The plugin provides
+Exa and Firecrawl via its own MCP servers (namespace `mcp__plugin_jadlis-research_exa__` and
+`mcp__plugin_jadlis-research_firecrawl__`). The claude.ai built-in equivalents below must be
+explicitly blocked to prevent accidental fallback.
 
-### Core forbidden (replaced by MCP equivalents)
-- `WebSearch` — replaced by Exa
-- `WebFetch` — replaced by Firecrawl
+### Core blocked (replaced by MCP equivalents)
+- `WebSearch` — replaced by Exa (`mcp__plugin_jadlis-research_exa__web_search_exa`)
+- `WebFetch` — replaced by Firecrawl (`mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape`)
 - `ToolSearch` — enforcement gap: bypasses `disallowedTools`
 
-### claude.ai Exa tools (block native tools, use plugin MCP instead)
+### claude.ai Exa tools (safety net — block built-in Exa)
 - `mcp__claude_ai_Exa__web_search_exa`
 - `mcp__claude_ai_Exa__web_search_advanced_exa`
 - `mcp__claude_ai_Exa__crawling_exa`
@@ -212,7 +215,7 @@ All workers must include these in `disallowedTools`:
 - `mcp__claude_ai_Exa__find_similar_exa`
 - `mcp__claude_ai_Exa__answer_exa`
 
-### claude.ai Firecrawl tools
+### claude.ai Firecrawl tools (safety net — block built-in Firecrawl)
 - `mcp__claude_ai_Firecrawl__firecrawl_scrape`
 - `mcp__claude_ai_Firecrawl__firecrawl_map`
 - `mcp__claude_ai_Firecrawl__firecrawl_search`
@@ -220,7 +223,7 @@ All workers must include these in `disallowedTools`:
 - `mcp__claude_ai_Firecrawl__firecrawl_check_crawl_status`
 - `mcp__claude_ai_Firecrawl__firecrawl_extract`
 
-Note: `firecrawl_search` is forbidden even among plugin Firecrawl tools — use Exa for search.
+Note: `firecrawl_search` is blocked even among plugin Firecrawl tools — use Exa for search.
 
 ## Env Vars
 
