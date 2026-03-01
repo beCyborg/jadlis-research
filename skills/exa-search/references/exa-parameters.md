@@ -3,14 +3,14 @@
 ## MCP Tool Namespace
 
 ```
-mcp__claude_ai_Exa__web_search_exa
-mcp__claude_ai_Exa__web_search_advanced_exa
-mcp__claude_ai_Exa__crawling_exa
-mcp__claude_ai_Exa__company_research_exa
-mcp__claude_ai_Exa__people_search_exa
-mcp__claude_ai_Exa__get_code_context_exa
-mcp__claude_ai_Exa__deep_researcher_start
-mcp__claude_ai_Exa__deep_researcher_check
+mcp__plugin_jadlis-research_exa__web_search_exa
+mcp__plugin_jadlis-research_exa__web_search_advanced_exa
+mcp__plugin_jadlis-research_exa__crawling_exa
+mcp__plugin_jadlis-research_exa__company_research_exa
+mcp__plugin_jadlis-research_exa__people_search_exa
+mcp__plugin_jadlis-research_exa__get_code_context_exa
+mcp__plugin_jadlis-research_exa__deep_researcher_start
+mcp__plugin_jadlis-research_exa__deep_researcher_check
 ```
 
 `find_similar_exa` and `answer_exa` are NOT MCP tools — REST-only (see section 3).

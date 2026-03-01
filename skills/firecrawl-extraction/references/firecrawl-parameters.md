@@ -3,19 +3,13 @@
 ## MCP Tool Namespace
 
 ```
-mcp__claude_ai_Firecrawl__firecrawl_scrape
-mcp__claude_ai_Firecrawl__firecrawl_batch_scrape
-mcp__claude_ai_Firecrawl__firecrawl_map
-mcp__claude_ai_Firecrawl__firecrawl_crawl
-mcp__claude_ai_Firecrawl__firecrawl_search
-mcp__claude_ai_Firecrawl__firecrawl_extract
-mcp__claude_ai_Firecrawl__firecrawl_check_crawl_status
-mcp__claude_ai_Firecrawl__firecrawl_agent
-mcp__claude_ai_Firecrawl__firecrawl_agent_status
-mcp__claude_ai_Firecrawl__firecrawl_browser_create
-mcp__claude_ai_Firecrawl__firecrawl_browser_execute
-mcp__claude_ai_Firecrawl__firecrawl_browser_delete
-mcp__claude_ai_Firecrawl__firecrawl_browser_list
+mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape
+mcp__plugin_jadlis-research_firecrawl__firecrawl_batch_scrape
+mcp__plugin_jadlis-research_firecrawl__firecrawl_map
+mcp__plugin_jadlis-research_firecrawl__firecrawl_crawl
+mcp__plugin_jadlis-research_firecrawl__firecrawl_search
+mcp__plugin_jadlis-research_firecrawl__firecrawl_agent
+mcp__plugin_jadlis-research_firecrawl__firecrawl_browser
 ```
 
 ---
@@ -79,7 +73,7 @@ Multiple URLs in one async job.
 | `headers` | object | none | Custom HTTP headers |
 | `removeBase64Images` | bool | `true` | Remove embedded base64 images |
 
-**Async:** Returns `{ jobId: string }`. Poll via `firecrawl_check_crawl_status`. Results expire 24h.
+**Async:** Returns `{ jobId: string }`. Results expire 24h.
 
 ```json
 {
@@ -139,7 +133,7 @@ Full site crawl. Async. Use `firecrawl_map` + selective scrape when possible.
 
 **Webhook events:** `"completed"`, `"page"`, `"failed"`, `"paused"`.
 
-**Async:** Returns `{ jobId: string }`. Poll via `firecrawl_check_crawl_status`.
+**Async:** Returns `{ jobId: string }`.
 
 ```json
 {
@@ -150,20 +144,6 @@ Full site crawl. Async. Use `firecrawl_map` + selective scrape when possible.
   "excludePaths": ["/blog/.*", "/changelog/.*"]
 }
 ```
-
----
-
-## Tool: `firecrawl_check_crawl_status`
-
-Poll status of `firecrawl_crawl` or `firecrawl_batch_scrape` jobs.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `id` | string | **required** | Job ID from crawl/batch |
-
-Returns: `{ status: "scraping" | "completed" | "failed", data: [...], next: cursor }`
-
-Poll: 5s → 10s (after 3 attempts) → max 30 attempts (~300s).
 
 ---
 
@@ -188,32 +168,6 @@ Search operators: `""` (exact), `-` (exclude), `site:`, `inurl:`, `intitle:`, `r
 
 ---
 
-## Tool: `firecrawl_extract`
-
-Structured JSON extraction from URLs using LLM.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `urls` | string[] | **required** | URLs (supports wildcards: `https://site.com/*`) |
-| `prompt` | string | none | Description of data to extract |
-| `schema` | object | none | JSON Schema for structured output |
-| `systemPrompt` | string | none | System context for extraction LLM |
-| `allowExternalLinks` | bool | `false` | Follow external links |
-| `enableWebSearch` | bool | `false` | Expand beyond provided URLs |
-| `origin` | string | none | Source attribution |
-
-**Cost:** Variable (LLM-based).
-
-```json
-{
-  "urls": ["https://company.com/pricing", "https://company.com/*"],
-  "prompt": "Extract pricing tiers with features and prices",
-  "schema": { "type": "object", "properties": { "tiers": { "type": "array" } } }
-}
-```
-
----
-
 ## Tool: `firecrawl_agent`
 
 Multi-step agentic browser task. **Last resort — variable cost.**
@@ -229,51 +183,27 @@ Multi-step agentic browser task. **Last resort — variable cost.**
 | `enableExtract` | bool | `false` | Allow structured extraction |
 | `allowExternalLinks` | bool | `false` | Follow external links |
 
-**Async:** Returns `{ jobId: string }`. Poll via `firecrawl_agent_status`.
-
----
-
-## Tool: `firecrawl_agent_status`
-
-Poll status of `firecrawl_agent` jobs.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `id` | string | **required** | Job ID from `firecrawl_agent` |
-
-Returns: `{ status: "running" | "completed" | "failed", output?: string }`
+**Async:** Returns `{ jobId: string }`.
 
 ---
 
 ## Browser Session Tools
 
-Lifecycle: `browser_create` → `browser_execute` (repeat) → `browser_delete`
+Lifecycle: `browser` (create) → `browser` (execute) → `browser` (delete)
 
-### `firecrawl_browser_create`
+### `firecrawl_browser`
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `ttl` | int (s) | `300` | Session lifetime (max: 3600) |
-
-Returns: `{ sessionId: string }`
-
-### `firecrawl_browser_execute`
+Unified browser session management tool. Supports create, execute, delete, and list operations.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `sessionId` | string | **required** | Session ID from `browser_create` |
-| `code` | string | **required** | Code to execute |
-| `language` | enum | `javascript` | `javascript` / `python` |
+| `action` | enum | **required** | `create` / `execute` / `delete` / `list` |
+| `sessionId` | string | conditional | Required for `execute` and `delete` actions |
+| `ttl` | int (s) | `300` | Session lifetime on `create` (max: 3600) |
+| `code` | string | conditional | Code to execute (required for `execute`) |
+| `language` | enum | `javascript` | `javascript` / `python` (for `execute`) |
 
-### `firecrawl_browser_delete`
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `sessionId` | string | **required** | Session to terminate |
-
-### `firecrawl_browser_list`
-
-No parameters. Returns all active sessions.
+`create` returns `{ sessionId: string }`. `list` returns all active sessions. Max 2 concurrent sessions.
 
 ---
 
@@ -383,11 +313,10 @@ Events: `"completed"` (full job), `"page"` (each page), `"failed"` (job failure)
 | `firecrawl_map` | 1 credit/call |
 | `firecrawl_crawl` | 1 credit/page |
 | `firecrawl_search` | ~1 credit/result *(unverified — check Firecrawl dashboard)* |
-| `firecrawl_extract` | Variable (LLM-based) |
 | `firecrawl_agent` (spark-1-mini) | Variable/step |
 | `firecrawl_agent` (spark-1-pro) | Variable/step (higher) |
-| `firecrawl_browser_create` | 1 credit |
-| `firecrawl_browser_execute` | 1 credit/execution |
+| `firecrawl_browser` (create) | 1 credit |
+| `firecrawl_browser` (execute) | 1 credit/execution |
 
 Failed requests are **not** charged (except Agent jobs).
 
@@ -410,6 +339,6 @@ Rate limits (Free plan):
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `FIRECRAWL_API_KEY` | API authentication key | For non-built-in usage only |
+| `FIRECRAWL_API_KEY` | API authentication key | Yes |
 
-**Note:** Built-in `claude.ai` Firecrawl MCP (`mcp__claude_ai_Firecrawl__*`) handles auth internally. No `.mcp.json` or API key needed in the plugin.
+**Note:** Plugin uses a local Firecrawl server. `FIRECRAWL_API_KEY` must be set in the environment (e.g., `~/.zshrc`). Export it before starting Claude Code.

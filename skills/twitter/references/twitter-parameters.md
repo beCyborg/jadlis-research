@@ -116,8 +116,7 @@ Key Opinion Leaders following a given user. Identifies influential accounts.
 ## Exa Fallback — Critical Constraint
 
 ```
-Fallback: mcp__claude_ai_Exa__web_search_advanced_exa
-         OR mcp__plugin_jadlis-research_exa__web_search_advanced_exa
+Fallback: mcp__plugin_jadlis-research_exa__web_search_advanced_exa
 
 Parameter: { "query": "...", "category": "tweet" }
 

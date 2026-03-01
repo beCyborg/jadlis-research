@@ -130,7 +130,7 @@ Comprehensive publication data collection.
 Primary: mcp__plugin_jadlis-research_substack__ tools
 
 Fallback (discovery):
-  Tool: mcp__claude_ai_Exa__web_search_exa
+  Tool: mcp__plugin_jadlis-research_exa__web_search_exa
   Parameters: { query: "<topic>", includeDomains: ["substack.com"] }
 
 Fallback (extraction):

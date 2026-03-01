@@ -177,8 +177,7 @@ Auth: handled by built-in MCP; authenticated = 5000 req/h, unauthenticated = 60 
 
 ```
 Primary:  mcp__github__ tools
-Fallback: mcp__claude_ai_Exa__web_search_exa
-       or mcp__plugin_jadlis-research_exa__web_search_exa
+Fallback: mcp__plugin_jadlis-research_exa__web_search_exa
           with: includeDomains: ["github.com"]
 
 Note: GitHub is NOT an Exa category. Use includeDomains, not category.
