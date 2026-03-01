@@ -34,8 +34,44 @@ if [ -f "$LOCK_FILE" ]; then
 fi
 touch "$LOCK_FILE"
 
+# --- New: v0.9.0 plugin env management ---
+PLUGIN_VERSION="0.9.0"
+JADLIS_HOME="${HOME}/.jadlis-research"
+INSTALL_VERSION_FILE="${JADLIS_HOME}/.install-version"
+JADLIS_ENV="${JADLIS_HOME}/env"
+
 WARNINGS=""
 CONTEXT_PARTS=""
+
+# A. Source plugin env file → forward to current CC session
+if [ -f "$JADLIS_ENV" ]; then
+  if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+    (
+      set -a
+      # shellcheck source=/dev/null
+      source "$JADLIS_ENV" 2>/dev/null || true
+      set +a
+      env | grep -E '^(EXA_API_KEY|FIRECRAWL_API_KEY|SEMANTIC_SCHOLAR_API_KEY|PUBMED_API_KEY|OPENALEX_API_KEY|SERPAPI_KEY|TWITTER_API_KEY|GOOGLE_MAPS_API_KEY|CROSSREF_API_KEY|PAPER_DOWNLOAD_API_KEY)=' >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
+    )
+  fi
+fi
+
+# B. First-run / version-upgrade detection
+IS_FIRST_RUN=false
+if [ ! -f "$INSTALL_VERSION_FILE" ]; then
+  IS_FIRST_RUN=true
+elif [ "$(cat "$INSTALL_VERSION_FILE" 2>/dev/null)" != "$PLUGIN_VERSION" ]; then
+  IS_FIRST_RUN=true
+fi
+
+# C. First-run action: create dir, write marker, inject context
+if [ "$IS_FIRST_RUN" = true ]; then
+  if [ ! -d "$JADLIS_HOME" ]; then
+    mkdir -p "$JADLIS_HOME" && chmod 700 "$JADLIS_HOME"
+  fi
+  echo "$PLUGIN_VERSION" > "$INSTALL_VERSION_FILE"
+  CONTEXT_PARTS="[jadlis-research v${PLUGIN_VERSION}] First run detected. Run /jadlis-research:setup to configure API keys and data sources. Core requirements: EXA_API_KEY, FIRECRAWL_API_KEY"
+fi
 
 # 2. Environment variable check
 for VAR_NAME in EXA_API_KEY FIRECRAWL_API_KEY SEMANTIC_SCHOLAR_API_KEY; do
@@ -59,7 +95,11 @@ else
   echo "jadlis-research: Reddit health check timed out or failed" >&2
 fi
 echo "$REDDIT_STATUS" > "$REDDIT_HEALTH_CACHE"
-CONTEXT_PARTS="Reddit: ${REDDIT_STATUS}"
+if [ -n "$CONTEXT_PARTS" ]; then
+  CONTEXT_PARTS="${CONTEXT_PARTS}. Reddit: ${REDDIT_STATUS}"
+else
+  CONTEXT_PARTS="Reddit: ${REDDIT_STATUS}"
+fi
 
 # 4. Scratchpad cleanup (directories older than 7 days)
 if [ -n "$CWD" ] && [ -d "${CWD}/.scratchpads" ]; then
