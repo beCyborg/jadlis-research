@@ -6,21 +6,27 @@ GitHub: https://github.com/beCyborg/jadlis-research
 ## Pipeline Architecture
 
 ```
-User → /research → Query Understanding → Source Routing
-                                              ↓
-                    ┌─────────────┬───────────┼───────────┬──────────────┐
-                    ↓             ↓           ↓           ↓              ↓
-              Academic      Community     Expert    Native-Web    (parallel)
-              Worker        Worker        Worker     Worker
-                    ↓             ↓           ↓           ↓
-                    └─────────────┴───────────┼───────────┴──────────────┘
-                                              ↓
-                                    Verification Worker
-                                              ↓
-                                      Research Synthesis
-                                              ↓
-                                      Markdown Report (RU)
+User Query ($ARGUMENTS)
+    ↓
+[query-understanding skill]  →  query-analysis.md (scratchpad)
+    ↓
+[source-routing skill]       →  routing-decision.md (scratchpad)
+    ↓
+    ┌─────────────┬───────────┬────────────────┬──────────────┐
+    ↓             ↓           ↓                ↓              ↓
+Academic      Community   Social-Media      Expert         Web
+Worker        Worker      Worker (direct)   Worker*        Worker*
+    ↓             ↓           ↓                ↓              ↓
+    └─────────────┴───────────┴────────────────┴──────────────┘
+                                 ↓
+                    Verification Worker (moderate+)
+                                 ↓
+                  [research-synthesis skill]   →  report.md (scratchpad)
+                                 ↓
+                       Markdown Report (RU)
 ```
+
+*Expert Worker, Web Worker — sprint 07. Social-Media Worker — direct invocation only (pipeline integration sprint 07).
 
 ### Stage Descriptions
 
@@ -32,6 +38,25 @@ User → /research → Query Understanding → Source Routing
 - **Native-Web Worker**: Uses Firecrawl for web scraping when direct page content is needed
 - **Verification Worker**: Cross-validates facts across sources, checks citations, ensures triangulation (minimum 2-3 independent sources per claim)
 - **Research Synthesis**: Produces structured Markdown report: TLDR → main conclusions → detailed findings → sources with citations
+
+## Pipeline Skills
+
+Four SKILL.md files implement the core pipeline logic. These are invoked by the orchestrator (sprint 07); they read/write scratchpad files but do NOT call MCP tools directly.
+
+| Skill | Role | DMI | Scratchpad Output |
+|-------|------|-----|-------------------|
+| shared-protocols | Shared conventions loaded by all workers (finding format, source tiers, fallback chains, citation format, cache directive) | No DMI | — |
+| query-understanding | Query classification (type/domain/complexity), MECE sub-question decomposition, query expansion (3-5 reformulations), clarification protocol | `true` | `query-analysis.md` |
+| source-routing | Routing matrix (5 tracks × 6 domains), complexity rules, worker assignment, source prioritization within tracks | `true` | `routing-decision.md` |
+| research-synthesis | Aggregation of worker findings, triangulation (2-3 sources per claim), confidence calibration, Russian-language report generation | `true` | `report.md` |
+
+### Scratchpad Path Pattern
+
+```
+${CLAUDE_PROJECT_DIR}/.scratchpads/${CLAUDE_SESSION_ID}/<filename>.md
+```
+
+`CLAUDE_PROJECT_DIR` is the **user's project directory** (not the plugin root). Users should add `.scratchpads/` to their project `.gitignore`.
 
 ## Data Sources
 
@@ -176,9 +201,9 @@ Export all keys in `~/.zshrc` — MCP servers fail to start if env vars are miss
 |--------|--------------------------|--------|
 | academic-worker | Yes | 03 |
 | community-worker | Yes | 04 |
-| social-media-worker | **No — direct invocation only** | 05 (integration: 06/07) |
+| social-media-worker | **No — direct invocation only** | 05 (integration: 07) |
 
-`social-media-worker` can be invoked directly but is NOT yet in the source-routing skill's routing table. Integration into the pipeline is planned for sprint 06/07.
+`social-media-worker` can be invoked directly but is NOT yet launched by the pipeline. Source-routing includes it as `direct-only` status. Full pipeline integration is planned for sprint 07.
 
 ## Known CC Limitations
 
@@ -190,3 +215,14 @@ Export all keys in `~/.zshrc` — MCP servers fail to start if env vars are miss
 | ToolSearch bypass | ToolSearch bypasses `disallowedTools` enforcement | Security-relevant gap, must monitor |
 | SubagentStop empty query | Internal `prompt_suggestion` agent triggers SubagentStop with empty `agent_type` | Guard in stop hook required |
 | enabledPlatforms TypeError | CC startup bug | No functional impact |
+
+## Hooks (sprint 06)
+
+Two enforcement hooks added in sprint 06:
+
+| Hook | Event | Script | Behavior |
+|------|-------|--------|----------|
+| MCP Error Recovery | `PostToolUseFailure` | `scripts/mcp-error-recovery.sh` | Counts failures per MCP server per session. After ≥3 failures, returns prompt instructing Claude to switch to fallback chain per shared-protocols. Non-blocking (exit 0). |
+| Scratchpad Size Guard | `PostToolUse` (Write to `.scratchpads/`) | `scripts/scratchpad-size-guard.sh` | Warns when a scratchpad file exceeds 80 lines. Does NOT block — budget is advisory (exit 0). |
+
+See `hooks/hooks.json` for the full hook definitions.
