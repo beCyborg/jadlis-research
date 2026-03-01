@@ -14,7 +14,7 @@
     },
     "openalex": {
       "command": "npx",
-      "args": ["-y", "openalex-research-mcp"],
+      "args": ["-y", "openalex-research-mcp@0.3.0"],
       "env": {
         "OPENALEX_EMAIL": "${OPENALEX_EMAIL}",
         "OPENALEX_API_KEY": "${OPENALEX_API_KEY}"
@@ -22,7 +22,7 @@
     },
     "pubmed": {
       "command": "npx",
-      "args": ["-y", "@cyanheads/pubmed-mcp-server"],
+      "args": ["-y", "@cyanheads/pubmed-mcp-server@1.4.5"],
       "env": {
         "NCBI_EMAIL": "${NCBI_EMAIL}",
         "NCBI_API_KEY": "${NCBI_API_KEY}"
@@ -74,16 +74,9 @@
     },
     "google-maps": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-google-maps"],
+      "args": ["-y", "@modelcontextprotocol/server-google-maps@0.6.2"],
       "env": {
         "GOOGLE_MAPS_API_KEY": "${GOOGLE_MAPS_API_KEY}"
-      }
-    },
-    "serpapi": {
-      "command": "uv",
-      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/vendors/serpapi-mcp", "src/server.py"],
-      "env": {
-        "SERPAPI_KEY": "${SERPAPI_KEY}"
       }
     },
     "xpoz": {
@@ -93,7 +86,7 @@
     "exa": {
       "command": "npx",
       "args": [
-        "-y", "exa-mcp-server",
+        "-y", "exa-mcp-server@3.1.8",
         "--tools=web_search_exa,web_search_advanced_exa,crawling_exa,company_research_exa,people_search_exa,get_code_context_exa,deep_researcher_start,deep_researcher_check"
       ],
       "env": {
@@ -102,7 +95,7 @@
     },
     "firecrawl": {
       "command": "npx",
-      "args": ["-y", "firecrawl-mcp"],
+      "args": ["-y", "firecrawl-mcp@3.9.0"],
       "env": {
         "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}"
       }
