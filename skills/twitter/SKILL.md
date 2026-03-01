@@ -15,7 +15,6 @@ allowed-tools:
   - mcp__plugin_jadlis-research_twitter__get_twitter_follower_events
   - mcp__plugin_jadlis-research_twitter__get_twitter_deleted_tweets
   - mcp__plugin_jadlis-research_twitter__get_twitter_kol_followers
-  - mcp__claude_ai_Exa__web_search_advanced_exa
   - mcp__plugin_jadlis-research_exa__web_search_advanced_exa
 ---
 
@@ -98,7 +97,7 @@ When these tools fail and the proxy is unavailable, document the data gap in res
 
 When any twitter tool call fails (missing key, proxy error, rate limit):
 
-1. Use `mcp__claude_ai_Exa__web_search_advanced_exa` (or `mcp__plugin_jadlis-research_exa__web_search_advanced_exa`)
+1. Use `mcp__plugin_jadlis-research_exa__web_search_advanced_exa`
 2. Pass `category: "tweet"` as the ONLY filter parameter
 
 **CRITICAL CONSTRAINT: `category: "tweet"` prohibits ALL other parameters.**

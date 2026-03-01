@@ -15,7 +15,6 @@ allowed-tools:
   - mcp__github__pull_request_read
   - mcp__github__list_issues
   - mcp__github__list_pull_requests
-  - mcp__claude_ai_Exa__web_search_exa
   - mcp__plugin_jadlis-research_exa__web_search_exa
 ---
 
@@ -131,7 +130,7 @@ Parameters: `owner`, `repo`, `state`, `base`, `head`, `per_page`, `page`
 When GitHub MCP tools are unavailable or return empty results, fall back to Exa with domain filtering:
 
 ```
-mcp__claude_ai_Exa__web_search_exa (or mcp__plugin_jadlis-research_exa__web_search_exa)
+mcp__plugin_jadlis-research_exa__web_search_exa
 with includeDomains: ["github.com"]
 ```
 

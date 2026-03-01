@@ -10,7 +10,6 @@ allowed-tools:
   - mcp__plugin_jadlis-research_hn__get_stories
   - mcp__plugin_jadlis-research_hn__get_story_info
   - mcp__plugin_jadlis-research_hn__get_user_info
-  - mcp__claude_ai_Exa__web_search_exa
   - mcp__plugin_jadlis-research_exa__web_search_exa
 ---
 
@@ -54,6 +53,6 @@ Fetches an HN user profile: karma score, about text, account age, and submitted 
 ## Exa Fallback
 
 When the HN MCP server is unavailable or any tool call fails:
-- Use `mcp__claude_ai_Exa__web_search_exa` or `mcp__plugin_jadlis-research_exa__web_search_exa`
+- Use `mcp__plugin_jadlis-research_exa__web_search_exa`
 - Include `includeDomains: ["news.ycombinator.com"]` in the Exa call
 - This returns indexed HN pages but loses structured comment access and real-time data

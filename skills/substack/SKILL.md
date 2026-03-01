@@ -15,7 +15,6 @@ allowed-tools:
   - mcp__plugin_jadlis-research_substack__get_all_posts
   - mcp__plugin_jadlis-research_substack__search_notes
   - mcp__plugin_jadlis-research_substack__crawl_publication
-  - mcp__claude_ai_Exa__web_search_exa
   - mcp__plugin_jadlis-research_exa__web_search_exa
   - mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape
 ---
@@ -91,6 +90,5 @@ Comprehensive data collection: posts, notes, and profile analysis in a single ca
 ## Fallback Chain
 
 1. **Primary:** `mcp__plugin_jadlis-research_substack__` tools
-2. **Discovery fallback:** `mcp__claude_ai_Exa__web_search_exa` with `includeDomains: ["substack.com"]`
+2. **Discovery fallback:** `mcp__plugin_jadlis-research_exa__web_search_exa` with `includeDomains: ["substack.com"]`
 3. **Extraction fallback:** `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape` for individual post content
-4. Both Exa namespace variants are in `allowed-tools` for runtime configuration resilience

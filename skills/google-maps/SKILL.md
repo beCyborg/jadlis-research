@@ -3,7 +3,7 @@ name: google-maps
 description: "Google Maps place search, geocoding, place details, and reviews extraction. Use for location research, business analysis, and review mining."
 version: "1.0.0"
 user-invocable: false
-allowed-tools: mcp__plugin_jadlis-research_google-maps__maps_geocode, mcp__plugin_jadlis-research_google-maps__maps_reverse_geocode, mcp__plugin_jadlis-research_google-maps__maps_search_places, mcp__plugin_jadlis-research_google-maps__maps_place_details, mcp__plugin_jadlis-research_google-maps__maps_distance_matrix, mcp__plugin_jadlis-research_google-maps__maps_elevation, mcp__plugin_jadlis-research_google-maps__maps_directions, mcp__plugin_jadlis-research_serpapi__search, mcp__claude_ai_Exa__web_search_exa
+allowed-tools: mcp__plugin_jadlis-research_google-maps__maps_geocode, mcp__plugin_jadlis-research_google-maps__maps_reverse_geocode, mcp__plugin_jadlis-research_google-maps__maps_search_places, mcp__plugin_jadlis-research_google-maps__maps_place_details, mcp__plugin_jadlis-research_google-maps__maps_distance_matrix, mcp__plugin_jadlis-research_google-maps__maps_elevation, mcp__plugin_jadlis-research_google-maps__maps_directions, mcp__plugin_jadlis-research_serpapi__search, mcp__plugin_jadlis-research_exa__web_search_exa
 ---
 
 # Google Maps Research Protocols

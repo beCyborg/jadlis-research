@@ -7,7 +7,6 @@ allowed-tools:
   - mcp__claude_ai_Reddit__discover_operations
   - mcp__claude_ai_Reddit__get_operation_schema
   - mcp__claude_ai_Reddit__execute_operation
-  - mcp__claude_ai_Exa__web_search_exa
   - mcp__plugin_jadlis-research_exa__web_search_exa
 ---
 
