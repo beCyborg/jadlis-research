@@ -102,11 +102,11 @@ Activate when a primary source fails or returns empty results:
 
 | Primary Fails | Fallback |
 |---|---|
-| Reddit | `mcp__claude_ai_Exa__web_search_exa` with `includeDomains: ["reddit.com"]` |
-| Hacker News | `mcp__claude_ai_Exa__web_search_exa` with `includeDomains: ["news.ycombinator.com"]` |
-| Substack | `mcp__claude_ai_Exa__web_search_exa` with `includeDomains: ["substack.com"]`; Firecrawl for individual posts |
-| GitHub | `mcp__claude_ai_Exa__web_search_exa` with `includeDomains: ["github.com"]` |
-| Twitter/X | `mcp__claude_ai_Exa__web_search_advanced_exa` with `category: "tweet"` — **CRITICAL: no other parameters allowed; any additional filter causes a 500 crash** |
+| Reddit | `mcp__plugin_jadlis-research_exa__web_search_exa` with `includeDomains: ["reddit.com"]` |
+| Hacker News | `mcp__plugin_jadlis-research_exa__web_search_exa` with `includeDomains: ["news.ycombinator.com"]` |
+| Substack | `mcp__plugin_jadlis-research_exa__web_search_exa` with `includeDomains: ["substack.com"]`; Firecrawl for individual posts |
+| GitHub | `mcp__plugin_jadlis-research_exa__web_search_exa` with `includeDomains: ["github.com"]` |
+| Twitter/X | `mcp__plugin_jadlis-research_exa__web_search_advanced_exa` with `category: "tweet"` — **CRITICAL: no other parameters allowed; any additional filter causes a 500 crash** |
 
 Native Exa and Firecrawl tools are NOT blocked — they serve as skill-level fallbacks.
 

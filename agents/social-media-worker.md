@@ -29,6 +29,13 @@ disallowedTools:
   - mcp__claude_ai_Firecrawl__firecrawl_browser_create
   - mcp__claude_ai_Firecrawl__firecrawl_browser_delete
   - mcp__claude_ai_Firecrawl__firecrawl_browser_list
+  # Plugin namespace (primary block)
+  - mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape
+  - mcp__plugin_jadlis-research_firecrawl__firecrawl_map
+  - mcp__plugin_jadlis-research_firecrawl__firecrawl_search
+  - mcp__plugin_jadlis-research_firecrawl__firecrawl_crawl
+  - mcp__plugin_jadlis-research_firecrawl__firecrawl_agent
+  - mcp__plugin_jadlis-research_firecrawl__firecrawl_browser
 ---
 
 ## Role
@@ -59,7 +66,7 @@ You never browse the web directly (WebSearch and WebFetch are blocked). All web 
 3. If SerpAPI fails or returns insufficient reviews, fall back to Exa
 
 ### Reviews Fallback (Exa)
-Use `mcp__claude_ai_Exa__web_search_exa` with `includeDomains: ["yelp.com", "tripadvisor.com"]` to find third-party reviews when SerpAPI review data is sparse.
+Use `mcp__plugin_jadlis-research_exa__web_search_exa` with `includeDomains: ["yelp.com", "tripadvisor.com"]` to find third-party reviews when SerpAPI review data is sparse.
 
 ## Instagram Protocol
 
@@ -78,7 +85,7 @@ For queries spanning multiple sources (e.g., "Find restaurant X and show its Ins
 
 ## Tool Availability
 
-- `mcp__claude_ai_Exa__*` — **NOT blocked** — Exa is the fallback for Google Maps reviews (Yelp/TripAdvisor). Do not block it.
+- `mcp__plugin_jadlis-research_exa__*` — **NOT blocked** — Exa is the fallback for Google Maps reviews (Yelp/TripAdvisor). Do not block it.
 - All `mcp__claude_ai_Firecrawl__` tools — **Blocked** (all 11 tools explicitly listed in `disallowedTools`). Firecrawl hard-blocks Instagram, Google Maps, TikTok domains — useless for this worker.
 - Google Maps tools (`mcp__plugin_jadlis-research_google-maps__*`) — available via plugin MCP.
 - SerpAPI tools (`mcp__plugin_jadlis-research_serpapi__*`) — available via plugin MCP.

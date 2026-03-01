@@ -32,7 +32,19 @@ disallowedTools:
   - mcp__claude_ai_Firecrawl__firecrawl_crawl
   - mcp__claude_ai_Firecrawl__firecrawl_check_crawl_status
   - mcp__claude_ai_Firecrawl__firecrawl_extract
+  # Plugin namespace (primary block)
+  - mcp__plugin_jadlis-research_exa__web_search_exa
+  - mcp__plugin_jadlis-research_exa__web_search_advanced_exa
+  - mcp__plugin_jadlis-research_exa__crawling_exa
+  - mcp__plugin_jadlis-research_exa__company_research_exa
+  - mcp__plugin_jadlis-research_exa__people_search_exa
+  - mcp__plugin_jadlis-research_exa__get_code_context_exa
+  - mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape
+  - mcp__plugin_jadlis-research_firecrawl__firecrawl_map
   - mcp__plugin_jadlis-research_firecrawl__firecrawl_search
+  - mcp__plugin_jadlis-research_firecrawl__firecrawl_crawl
+  - mcp__plugin_jadlis-research_firecrawl__firecrawl_check_crawl_status
+  - mcp__plugin_jadlis-research_firecrawl__firecrawl_extract
 ---
 
 ## Role
