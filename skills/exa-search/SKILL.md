@@ -2,7 +2,7 @@
 name: exa-search
 description: "Exa API optimization: search types, categories, domain filters, content extraction, people/company research, code context. Covers all 8 MCP tools."
 user-invocable: false
-allowed-tools: mcp__claude_ai_Exa__web_search_exa, mcp__claude_ai_Exa__web_search_advanced_exa, mcp__claude_ai_Exa__crawling_exa, mcp__claude_ai_Exa__company_research_exa, mcp__claude_ai_Exa__people_search_exa, mcp__claude_ai_Exa__get_code_context_exa, mcp__claude_ai_Exa__deep_researcher_start, mcp__claude_ai_Exa__deep_researcher_check
+allowed-tools: mcp__plugin_jadlis-research_exa__web_search_exa, mcp__plugin_jadlis-research_exa__web_search_advanced_exa, mcp__plugin_jadlis-research_exa__crawling_exa, mcp__plugin_jadlis-research_exa__company_research_exa, mcp__plugin_jadlis-research_exa__people_search_exa, mcp__plugin_jadlis-research_exa__get_code_context_exa, mcp__plugin_jadlis-research_exa__deep_researcher_start, mcp__plugin_jadlis-research_exa__deep_researcher_check
 ---
 
 # Exa Search Protocols

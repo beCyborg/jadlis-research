@@ -1,8 +1,8 @@
 ---
 name: firecrawl-extraction
-description: "Firecrawl content extraction: scraping, crawling, structured extraction, browser automation. Covers all 12+ MCP tools."
+description: "Firecrawl content extraction: scraping, crawling, browser automation. Covers 6 plugin MCP tools."
 user-invocable: false
-allowed-tools: mcp__claude_ai_Firecrawl__firecrawl_scrape, mcp__claude_ai_Firecrawl__firecrawl_batch_scrape, mcp__claude_ai_Firecrawl__firecrawl_map, mcp__claude_ai_Firecrawl__firecrawl_crawl, mcp__claude_ai_Firecrawl__firecrawl_check_crawl_status, mcp__claude_ai_Firecrawl__firecrawl_extract, mcp__claude_ai_Firecrawl__firecrawl_agent, mcp__claude_ai_Firecrawl__firecrawl_agent_status, mcp__claude_ai_Firecrawl__firecrawl_browser_create, mcp__claude_ai_Firecrawl__firecrawl_browser_execute, mcp__claude_ai_Firecrawl__firecrawl_browser_delete, mcp__claude_ai_Firecrawl__firecrawl_browser_list
+allowed-tools: mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape, mcp__plugin_jadlis-research_firecrawl__firecrawl_batch_scrape, mcp__plugin_jadlis-research_firecrawl__firecrawl_map, mcp__plugin_jadlis-research_firecrawl__firecrawl_crawl, mcp__plugin_jadlis-research_firecrawl__firecrawl_agent, mcp__plugin_jadlis-research_firecrawl__firecrawl_browser
 ---
 
 # Firecrawl Extraction Protocols
@@ -14,14 +14,12 @@ Firecrawl is the **primary** tool for deep page content extraction. WebFetch is 
 | Task | Tool | Async? | Notes |
 |------|------|--------|-------|
 | Single known URL → content | `firecrawl_scrape` | No | Primary extraction tool |
-| Multiple known URLs | `firecrawl_batch_scrape` | **Yes** | Poll via `check_crawl_status` |
+| Multiple known URLs | `firecrawl_batch_scrape` | **Yes** | Async — check response for status |
 | Search for URLs | `firecrawl_search` | No | **Use Exa instead** (not in allowed-tools) |
 | All URLs on a site | `firecrawl_map` | No | Cheaper than full crawl |
-| Full site content | `firecrawl_crawl` | **Yes** | Poll via `check_crawl_status` |
-| Structured JSON from URLs | `firecrawl_extract` | No | Supports URL wildcards |
+| Full site content | `firecrawl_crawl` | **Yes** | Async — check response for status |
 | Complex multi-page task | `firecrawl_agent` | **Yes** | **Last resort** — variable cost |
-| Check async job | `check_crawl_status` / `agent_status` | — | For crawl/batch/agent |
-| Browser automation | `browser_create` → `browser_execute` → `browser_delete` | No | Session lifecycle |
+| Browser automation | `firecrawl_browser` | No | Single consolidated tool |
 
 ## Default Parameters
 
@@ -59,7 +57,7 @@ Decision: default → no proxy. If 401/403 or empty → retry with `stealth`.
 1. Standard `firecrawl_scrape` (no `waitFor`)
 2. Empty result → retry with `waitFor: 2000`
 3. Still empty → `waitFor: 5000` + `actions` if needed (see `references/firecrawl-parameters.md` for action types)
-4. Auth required → browser session (`firecrawl_browser_*`)
+4. Auth required → browser session (`firecrawl_browser`)
 
 ## Blocked Domains
 
@@ -98,11 +96,11 @@ Each step tried once. No loops. **Do NOT use WebFetch as fallback.**
 
 For `firecrawl_crawl`, `firecrawl_batch_scrape`, `firecrawl_agent`:
 
-1. Start job → get `jobId`
-2. Poll: `firecrawl_check_crawl_status` (crawl/batch) or `firecrawl_agent_status` (agent)
-   - Poll interval: 5s initially, 10s after 3 attempts
+1. Start job → check response for job status/ID
+2. Local MCP server may handle polling internally — no separate `check_crawl_status` or `agent_status` tools
+3. If response includes a job ID without results, wait and check status via the server's response format
+   - Wait interval: 5s initially, 10s after 3 attempts
    - Max attempts: 30 (~300s)
-3. Results expire 24h after completion
 4. On timeout: skip, record `[TIMEOUT: async job {id}]`
 
 ## Error Patterns
