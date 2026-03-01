@@ -1,5 +1,11 @@
 # Xpoz Instagram Tools — Parameter Reference
 
+All tools below are accessed via the Xpoz MCP server with namespace `mcp__plugin_jadlis-research_xpoz__`.
+
+## Rate Limits
+
+Xpoz enforces per-account rate limits. If you receive HTTP 429 or "rate limit exceeded", back off for 30 seconds before retrying. Avoid bulk pagination (pageNumberEnd > pageNumber + 3) to stay within rate limits.
+
 ## Operation Pattern
 
 All tools return an `operationId`. Call `checkOperationStatus` immediately to get results.
