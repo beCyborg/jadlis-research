@@ -3,9 +3,31 @@
   "hooks": {
     "SessionStart": [],
     "PreToolUse": [],
-    "PostToolUse": [],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/scratchpad-size-guard.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "SubagentStop": [],
-    "PostToolUseFailure": [],
+    "PostToolUseFailure": [
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/mcp-error-recovery.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "Stop": [],
     "SessionEnd": []
   }
