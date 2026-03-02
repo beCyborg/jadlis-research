@@ -2,9 +2,8 @@
 # IMPORTANT: .gitignore is created FIRST to prevent API key leaks
 
 # =============================================================================
-# API KEYS — CRITICAL: Never commit .mcp.json
+# MCP Config — .mcp.json is committed (uses ${VAR} refs, safe)
 # =============================================================================
-.mcp.json
 .mcp.json.local
 
 # =============================================================================

@@ -14,7 +14,10 @@
     },
     "openalex": {
       "command": "npx",
-      "args": ["-y", "openalex-research-mcp@0.3.0"],
+      "args": [
+        "-y",
+        "openalex-research-mcp@0.3.0"
+      ],
       "env": {
         "OPENALEX_EMAIL": "${OPENALEX_EMAIL}",
         "OPENALEX_API_KEY": "${OPENALEX_API_KEY}"
@@ -22,7 +25,10 @@
     },
     "pubmed": {
       "command": "npx",
-      "args": ["-y", "@cyanheads/pubmed-mcp-server@1.4.5"],
+      "args": [
+        "-y",
+        "@cyanheads/pubmed-mcp-server@1.4.5"
+      ],
       "env": {
         "NCBI_EMAIL": "${NCBI_EMAIL}",
         "NCBI_API_KEY": "${NCBI_API_KEY}"
@@ -30,25 +36,33 @@
     },
     "arxiv": {
       "command": "uvx",
-      "args": ["arxiv-mcp-server"]
+      "args": [
+        "arxiv-mcp-server"
+      ]
     },
     "crossref": {
       "command": "uvx",
-      "args": ["crossref-cite-mcp"],
+      "args": [
+        "crossref-cite-mcp"
+      ],
       "env": {
         "CROSSREF_MAILTO": "${CROSSREF_MAILTO}"
       }
     },
     "paper-download": {
       "command": "uvx",
-      "args": ["paper-download-mcp"],
+      "args": [
+        "paper-download-mcp"
+      ],
       "env": {
         "PAPER_DOWNLOAD_EMAIL": "${PAPER_DOWNLOAD_EMAIL}"
       }
     },
     "hn": {
       "command": "uvx",
-      "args": ["mcp-hn"]
+      "args": [
+        "mcp-hn"
+      ]
     },
     "substack": {
       "command": "uv",
