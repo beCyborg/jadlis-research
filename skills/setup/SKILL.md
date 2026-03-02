@@ -22,7 +22,7 @@ You are the setup wizard for the **jadlis-research** plugin. Guide the user thro
 Check each environment variable by running:
 
 ```bash
-env | grep -E '^(EXA_API_KEY|FIRECRAWL_API_KEY|SEMANTIC_SCHOLAR_API_KEY|PUBMED_API_KEY|OPENALEX_API_KEY|TWITTER_BEARER_TOKEN|GOOGLE_MAPS_API_KEY|SERPAPI_KEY|CROSSREF_MAILTO|DOWNLOAD_BASE_URL)=' || true
+env | grep -E '^(EXA_API_KEY|FIRECRAWL_API_KEY|SEMANTIC_SCHOLAR_API_KEY|NCBI_API_KEY|OPENALEX_API_KEY|XAI_API_KEY|GOOGLE_MAPS_API_KEY|SERPAPI_KEY|CROSSREF_MAILTO|PAPER_DOWNLOAD_EMAIL)=' || true
 ```
 
 Also read `~/.jadlis-research/env` if it exists (use Read tool) to see what has been persisted.
@@ -105,10 +105,10 @@ Use `AskUserQuestion` with `multiSelect: true`:
 
 | Option | Key | Registration URL | Notes |
 |--------|-----|-----------------|-------|
-| Twitter | `TWITTER_BEARER_TOKEN` | https://developer.twitter.com/ | Free Basic tier |
+| X/Twitter (Grok) | `XAI_API_KEY` | https://console.x.ai/ | Paid |
 | Google Maps | `GOOGLE_MAPS_API_KEY` | https://console.cloud.google.com/ | $200/month free credit |
 | CrossRef | `CROSSREF_MAILTO` | https://www.crossref.org/ | Free, just provide your email |
-| Paper Download | `DOWNLOAD_BASE_URL` | — | Custom base URL for institutional access |
+| Paper Download | `PAPER_DOWNLOAD_EMAIL` | https://www.unpaywall.org/ | Email for Unpaywall API polite pool (free) |
 
 Same validate → confirm → write flow per selected key.
 

@@ -12,6 +12,7 @@ skills:
   - jadlis-research:arxiv
   - jadlis-research:crossref
   - jadlis-research:unpaywall
+  - jadlis-research:shared-protocols
 mcpServers:
   - semantic-scholar
   - openalex

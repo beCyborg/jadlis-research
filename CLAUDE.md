@@ -179,7 +179,7 @@ Accessible directly (not yet integrated into source-routing pipeline — see spr
 | reddit | Community discussions | — (HTTP) | 04 |
 | hn | Hacker News stories and comments | — | 04 |
 | substack | Newsletter content | — | 04 |
-| twitter | Twitter/X search and tweets | `${OPENTWITTER_API_KEY}` | 04 |
+| twitter | X/Twitter agentic search via Grok (xAI) | `${XAI_API_KEY}` | 04 |
 | google-maps | Place search, geocoding, directions, place details | `${GOOGLE_MAPS_API_KEY}` | 05 |
 | serpapi | Google Maps reviews (google_maps_reviews engine) | `${SERPAPI_KEY}` | 05 |
 | xpoz | Instagram + TikTok data (OAuth 2.1, streamable-http) | OAuth (no env var) | 05 |
@@ -303,7 +303,7 @@ For manual setup, export all keys in `~/.zshrc` before launching Claude Code —
 | `EXA_API_KEY` | exa.ai | Core (required) | 02 |
 | `FIRECRAWL_API_KEY` | firecrawl.dev | Core (required) | 02 |
 | `NCBI_API_KEY` | ncbi.nlm.nih.gov/account | Recommended | 03 |
-| `OPENTWITTER_API_KEY` | opentwitter API | Optional | 04 |
+| `XAI_API_KEY` | xAI API (console.x.ai) | Optional | 04 |
 | `GOOGLE_MAPS_API_KEY` | Google Cloud Console | Optional | 05 |
 | `SERPAPI_KEY` | serpapi.com | Optional (deferred) | 05 |
 

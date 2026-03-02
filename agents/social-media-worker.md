@@ -8,6 +8,7 @@ memory: user
 skills:
   - jadlis-research:google-maps
   - jadlis-research:instagram
+  - jadlis-research:shared-protocols
 mcpServers:
   - google-maps
   - serpapi

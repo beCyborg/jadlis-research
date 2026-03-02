@@ -117,10 +117,10 @@ After `/plugin install`, restart Claude Code for the plugin to load.
 | Semantic Scholar | Recommended | Academic papers, citations, graphs | `SEMANTIC_SCHOLAR_API_KEY` |
 | PubMed | Recommended | Biomedical & life sciences literature | `PUBMED_API_KEY` |
 | OpenAlex | Recommended | Open academic graph, works, authors | `OPENALEX_API_KEY` |
-| Twitter/X | Optional | Social media, trending topics | `TWITTER_BEARER_TOKEN` |
+| Twitter/X | Optional | Social media, trending topics | `XAI_API_KEY` |
 | Google Maps | Optional | Location, business, reviews data | `GOOGLE_MAPS_API_KEY` |
 | CrossRef | Optional | DOI resolution, citation metadata | `CROSSREF_MAILTO` |
-| Paper Download | Optional | Full paper PDFs (institutional) | `DOWNLOAD_BASE_URL` |
+| Paper Download | Optional | Full paper PDFs (Unpaywall polite pool) | `PAPER_DOWNLOAD_EMAIL` |
 | arXiv | Free | Preprints: physics, CS, math, biology | — |
 | Hacker News | Free | Tech community discussions | — |
 | Substack | Free | Newsletter content extraction | — |
@@ -136,7 +136,7 @@ After `/plugin install`, restart Claude Code for the plugin to load.
 | `SEMANTIC_SCHOLAR_API_KEY` | Semantic Scholar | https://www.semanticscholar.org/product/api | Free, higher limits with key |
 | `PUBMED_API_KEY` | PubMed/NCBI | https://www.ncbi.nlm.nih.gov/account/ | 10 req/s (100/s with key) |
 | `OPENALEX_API_KEY` | OpenAlex | https://openalex.org/ | Free, polite pool with email |
-| `TWITTER_BEARER_TOKEN` | Twitter/X | https://developer.twitter.com/ | Free Basic tier |
+| `XAI_API_KEY` | X/Twitter (Grok) | https://console.x.ai/ | Paid |
 | `GOOGLE_MAPS_API_KEY` | Google Maps | https://console.cloud.google.com/ | $200/month free credit |
 | `CROSSREF_MAILTO` | CrossRef | https://www.crossref.org/ | Free, just provide email |
 
@@ -365,10 +365,10 @@ See [LICENSE](LICENSE) file.
 | Semantic Scholar | Рекомендуемые | Академические статьи, цитирования | `SEMANTIC_SCHOLAR_API_KEY` |
 | PubMed | Рекомендуемые | Биомедицинская литература | `PUBMED_API_KEY` |
 | OpenAlex | Рекомендуемые | Открытый академический граф | `OPENALEX_API_KEY` |
-| Twitter/X | Опциональные | Социальные сети, тренды | `TWITTER_BEARER_TOKEN` |
+| Twitter/X | Опциональные | Социальные сети, тренды | `XAI_API_KEY` |
 | Google Maps | Опциональные | Локации, бизнесы, отзывы | `GOOGLE_MAPS_API_KEY` |
 | CrossRef | Опциональные | DOI, метаданные цитирований | `CROSSREF_MAILTO` |
-| Paper Download | Опциональные | Полные PDF статей (институциональный доступ) | `DOWNLOAD_BASE_URL` |
+| Paper Download | Опциональные | Полные PDF статей (Unpaywall polite pool) | `PAPER_DOWNLOAD_EMAIL` |
 | arXiv | Бесплатно | Препринты: физика, CS, математика | — |
 | Hacker News | Бесплатно | Технические дискуссии | — |
 | Substack | Бесплатно | Контент рассылок | — |
@@ -384,7 +384,7 @@ See [LICENSE](LICENSE) file.
 | `SEMANTIC_SCHOLAR_API_KEY` | Semantic Scholar | https://www.semanticscholar.org/product/api | Бесплатно, лимиты с ключом |
 | `PUBMED_API_KEY` | PubMed/NCBI | https://www.ncbi.nlm.nih.gov/account/ | 10 зап/с (100/с с ключом) |
 | `OPENALEX_API_KEY` | OpenAlex | https://openalex.org/ | Бесплатно, polite pool |
-| `TWITTER_BEARER_TOKEN` | Twitter/X | https://developer.twitter.com/ | Бесплатный Basic тариф |
+| `XAI_API_KEY` | X/Twitter (Grok) | https://console.x.ai/ | Платный |
 | `GOOGLE_MAPS_API_KEY` | Google Maps | https://console.cloud.google.com/ | $200/месяц бесплатно |
 | `CROSSREF_MAILTO` | CrossRef | https://www.crossref.org/ | Бесплатно, укажите email |
 

@@ -1,12 +1,12 @@
-# Twitter/X MCP — Parameter Reference
+# X/Twitter MCP — Parameter Reference (Grok-MCP)
 
 ## Namespace
 
 ```
-Tool namespace: mcp__plugin_jadlis-research_twitter__<tool>
+Tool namespace: mcp__plugin_jadlis-research_twitter__x_search
 MCP server ID: twitter
-Package: 6551Team/opentwitter-mcp
-Proxy: ai.6551.io (third-party, non-transparent)
+Package: merterbak/Grok-MCP (vendored in vendors/grok-mcp/)
+API: Official xAI API (Grok)
 ```
 
 ---
@@ -14,102 +14,53 @@ Proxy: ai.6551.io (third-party, non-transparent)
 ## Environment Variable
 
 ```
-OPENTWITTER_API_KEY:
-  Obtain: https://6551.io/mcp (free token)
-  Set: export OPENTWITTER_API_KEY="your_token" in ~/.zshrc
-  Effect if missing: MCP server fails to start → fall back to Exa immediately
+XAI_API_KEY:
+  Obtain: console.x.ai (paid)
+  Set: export XAI_API_KEY="your_key" in ~/.zshrc
+  Effect if missing: MCP server fails to start -> fall back to Exa immediately
 ```
 
 ---
 
-## Tool Parameter Signatures
+## Tool Parameter Signature
 
-### `mcp__plugin_jadlis-research_twitter__search_twitter`
+### `mcp__plugin_jadlis-research_twitter__x_search`
 
-Basic tweet search with time and engagement filters.
+Agentic X/Twitter search. Grok processes the query, searches X, and returns narrative synthesis with optional inline citations.
 
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `query` | string | yes | Search query text |
-| `start_time` | string | no | ISO 8601 start timestamp |
-| `end_time` | string | no | ISO 8601 end timestamp |
-| `min_likes` | integer | no | Minimum like count filter |
-| `min_retweets` | integer | no | Minimum retweet count filter |
-| `limit` | integer | no | Max results to return |
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `prompt` | string | yes | — | Search query or question about X content |
+| `model` | string | no | `grok-3` | Grok model to use |
+| `allowed_x_handles` | array[string] | no | [] | Up to 10 handles to restrict search (without @) |
+| `excluded_x_handles` | array[string] | no | [] | Handles to exclude from results (without @) |
+| `from_date` | string | no | — | Start date, format **DD-MM-YYYY** |
+| `to_date` | string | no | — | End date, format **DD-MM-YYYY** |
+| `include_image_understanding` | boolean | no | false | Analyze images in posts |
+| `include_video_understanding` | boolean | no | false | Analyze videos in posts |
+| `include_inline_citations` | boolean | no | false | Include source citations in response |
+| `max_turns` | integer | no | 5 | Max agentic turns for search |
 
-### `mcp__plugin_jadlis-research_twitter__search_twitter_advanced`
+**Date format warning:** Dates must be **DD-MM-YYYY** (e.g., `"15-03-2025"`). ISO 8601 format will NOT work.
 
-Advanced tweet search with hashtag and engagement threshold filters.
+**Research recommendation:** Always set `include_inline_citations: true` for research tasks.
 
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `query` | string | yes | Search query text |
-| `hashtags` | array | no | List of hashtags to include |
-| `min_likes` | integer | no | Minimum like count |
-| `min_retweets` | integer | no | Minimum retweet count |
-| `start_time` | string | no | ISO 8601 start timestamp |
-| `end_time` | string | no | ISO 8601 end timestamp |
-| `limit` | integer | no | Max results to return |
+---
 
-### `mcp__plugin_jadlis-research_twitter__get_twitter_user`
+## Lost Tools (opentwitter-mcp -> Grok-MCP)
 
-User profile by handle.
+The following opentwitter-mcp tools have no equivalent in Grok-MCP:
 
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `username` | string | yes | Twitter handle (without @) |
-
-Returns: bio, follower count, following count, tweet count, verified status, account creation date.
-
-### `mcp__plugin_jadlis-research_twitter__get_twitter_user_by_id`
-
-User profile by numeric Twitter user ID.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `user_id` | string | yes | Numeric Twitter user ID |
-
-### `mcp__plugin_jadlis-research_twitter__get_twitter_user_tweets`
-
-Recent tweets from a specific user.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `username` | string | yes | Twitter handle (without @) |
-| `limit` | integer | no | Max tweets to return |
-| `start_time` | string | no | ISO 8601 start timestamp |
-| `end_time` | string | no | ISO 8601 end timestamp |
-
-### `mcp__plugin_jadlis-research_twitter__get_twitter_follower_events`
-
-Who started or stopped following a user — change tracking.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `username` | string | yes | Twitter handle (without @) |
-| `limit` | integer | no | Max events to return |
-
-### `mcp__plugin_jadlis-research_twitter__get_twitter_deleted_tweets`
-
-Retrieve deleted tweets from a user's history. Unique capability — no fallback available.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `username` | string | yes | Twitter handle (without @) |
-| `limit` | integer | no | Max tweets to return |
-
-**Note:** If proxy unavailable, this data cannot be recovered. Document data gap in research output.
-
-### `mcp__plugin_jadlis-research_twitter__get_twitter_kol_followers`
-
-Key Opinion Leaders following a given user. Identifies influential accounts.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `username` | string | yes | Twitter handle (without @) |
-| `limit` | integer | no | Max KOLs to return |
-
-**Note:** If proxy unavailable, this data cannot be recovered — no fallback source provides KOL follower data. Document data gap in research output.
+| Old Tool | Status | Workaround |
+|---|---|---|
+| `search_twitter` | Replaced | Use `x_search` with prompt |
+| `search_twitter_advanced` | Replaced | Use `x_search` with handle/date filters |
+| `get_twitter_user` | Lost | No direct replacement; profile info may appear contextually in `x_search` |
+| `get_twitter_user_by_id` | Lost | No replacement |
+| `get_twitter_user_tweets` | Partial | Use `x_search` + `allowed_x_handles: ["username"]` |
+| `get_twitter_follower_events` | Lost | No replacement |
+| `get_twitter_deleted_tweets` | Lost | **No replacement anywhere** — unique capability |
+| `get_twitter_kol_followers` | Lost | **No replacement anywhere** — unique capability |
 
 ---
 
@@ -126,20 +77,20 @@ CONSTRAINT: category: "tweet" prohibits ALL other parameters.
 ```
 
 Use fallback when:
-- `OPENTWITTER_API_KEY` is missing or expired
-- Proxy returns error or is rate-limited
+- `XAI_API_KEY` is missing or expired
+- xAI API returns error or is rate-limited
 - MCP server fails to start
 
-Fallback limitations: no engagement filters, no time filters, no deleted tweet access, no KOL analysis.
+Fallback limitations: no agentic synthesis, no handle filtering, no date ranges, no image/video understanding, no inline citations.
 
 ---
 
-## Proxy Notes
+## Blocked Grok Tools
 
-```
-Proxy host: ai.6551.io
-Data sourcing: non-transparent (not official Twitter API)
-Do not use for: sensitive, confidential, or legally sensitive research
-Service continuity: not guaranteed
-Package: 6551Team/opentwitter-mcp
-```
+Grok-MCP exposes 17 additional tools beyond `x_search` that are **blocked** in `community-worker.md` via `disallowedTools`:
+
+- `web_search`, `list_models`, `chat`, `chat_with_vision`, `generate_image`, `generate_video`
+- `grok_agent`, `code_executor`, `stateful_chat`, `retrieve_stateful_response`, `delete_stateful_response`
+- `upload_file`, `list_files`, `get_file`, `get_file_content`, `delete_file`, `chat_with_files`
+
+These are general Grok capabilities not relevant to X/Twitter research.

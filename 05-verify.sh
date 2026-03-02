@@ -260,6 +260,20 @@ jq -e '.mcpServers.firecrawl' .mcp.json > /dev/null 2>&1 \
 
 # -----------------------------------------------
 echo ""
+echo "--- 14. Grok Tools Blocking in community-worker ---"
+AGENT="$PLUGIN/agents/community-worker.md"
+for grok_tool in web_search list_models chat chat_with_vision generate_image generate_video grok_agent code_executor stateful_chat retrieve_stateful_response delete_stateful_response upload_file list_files get_file get_file_content delete_file chat_with_files; do
+  grep -q "mcp__plugin_jadlis-research_twitter__${grok_tool}" "$AGENT" \
+    && pass "Grok tool ${grok_tool} blocked in community-worker" \
+    || fail "Grok tool ${grok_tool} NOT blocked in community-worker"
+done
+# Verify x_search is NOT blocked (it's the only allowed tool)
+! grep -q "mcp__plugin_jadlis-research_twitter__x_search" "$AGENT" \
+  && pass "x_search NOT in disallowedTools (correct)" \
+  || fail "x_search found in disallowedTools (should not be blocked)"
+
+# -----------------------------------------------
+echo ""
 echo "Results: $PASS passed, $FAIL failed, $WARN warnings"
 if [ "$FAIL" -eq 0 ]; then
   echo "STATUS: PASS"

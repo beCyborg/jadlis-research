@@ -62,14 +62,16 @@
       ]
     },
     "twitter": {
-      "command": "uvx",
+      "command": "uv",
       "args": [
-        "--from",
-        "git+https://github.com/6551Team/opentwitter-mcp",
-        "opentwitter-mcp"
+        "run",
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}/vendors/grok-mcp",
+        "python",
+        "main.py"
       ],
       "env": {
-        "OPENTWITTER_API_KEY": "${OPENTWITTER_API_KEY}"
+        "XAI_API_KEY": "${XAI_API_KEY}"
       }
     },
     "google-maps": {

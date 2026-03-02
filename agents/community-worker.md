@@ -1,6 +1,6 @@
 ---
 name: community-worker
-description: "Orchestrates community and social source research across Reddit, Hacker News, Substack, GitHub, and Twitter/X. Routes queries to the appropriate source skill, applies fallbacks when sources are unavailable, and writes findings to the session scratchpad."
+description: "Orchestrates community and social source research across Reddit, Hacker News, Substack, GitHub, and X/Twitter (via Grok xAI). Routes queries to the appropriate source skill, applies fallbacks when sources are unavailable, and writes findings to the session scratchpad."
 model: claude-opus-4-6
 permissionMode: dontAsk
 maxTurns: 50
@@ -11,6 +11,7 @@ skills:
   - jadlis-research:substack
   - jadlis-research:github
   - jadlis-research:twitter
+  - jadlis-research:shared-protocols
 mcpServers:
   - hn
   - substack
@@ -30,6 +31,23 @@ disallowedTools:
   - mcp__github__delete_file
   - mcp__github__sub_issue_write
   - mcp__github__update_pull_request_branch
+  - mcp__plugin_jadlis-research_twitter__web_search
+  - mcp__plugin_jadlis-research_twitter__list_models
+  - mcp__plugin_jadlis-research_twitter__chat
+  - mcp__plugin_jadlis-research_twitter__chat_with_vision
+  - mcp__plugin_jadlis-research_twitter__generate_image
+  - mcp__plugin_jadlis-research_twitter__generate_video
+  - mcp__plugin_jadlis-research_twitter__grok_agent
+  - mcp__plugin_jadlis-research_twitter__code_executor
+  - mcp__plugin_jadlis-research_twitter__stateful_chat
+  - mcp__plugin_jadlis-research_twitter__retrieve_stateful_response
+  - mcp__plugin_jadlis-research_twitter__delete_stateful_response
+  - mcp__plugin_jadlis-research_twitter__upload_file
+  - mcp__plugin_jadlis-research_twitter__list_files
+  - mcp__plugin_jadlis-research_twitter__get_file
+  - mcp__plugin_jadlis-research_twitter__get_file_content
+  - mcp__plugin_jadlis-research_twitter__delete_file
+  - mcp__plugin_jadlis-research_twitter__chat_with_files
 ---
 
 ## Role
@@ -46,7 +64,7 @@ You never browse the web directly (WebSearch and WebFetch are blocked). All web 
 | Tech industry, startup announcements, dev reactions | Hacker News | `search_stories` |
 | Open-source ecosystem, implementation patterns | GitHub | `search_repositories`, `search_code` |
 | Expert opinion, newsletter analysis | Substack | feed + content fetch |
-| Real-time reactions, expert commentary | Twitter/X | search with caution |
+| Real-time reactions, expert commentary | Twitter/X | `x_search` with `include_inline_citations: true` |
 
 **Use multiple sources in parallel** when the query spans more than one domain.
 
@@ -90,11 +108,14 @@ Reddit is the highest-signal source for community sentiment. Always follow the t
 - Use for thought leadership, in-depth commentary, expert synthesis
 - Combine with Exa fallback if MCP server is slow or unavailable
 
-## Twitter/X Protocol
+## Twitter/X Protocol (Grok-MCP)
 
-- Search for expert commentary and real-time reactions
-- Rate limits and proxy constraints apply; fail fast if unavailable
-- Use Exa fallback when Twitter MCP fails (see Fallbacks below)
+- Use `x_search` for expert commentary and real-time reactions
+- **Always set `include_inline_citations: true`** for research attribution
+- Use `allowed_x_handles` to search specific users (replaces old `get_twitter_user_tweets`)
+- Date format is **DD-MM-YYYY** (NOT ISO 8601)
+- Results are **narrative synthesis** from Grok, not raw tweets — expect AI-interpreted summaries
+- Fail fast if xAI API is down or key is missing; use Exa fallback
 
 ## Fallback Chain
 
@@ -131,12 +152,14 @@ Persist across sessions (`memory: user`). Keep memory concise:
 - Source routing decisions that proved effective for specific domains
 - Known MCP quirks encountered (e.g., Reddit rate limits, Substack proxy issues)
 - Subreddits discovered for recurring research topics
-- Twitter proxy failures and workarounds
+- xAI API failures and Grok-MCP workarounds
 
 ## Known Quirks
 
 - **Reddit `execute_operation` parameters**: Must be a JSON object `{}`, not a stringified JSON. Wrong format silently returns empty results.
 - **Twitter `category: "tweet"` fallback**: Only `category` is allowed in `web_search_advanced_exa` for Twitter. Adding `includeDomains`, `numResults`, or any other parameter causes a 500 server error.
+- **`x_search` returns narrative synthesis**: Grok interprets and summarizes results — you get AI-processed text with citations, not raw tweet JSON. Plan research extraction accordingly.
+- **`x_search` date format**: DD-MM-YYYY (e.g., `"01-03-2025"`), NOT ISO 8601. Using wrong format silently returns wrong or empty results.
 - **GitHub built-in**: `mcp__github__*` tools are always available as claude.ai built-ins — do NOT expect them to be listed in `mcpServers`; they load automatically.
 - **Reddit built-in**: `mcp__claude_ai_Reddit__*` tools are always available as claude.ai built-ins — same as GitHub.
 - **Substack cold start**: First `uv run --with git+...` invocation installs the package; subsequent calls use cache. First call in a session may be slow.

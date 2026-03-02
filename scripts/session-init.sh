@@ -51,7 +51,7 @@ if [ -f "$JADLIS_ENV" ]; then
       # shellcheck source=/dev/null
       source "$JADLIS_ENV" 2>/dev/null || true
       set +a
-      env | grep -E '^(EXA_API_KEY|FIRECRAWL_API_KEY|SEMANTIC_SCHOLAR_API_KEY|PUBMED_API_KEY|OPENALEX_API_KEY|SERPAPI_KEY|TWITTER_API_KEY|GOOGLE_MAPS_API_KEY|CROSSREF_API_KEY|PAPER_DOWNLOAD_API_KEY)=' >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
+      env | grep -E '^(EXA_API_KEY|FIRECRAWL_API_KEY|SEMANTIC_SCHOLAR_API_KEY|NCBI_API_KEY|OPENALEX_API_KEY|SERPAPI_KEY|XAI_API_KEY|GOOGLE_MAPS_API_KEY|CROSSREF_MAILTO|PAPER_DOWNLOAD_EMAIL)=' >> "$CLAUDE_ENV_FILE" 2>/dev/null || true
     )
   fi
 fi
@@ -83,7 +83,7 @@ done
 
 # 3. Reddit health probe (5s curl timeout)
 REDDIT_STATUS="UNKNOWN"
-if HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "https://www.reddit.com/r/test.json" 2>/dev/null); then
+if HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "User-Agent: jadlis-research/${PLUGIN_VERSION}" "https://www.reddit.com/r/test.json" 2>/dev/null); then
   if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
     REDDIT_STATUS="HEALTHY"
   else

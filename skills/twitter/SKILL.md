@@ -1,101 +1,74 @@
 ---
 name: twitter
 description: >
-  Twitter/X research via opentwitter-mcp proxy. Provides 8 tools for tweet
-  search, user profiling, follower analysis, deleted tweet retrieval, and KOL
-  discovery. Requires OPENTWITTER_API_KEY from https://6551.io/mcp. Falls back
-  to Exa category:tweet search when unavailable.
+  X/Twitter research via Grok-MCP (xAI official API). Agentic x_search with
+  handle filtering, date ranges, image/video understanding, inline citations.
+  Requires XAI_API_KEY from console.x.ai. Falls back to Exa category:tweet.
 user-invocable: false
 allowed-tools:
-  - mcp__plugin_jadlis-research_twitter__search_twitter
-  - mcp__plugin_jadlis-research_twitter__search_twitter_advanced
-  - mcp__plugin_jadlis-research_twitter__get_twitter_user
-  - mcp__plugin_jadlis-research_twitter__get_twitter_user_by_id
-  - mcp__plugin_jadlis-research_twitter__get_twitter_user_tweets
-  - mcp__plugin_jadlis-research_twitter__get_twitter_follower_events
-  - mcp__plugin_jadlis-research_twitter__get_twitter_deleted_tweets
-  - mcp__plugin_jadlis-research_twitter__get_twitter_kol_followers
+  - mcp__plugin_jadlis-research_twitter__x_search
   - mcp__plugin_jadlis-research_exa__web_search_advanced_exa
 ---
 
-# Twitter/X Research Skill
+# X/Twitter Research Skill (Grok-MCP)
 
-## ⚠️ Proxy Risk Warning
+## Overview
 
-**This skill routes all queries through a third-party proxy (`ai.6551.io`), not the official Twitter API.**
+This skill provides X/Twitter research via the **official xAI API** (Grok-MCP). Unlike raw tweet retrieval, `x_search` is an **agentic tool** — Grok processes the query, searches X, and returns a synthesized narrative with inline citations. Results are AI-interpreted summaries, not raw tweet data.
 
-- Data comes from `ai.6551.io` — sourcing methodology is non-transparent
-- The proxy service (`6551Team/opentwitter-mcp`) may be discontinued without notice
-- **Do NOT use for sensitive, confidential, or legally sensitive research topics**
-- Requires a free token from `https://6551.io/mcp` stored as `OPENTWITTER_API_KEY` in `~/.zshrc`
-- If `OPENTWITTER_API_KEY` is missing or expired, fall back to Exa immediately
+Requires a paid `XAI_API_KEY` from `console.x.ai`.
 
 ---
 
-## Tools
+## Tool
 
-### `mcp__plugin_jadlis-research_twitter__search_twitter`
+### `mcp__plugin_jadlis-research_twitter__x_search`
 
-Basic tweet search with time and engagement filters. Primary tool for finding recent discussion on a topic.
+Agentic X/Twitter search powered by Grok. Returns narrative synthesis with inline citations.
 
-Key parameters: `query`, `start_time`, `end_time`, `min_likes`, `min_retweets`, `limit`
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `prompt` | string | yes | The search query / question about X content |
+| `model` | string | no | Grok model to use (default: `grok-3`) |
+| `allowed_x_handles` | array | no | Up to 10 X handles to restrict search to (without @) |
+| `excluded_x_handles` | array | no | X handles to exclude from results (without @) |
+| `from_date` | string | no | Start date filter — format **DD-MM-YYYY** (NOT ISO!) |
+| `to_date` | string | no | End date filter — format **DD-MM-YYYY** (NOT ISO!) |
+| `include_image_understanding` | boolean | no | Analyze images in posts (default: false) |
+| `include_video_understanding` | boolean | no | Analyze videos in posts (default: false) |
+| `include_inline_citations` | boolean | no | Include inline citations in response (default: false) |
+| `max_turns` | integer | no | Max agentic turns for search (default: 5) |
 
-### `mcp__plugin_jadlis-research_twitter__search_twitter_advanced`
+**Always set `include_inline_citations: true`** for research — this provides source attribution for every claim.
 
-Advanced tweet search with hashtag filtering and engagement thresholds. Use when you need precise filters beyond basic search.
+### Key behaviors
 
-Key parameters: `query`, `hashtags`, `min_likes`, `min_retweets`, `start_time`, `end_time`, `limit`
-
-### `mcp__plugin_jadlis-research_twitter__get_twitter_user`
-
-User profile by handle: bio, follower count, verified status, account metadata.
-
-Key parameters: `username` (without @)
-
-### `mcp__plugin_jadlis-research_twitter__get_twitter_user_by_id`
-
-Same as `get_twitter_user` but by numeric Twitter user ID.
-
-Key parameters: `user_id`
-
-### `mcp__plugin_jadlis-research_twitter__get_twitter_user_tweets`
-
-Recent tweets from a specific user. Useful for tracking what a person or account has been saying.
-
-Key parameters: `username`, `limit`, `start_time`, `end_time`
-
-### `mcp__plugin_jadlis-research_twitter__get_twitter_follower_events`
-
-Who started or stopped following a user — change tracking over time.
-
-Key parameters: `username`, `limit`
-
-### `mcp__plugin_jadlis-research_twitter__get_twitter_deleted_tweets`
-
-Retrieve deleted tweets. **Unique capability — not available via Exa or any other fallback.** If the proxy is unavailable, this data cannot be recovered. Note data gap in research output.
-
-Key parameters: `username`, `limit`
-
-### `mcp__plugin_jadlis-research_twitter__get_twitter_kol_followers`
-
-Key Opinion Leaders following a given user. Identifies influential accounts that follow a target user — useful for community mapping and influence analysis.
-
-Key parameters: `username`, `limit`
+- Returns **narrative synthesis**, not raw tweets — Grok interprets and summarizes results
+- Handle filtering (`allowed_x_handles`) replaces the old `get_twitter_user_tweets` workflow — search a specific user's content by restricting to their handle
+- Date format is **DD-MM-YYYY** (e.g., `"01-01-2025"`), NOT ISO 8601
+- Image/video understanding adds latency; enable only when visual content is relevant
 
 ---
 
-## Unique Capabilities (No Fallback Available)
+## Lost Capabilities (No Replacement)
 
-- `get_twitter_deleted_tweets` — deleted tweet archive; not accessible via any other source
-- `get_twitter_kol_followers` — KOL follower graph; not available via Exa category:tweet
+The following tools from the previous opentwitter-mcp proxy have **no equivalent** in Grok-MCP:
 
-When these tools fail and the proxy is unavailable, document the data gap in research output rather than attempting to substitute.
+- **Deleted tweets** (`get_twitter_deleted_tweets`) — archive of removed posts; no alternative source exists
+- **KOL followers** (`get_twitter_kol_followers`) — influential follower graph; not available via any other tool
+
+When these capabilities are needed, document the data gap in research output rather than attempting to substitute.
+
+### Partially replaced
+
+- **User tweets** (`get_twitter_user_tweets`) — use `x_search` with `allowed_x_handles: ["username"]` to search a specific user's content. Note: returns Grok's synthesis, not raw tweet list.
+- **User profile** (`get_twitter_user`) — no direct replacement. Basic profile info may appear in `x_search` results contextually.
 
 ---
 
 ## Exa Fallback
 
-When any twitter tool call fails (missing key, proxy error, rate limit):
+When `x_search` fails (XAI API down, key missing, rate limit):
 
 1. Use `mcp__plugin_jadlis-research_exa__web_search_advanced_exa`
 2. Pass `category: "tweet"` as the ONLY filter parameter
@@ -110,18 +83,18 @@ When any twitter tool call fails (missing key, proxy error, rate limit):
 { "query": "your search query", "category": "tweet" }
 ```
 
-Limitations of Exa fallback: loses engagement filters, deleted tweet access, and KOL analysis. Note: time-based filters are also unavailable — not because Exa lacks them, but because `category: "tweet"` prohibits ALL additional parameters.
+Limitations of Exa fallback: loses agentic synthesis, handle filtering, date ranges, image/video understanding, and inline citations.
 
 ---
 
 ## Token Setup
 
-Export `OPENTWITTER_API_KEY` in `~/.zshrc` before starting Claude Code:
+Export `XAI_API_KEY` in `~/.zshrc` before starting Claude Code:
 
 ```bash
-export OPENTWITTER_API_KEY="your_token_from_6551.io"
+export XAI_API_KEY="your_key_from_console.x.ai"
 ```
 
-Obtain a free token at `https://6551.io/mcp`.
+Obtain a paid API key at `console.x.ai`.
 
 See `references/twitter-parameters.md` for full parameter reference.
