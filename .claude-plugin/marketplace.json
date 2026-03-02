@@ -9,8 +9,11 @@
   "plugins": [
     {
       "name": "jadlis-research",
+      "version": "0.9.0",
       "source": "./",
       "description": "Deep multi-source parallel research pipeline — academic papers, web, communities, social media. 14+ data sources, 6 specialized workers.",
+      "author": { "name": "beCyborg" },
+      "repository": "https://github.com/beCyborg/jadlis-research",
       "category": "productivity",
       "tags": ["research", "academic", "exa", "firecrawl", "semantic-scholar", "arxiv", "pubmed", "deep-research"]
     }
