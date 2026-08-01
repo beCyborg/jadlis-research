@@ -2,7 +2,7 @@
 
 ## MCP-инструменты
 
-Namespace: `mcp__hn__*`
+Namespace: `mcp__plugin_jadlis-research_hn__*`
 
 | Инструмент | Назначение |
 |---|---|
@@ -121,7 +121,7 @@ user_analysis({ "username": "<expert>", "submissionLimit": 15 })
 
 ## Фоллбэк
 
-При сбое HN MCP — используй `mcp__brave-search__brave_web_search`:
+При сбое HN MCP — используй `mcp__plugin_jadlis-research_brave-search__brave_web_search`:
 ```json
 { "query": "site:news.ycombinator.com <ЗАПРОС>", "count": 10 }
 ```

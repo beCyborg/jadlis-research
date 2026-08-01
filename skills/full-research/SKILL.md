@@ -21,7 +21,7 @@ allowed-tools:
   - Bash
   - AskUserQuestion
   - Workflow
-  - mcp__brave-search__brave_web_search
+  - mcp__plugin_jadlis-research_brave-search__brave_web_search
 argument-hint: "<query — тема исследования>"
 model: claude-opus-5
 effort: xhigh
@@ -58,7 +58,7 @@ Phase A (INTAKE: каналы + recon + интервью) → Phase B (Workflow 
    - «Только соцсети» → `["reddit","twitter","hackernews","substack"]`
    - «Web + соцсети без Substack» → `["web","codexweb","grokweb","reddit","twitter","hackernews"]`
 
-3. **Разведка (recon).** Сделай 1-2 вызова `mcp__brave-search__brave_web_search`
+3. **Разведка (recon).** Сделай 1-2 вызова `mcp__plugin_jadlis-research_brave-search__brave_web_search`
    (тариф Search: 50 req/s, параллель OK; `count: 5`): широкий обзор темы + опц. уточняющий аспект. Цель —
    сориентироваться (аспекты, под-темы, контроверсии), не собирать данные.
    **Substack handle extraction:** если "substack" в каналах — из результатов Brave спарси URL
