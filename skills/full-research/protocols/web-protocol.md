@@ -6,9 +6,9 @@
 
 | Инструмент | Назначение |
 |---|---|
-| `mcp__brave-search__brave_llm_context` | **Дефолт для research**: возвращает ИЗВЛЕЧЁННЫЙ КОНТЕНТ страниц по запросу (не только ссылки) — закрывает большинство потребностей без скрапинга |
-| `mcp__brave-search__brave_web_search` | Keyword-based discovery источников — когда нужны САМИ ссылки/охват (+`extra_snippets`) |
-| `mcp__firecrawl__firecrawl_scrape` | Полный контент ОДНОЙ конкретной страницы — только когда llm_context не хватило |
+| `mcp__plugin_jadlis-research_brave-search__brave_llm_context` | **Дефолт для research**: возвращает ИЗВЛЕЧЁННЫЙ КОНТЕНТ страниц по запросу (не только ссылки) — закрывает большинство потребностей без скрапинга |
+| `mcp__plugin_jadlis-research_brave-search__brave_web_search` | Keyword-based discovery источников — когда нужны САМИ ссылки/охват (+`extra_snippets`) |
+| `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape` | Полный контент ОДНОЙ конкретной страницы — только когда llm_context не хватило |
 
 **КРИТИЧНО:** Перед использованием любого инструмента — загрузи его через ToolSearch если недоступен.
 **RATE LIMIT:** Brave (тариф Search): 50 req/s — **параллельные вызовы OK** (несколько tool calls в одном сообщении). Firecrawl scrape: 1 req/s. При 429 — подождать 1 сек, retry (max 2x).
@@ -51,7 +51,7 @@ brave_web_search(query="<запрос с альтернативного угла
 
 Для отобранных URL:
 ```
-mcp__firecrawl__firecrawl_scrape(url="<url1>", formats=["markdown"], onlyMainContent=true)
+mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape(url="<url1>", formats=["markdown"], onlyMainContent=true)
 ```
 
 Детект провала: ошибка или пустой/минимальный контент → retry с `waitFor: 5000`.

@@ -2,12 +2,12 @@
 
 ## MCP-инструменты
 
-Namespace: `mcp__reddit__*`
+Namespace: `mcp__plugin_jadlis-research_reddit__*`
 
 Все операции выполняются через 3 инструмента:
-- `mcp__reddit__discover_operations` — список операций
-- `mcp__reddit__get_operation_schema` — схема параметров
-- `mcp__reddit__execute_operation` — выполнение
+- `mcp__plugin_jadlis-research_reddit__discover_operations` — список операций
+- `mcp__plugin_jadlis-research_reddit__get_operation_schema` — схема параметров
+- `mcp__plugin_jadlis-research_reddit__execute_operation` — выполнение
 
 **КРИТИЧНО:** `parameters` в `execute_operation` — ВСЕГДА native JSON object, НЕ строка.
 
@@ -100,7 +100,7 @@ execute_operation({
 
 ## Фоллбэк
 
-При сбое Reddit MCP — используй `mcp__brave-search__brave_web_search`:
+При сбое Reddit MCP — используй `mcp__plugin_jadlis-research_brave-search__brave_web_search`:
 ```json
 { "query": "site:reddit.com <ЗАПРОС>", "count": 10, "result_filter": "web,discussions" }
 ```

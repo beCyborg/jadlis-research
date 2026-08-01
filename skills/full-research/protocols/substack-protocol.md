@@ -2,7 +2,7 @@
 
 ## MCP-инструменты
 
-Namespace: `mcp__substack__*`
+Namespace: `mcp__plugin_jadlis-research_substack__*`
 
 | Инструмент | Назначение |
 |---|---|
@@ -29,7 +29,7 @@ Substack MCP не умеет искать по всему Substack — нужн�
 
 **Шаг 1:** Keyword-based поиск по Substack через Goggles domain filter:
 ```json
-mcp__brave-search__brave_web_search({
+mcp__plugin_jadlis-research_brave-search__brave_web_search({
   "query": "<ключевые слова по теме ЗАПРОС>",
   "goggles": "$discard\n$site=substack.com",
   "count": 15,
@@ -40,7 +40,7 @@ mcp__brave-search__brave_web_search({
 
 **Шаг 2 (опционально):** Найти рекомендации из внешних источников (можно параллельно с шагом 1):
 ```json
-mcp__brave-search__brave_web_search({
+mcp__plugin_jadlis-research_brave-search__brave_web_search({
   "query": "best substack newsletters about <ТЕМА> recommended",
   "count": 5
 })
@@ -97,7 +97,7 @@ get_post_content({ "url": "<полный URL поста>" })
 
 При сбое `get_post_content` — Firecrawl по прямому URL поста:
 ```json
-mcp__firecrawl__firecrawl_scrape({ "url": "<url>", "formats": ["markdown"], "onlyMainContent": true })
+mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape({ "url": "<url>", "formats": ["markdown"], "onlyMainContent": true })
 ```
 Если цитата восстановлена НЕ из полного текста (сниппет RSS / нота / пересказ) —
 помечай её «(реконструировано)» в выходном файле.
@@ -136,7 +136,7 @@ mcp__firecrawl__firecrawl_scrape({ "url": "<url>", "formats": ["markdown"], "onl
 
 ## Фоллбэк
 
-При сбое Substack MCP — используй `mcp__brave-search__brave_web_search`:
+При сбое Substack MCP — используй `mcp__plugin_jadlis-research_brave-search__brave_web_search`:
 ```json
 { "query": "site:substack.com <ЗАПРОС>", "count": 15 }
 ```
