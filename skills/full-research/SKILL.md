@@ -58,6 +58,21 @@ Phase A (INTAKE: каналы + recon + интервью) → Phase B (Workflow 
    - «Только соцсети» → `["reddit","twitter","hackernews","substack"]`
    - «Web + соцсети без Substack» → `["web","codexweb","grokweb","reddit","twitter","hackernews"]`
 
+   **Яндекс (opt-in, платный ≈0,1-0,15 ₽/тема).** Канал `yandex` — слой Рунета, которого нет
+   у Brave (64,7% уникальных доменов; сверено 2026-08-06). Правила включения:
+   - Явная просьба («с Яндексом», «включая Яндекс», «поищи и в Яндексе») → добавить `yandex`
+     в SELECTED_CHANNELS без вопроса.
+   - RU-триггеры в теме (кириллическая формулировка про российский рынок/сервисы/цены,
+     «в России / в Рунете / в СНГ», упоминание vc.ru/Habr/Дзен) → добавить в AskUserQuestion
+     вариант «Все каналы + Яндекс (Рунет, ≈0,15 ₽)».
+   - Без RU-триггера — вариант НЕ показывать (глобальные темы пересекаются с Brave,
+     платить незачем).
+   - **Требует ключа `YC_SEARCH_API_KEY` в `env` файла settings.json** (ставит скилл
+     `/jadlis-research:keys`; userConfig плагина сюда не годится — sensitive-значения
+     не доезжают до Bash). Ключ не настроен → `yandex` не предлагать вообще. Если ключа
+     нет, а канал всё-таки выбран: `yandex-search.sh` вернёт `exit 2`, канал деградирует
+     (`sourceQuality=LOW`, пустые citations) и workflow это НЕ роняет.
+
 3. **Разведка (recon).** Сделай 1-2 вызова `mcp__plugin_jadlis-research_brave-search__brave_web_search`
    (тариф Search: 50 req/s, параллель OK; `count: 5`): широкий обзор темы + опц. уточняющий аспект. Цель —
    сориентироваться (аспекты, под-темы, контроверсии), не собирать данные.
@@ -89,7 +104,7 @@ Workflow({
   args: {
     refinedQuery: REFINED_QUERY,
     decisionContext: DECISION_CONTEXT,  // из интервью: какое решение принимает пользователь
-    channels: SELECTED_CHANNELS,        // ключи: web/codexweb/grokweb/reddit/twitter/hackernews/substack
+    channels: SELECTED_CHANNELS,        // ключи: web/codexweb/grokweb/reddit/twitter/hackernews/substack (+yandex — opt-in для RU-тем)
     substackHandles: SUBSTACK_HANDLES,  // может быть пуст
     bridgeModel: "claude-fable-5",      // модель Fable-моста; недоступна → авто-падение на claude-opus-5
     date: DATE,
@@ -163,5 +178,8 @@ OUTDATED) и **фильтрует** непрошедшие claims (не прос
 
 - Workflow вернул `insufficient-sources` — покажи что собралось, не пиши в vault.
 - Channel-агенты имеют встроенные фоллбэки (Brave `site:` вместо MCP) внутри протоколов.
+- Канал `yandex`: `exit 2` — нет `YC_SEARCH_API_KEY`; `exit 3` — ошибка API; `exit 4` — таймаут
+  поллинга. Во всех трёх случаях канал возвращает `sourceQuality=LOW` без ретраев и без
+  фоллбэка на Brave; workflow продолжается на остальных каналах.
 - obsidian CLI недоступен (Obsidian закрыт) — vault-контракт деградирует: пиши файл в
   `REPORT_PATH` без dedup/wikilinks/записи в дневную заметку, предупреди пользователя.
