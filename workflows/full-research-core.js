@@ -88,10 +88,12 @@ const ALL_CHANNELS = {
   twitter: { source: 'Twitter/X', prefix: 'x', protocol: `${PROTO_DIR}/twitter-protocol.md`, file: 'twitter.md' },
   hackernews: { source: 'HackerNews', prefix: 'hn', protocol: `${PROTO_DIR}/hackernews-protocol.md`, file: 'hackernews.md' },
   substack: { source: 'Substack', prefix: 'ss', protocol: `${PROTO_DIR}/substack-protocol.md`, file: 'substack.md' },
+  // opt-in канал для RU-тем (платный: ~0,1-0,2 ₽/тема); в дефолтный SELECTED не входит
+  yandex: { source: 'Web (Яндекс, Рунет)', prefix: 'y', protocol: `${PROTO_DIR}/yandex-protocol.md`, file: 'web-yandex.md' },
 }
 // Семья = независимый ТИП источника. web/codexweb/grokweb — три движка над одним
 // открытым вебом: их совпадение НЕ является независимой триангуляцией.
-const FAMILY = { web: 'web', codexweb: 'web', grokweb: 'web', reddit: 'reddit', twitter: 'twitter', hackernews: 'hn', substack: 'substack' }
+const FAMILY = { web: 'web', codexweb: 'web', grokweb: 'web', yandex: 'web', reddit: 'reddit', twitter: 'twitter', hackernews: 'hn', substack: 'substack' }
 const SELECTED = (Array.isArray(A.channels) && A.channels.length)
   ? A.channels.filter(c => ALL_CHANNELS[c])
   : ['web', 'codexweb', 'grokweb', 'reddit', 'twitter', 'hackernews', 'substack']
@@ -245,8 +247,8 @@ ${files.map(f => `- ${f}`).join('\n')}
 Задача:
 1. Прочитай все файлы.
 2. Выдели до ${MAX_CLAIMS} самых важных фактических claims (приоритет тем, что повторяются в разных каналах ИЛИ являются load-bearing для выводов).
-3. Для каждого: statement (проверяемое утверждение), channels (кто поддерживает — используй РОВНО ключи каналов: web, codexweb, grokweb, reddit, twitter, hackernews, substack; НЕ имена файлов), strength.
-   СЕМЬИ ИСТОЧНИКОВ: web/codexweb/grokweb — это ТРИ ДВИЖКА над одним открытым вебом = ОДНА семья 'web'; reddit, twitter, hackernews, substack — отдельные семьи. strength=STRONG ТОЛЬКО при поддержке 2+ РАЗНЫХ семей (например web+reddit); совпадение только web-движков между собой (w/cx/gw) — НЕ независимость, максимум MODERATE.
+3. Для каждого: statement (проверяемое утверждение), channels (кто поддерживает — используй РОВНО ключи каналов: web, codexweb, grokweb, yandex, reddit, twitter, hackernews, substack; НЕ имена файлов), strength.
+   СЕМЬИ ИСТОЧНИКОВ: web/codexweb/grokweb/yandex — ДВИЖКИ над одним открытым вебом (Яндекс — другой индекс, но тот же веб) = ОДНА семья 'web'; reddit, twitter, hackernews, substack — отдельные семьи. strength=STRONG ТОЛЬКО при поддержке 2+ РАЗНЫХ семей (например web+reddit); совпадение только web-движков между собой (w/cx/gw/y) — НЕ независимость, максимум MODERATE.
 
 Каждый claim — конкретное фактическое утверждение, которое можно проверить веб-поиском. Не мнение-вкусовщина. statement пиши НА РУССКОМ (имена собственные/термины — как в источнике). Верни строго по схеме.`
 }
@@ -265,7 +267,7 @@ ${webOrigin && !communityOrigin
   : communityOrigin && !webOrigin
     ? `- Claim пришёл из сообществ → проверь по ПЕРВОИСТОЧНИКАМ: официальная дока/changelog/данные вендора. ToolSearch "select:mcp__plugin_jadlis-research_brave-search__brave_llm_context,mcp__plugin_jadlis-research_brave-search__brave_web_search" → 1-2 запроса вида "<claim> official docs", "<тема> changelog", "<тема> 2026".`
     : `- Claim поддержан и web, и сообществами → проверь АКТУАЛЬНОСТЬ по первоисточникам (официальная дока/changelog, "<тема> 2026") через ToolSearch "select:mcp__plugin_jadlis-research_brave-search__brave_llm_context,mcp__plugin_jadlis-research_brave-search__brave_web_search".`}
-БЮДЖЕТ: ≤3 tool calls, загрузи РОВНО ОДИН набор инструментов. ЗАПРЕЩЕНО: Grok CLI (~/.grok/bin/grok) и mcp__grok-mcp__x_search — слишком медленно/дорого для верификации; Reddit discover_operations/get_operation_schema — вызывай execute_operation напрямую.`
+БЮДЖЕТ: ≤3 tool calls, загрузи РОВНО ОДИН набор инструментов. ЗАПРЕЩЕНО: Grok CLI (~/.grok/bin/grok) и mcp__grok-mcp__x_search — слишком медленно/дорого для верификации; Яндекс (yandex-search.sh) — платный, в верификации не используется; Reddit discover_operations/get_operation_schema — вызывай execute_operation напрямую.`
   return `Ты — adversarial-верификатор №${idx + 1}. Проверь claim через НЕЗАВИСИМЫЙ live-поиск. Не верь исходному исследованию.
 
 CLAIM: "${claim.statement}"
@@ -306,7 +308,7 @@ ${JSON.stringify(ledger, null, 2)}
 
 КРОСС-ВАЛИДАЦИЯ (для отбора материала; сам процесс в отчёт НЕ пишется):
 - Triangulation: тезис подтверждён РАЗНЫМИ типами источников? (web+community=strong; два reddit-поста=weak). Circular reporting: 2 источника на 1 оригинал = 1 источник.
-- WEB-СЕМЬЯ: файлы web.md/web-codex.md/web-grok.md — ТРИ ДВИЖКА (Brave [w], Codex [cx], Grok [gw]) над ОДНИМ открытым вебом. Дедупь их находки по URL. Совпадение движков = усиление ВНУТРИ типа web, НЕ независимая триангуляция (независимость = web+community). Находка, которую дал только ОДИН движок и не подтвердил никто другой — пониженная достоверность (цифра бейджа не выше 3) + краткая пометка "только {движок}".
+- WEB-СЕМЬЯ: файлы web.md/web-codex.md/web-grok.md/web-yandex.md — ДВИЖКИ (Brave [w], Codex [cx], Grok [gw], Яндекс [y]) над ОДНИМ открытым вебом. Дедупь их находки по URL. Совпадение движков = усиление ВНУТРИ типа web, НЕ независимая триангуляция (независимость = web+community). Находка, которую дал только ОДИН движок и не подтвердил никто другой — пониженная достоверность (цифра бейджа не выше 3) + краткая пометка "только {движок}".
 - Community consensus = сильный ТОЛЬКО при независимости (разные аккаунты/время, без incentives).
 - Claims из ledger: CONFIRMED → не только разрешают вердикты в выводах, но и РЕНДЕРЯТСЯ ЯВНО в подсекции «Проверенные факты» секции «📚 Контекст и находки» (с evidence и бейджем достоверности) — это подтверждённый фундамент, его нельзя «растворять» в выводах. CHALLENGED/OUTDATED → НЕ в выводы и НЕ в контекст, только строка в callout методологии с причиной отсева.
 
@@ -322,7 +324,7 @@ ai_model: "{модель, которая реально выполнила си�
 tags: []
 query: "{исходный запрос; внутренние двойные кавычки замени на «»}"
 decision: "{решение пользователя или пусто}"
-channels: [{ключи выбранных каналов; web-движки (web/codexweb/grokweb) схлопни в один "web"}]
+channels: [{ключи выбранных каналов; web-движки (web/codexweb/grokweb) схлопни в один "web"; yandex (если был выбран) — отдельным ключом}]
 claims_confirmed: {N}
 claims_dropped: {N}
 gaps: [{2-4 строки-пробела}]
@@ -344,7 +346,7 @@ work_dir: "${WORK_DIR}"
    - **Разногласия и нюансы**: где источники/сообщества расходятся, какие лагеря, что под вопросом — НЕ усреднять до ложного консенсуса.
    В секцию идёт только материал, прошедший кросс-валидацию; claims CHALLENGED/OUTDATED сюда НЕ попадают (они лишь строкой в callout методологии).
 9. ## Кому доверять в этой теме — таблица: Источник | Надёжность (A-F) | Почему.
-10. ## Источники — подсекции по каналам; web-движки — ОДНА подсекция "### Web" (движок различим по префиксу w/cx/gw, дубли URL между движками не повторять); каждая строка: [префикс·Бейдж](URL) Название — одна строка на русском о чём.
+10. ## Источники — подсекции по каналам; web-движки — ОДНА подсекция "### Web" (движок различим по префиксу w/cx/gw/y, дубли URL между движками не повторять); каждая строка: [префикс·Бейдж](URL) Название — одна строка на русском о чём.
 11. ## Связанные заметки — ПУСТАЯ секция-заглушка (wikilinks добавит оркестратор).
 12. > [!note]- Методология и проверка — ОДИН СВЁРНУТЫЙ callout ≤20 строк в самом конце: каналы и число источников; проверено K claims: X подтверждено, Y отсеяно (список отсеянных + причина: оспорено/устарело); gaps; bias выборки; дата данных; «полный процесс — в work_dir из frontmatter».
 
