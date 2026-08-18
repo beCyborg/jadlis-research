@@ -13,11 +13,20 @@ Namespace: `mcp__plugin_jadlis-research_reddit__*`
 
 ## THREE-LAYER Protocol
 
-### Layer 1 — Discover (1 вызов, батч)
+### Layer 1 — Discover (2 вызова: лексический + семантический)
 
-Один вызов с массивом `queries` — 2-3 переформулировки темы. Батч эквивалентен по покрытию
-N одиночным вызовам (проба 2026-08-06: результаты совпали до третьего знака confidence),
-но стоит 1 вызов вместо N. `limit` действует **per query**.
+**Шаг 1 (первым, всегда): `mcp__plugin_jadlis-research_reddit-alt__reddit_search_communities`** (`q`, `limit: 10`) —
+лексический поиск официального листинга. Находит точные имена, к которым слеп семантический
+индекс primary (r/mcp первым результатом — замер 3×3 2026-08-15; вердикт совета 2026-08-15:
+reddit-alt = первая линия discovery, свой OAuth-клиент/заявка НЕ нужны, пока reddit-alt жив).
+~$0.002/вызов (прикреплённый ключ), без 402-слоя primary.
+
+**Шаг 2 (опционально): primary `discover_subreddits`** — только если тема перифрастическая
+(смысловой запрос без точных имён) И шаг 1 дал мало релевантного. Один вызов с массивом
+`queries` — 2-3 переформулировки. Батч эквивалентен по покрытию N одиночным вызовам
+(проба 2026-08-06), но стоит 1 вызов вместо N. `limit` действует **per query**.
+При 402 от primary — НЕ ретраить, работать только через reddit-alt (402 = платный слой
+вендора MCP, не Reddit).
 
 ```json
 execute_operation({
@@ -159,13 +168,9 @@ execute_operation({
 
 ## Резервный Reddit-MCP — `reddit-alt` (redditapis-mcp, ступень 1.5)
 
-**Сначала проверь доступность.** Канал требует ключ `REDDITAPIS_KEY` (userConfig плагина).
-Если `ToolSearch "select:mcp__plugin_jadlis-research_reddit-alt__reddit_search"` не находит тулов —
-ключ не задан, сервер не поднялся: **сразу** переходи к no-auth-лестнице ниже, ретраить смысла нет.
-
 Второй MCP, независимый бэкенд (api.redditapis.com, live-данные, полные метрики).
 Namespace: `mcp__plugin_jadlis-research_reddit-alt__*` — 32 плоских тула (без execute_operation-обёртки).
-Платный: ~$0.002/read с ключа `REDDITAPIS_KEY`, т.е. полный протокол ≈ $0.05.
+Платный: ~$0.002/read с прикреплённого ключа (в env конфига), т.е. полный протокол ≈ $0.05.
 `reddit_deep_comment_search` — «premium call» с недокументированной ценой, по умолчанию не звать.
 
 Маппинг операций планки:
@@ -179,12 +184,11 @@ Namespace: `mcp__plugin_jadlis-research_reddit-alt__*` — 32 плоских т�
 | `fetch_comments` | `reddit_post_comments` (`permalink`, `limit`) | threaded-дерево + `after`-курсор |
 | feeds | мониторинг только на платном плане — не используем | |
 
-**Правило переключения на reddit-alt** (любое из): primary 5xx/timeout; discover вернул пусто
-или только peripheral-мусор; запрос содержит точное имя/аббревиатуру (кейс r/mcp);
+**Роли (обновлено вердиктом совета 2026-08-15):** discovery — reddit-alt ПЕРВЫМ (Layer 1
+шаг 1), primary discover — второй линией для смысловых перифраз. Остальные операции —
+primary первым выбором; переключение на alt (любое из): primary 5xx/timeout/402;
 не-английский запрос (кейс польского — проверено 2026-08-12: primary 0, alt находит r/Polska);
 нужны live-метрики свежих постов (у Arctic Shift score заморожен).
-Primary остаётся первым выбором из-за semantic discover; alt — при его провалах и как
-источник полей `upvotes`/`upvote_ratio`/`num_comments` в реальном времени.
 
 ## Fallback-лестница (no-auth бэкенды)
 
