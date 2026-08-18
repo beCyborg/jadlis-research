@@ -8,17 +8,17 @@
 
 ```bash
 ~/.grok/bin/grok -p '<ПРОМПТ>' \
-  -m grok-4.5 --effort high \
+  -m grok-4.6 --effort xhigh \
   --output-format json --yolo --no-auto-update \
   --disallowed-tools "run_terminal_cmd" --max-turns 8
 ```
 
 JSON-обёртка CLI: `{text, stopReason, sessionId, requestId, thought}`. Твой результат — внутри `.text`.
 
-> [!note] Проверено на grok 0.2.93 (2026-07-10), модель grok-4.5
+> [!note] Проверено на grok 0.2.93 (2026-07-10, grok-4.5); пере-сверено на grok 1.0.3 (2026-08-13, grok-4.6)
 > - **`env -u XAI_API_KEY` НЕ нужен.** Session-токен OIDC по precedence выше `XAI_API_KEY` (тот — лишь fallback) → биллинг по подписке автоматически. Источник: `~/.grok/docs/user-guide/02-authentication.md` (Auth Precedence).
 > - **`--disallowed-tools "run_terminal_cmd"` — это security-хайген, а НЕ обход бага.** Баг сборки агента из 0.2.22 исправлен; голый `grok -p` работает. Флаг оставлен, потому что поиску по X терминал не нужен. НЕ считать его обязательным «костылём».
-> - **Модель пиним явно: `-m grok-4.5 --effort high`.** grok-4.5 (500K ctx) сменила упразднённую `grok-build`; effort'ы: `low|medium|high`, high — дефолт. Пин защищает от смены серверного дефолта. Проверка списка: `grok models`.
+> - **Модель пиним явно: `-m grok-4.6 --effort xhigh`.** grok-4.6 (500K ctx) — серверный дефолт с 2026-08, сменила grok-4.5 (та пока доступна); effort'ы: `low|medium|high|xhigh`, high — дефолт. Пин защищает от смены серверного дефолта. effort=xhigh закреплён (директива 2026-08-15, откат снят). Проверка списка: `grok models`.
 
 ## Парсинг результата — толерантная схема (НЕ `jq -r '.text'` в лоб)
 
@@ -101,7 +101,7 @@ url:example.com                                ← по ссылке
 
 ```bash
 ~/.grok/bin/grok -p 'Исследуй тему на X: <развёрнутый запрос с контекстом: что ищем, какие мнения/аспекты, какое решение принимается>. Сделай НЕСКОЛЬКО поисков: (1) x_keyword_search query="<ключевые слова + операторы, напр. min_faves:5 since:ГГГГ-ММ-ДД>" mode=Latest limit=10; (2) x_semantic_search по смысловому ракурсу limit=10 exclude_usernames=["<корпоративные/маркетинговые аккаунты по теме>"] min_score_threshold=0.5 — это ДОПОЛНЕНИЕ к шагу (1), НЕ замена; (3) x_keyword_search query="<тема> url:<профильный домен, напр. github.com>" limit=10 — посты со ссылками на материалы; (4) углубление по ключевым хэндлам из шага (1): x_user_search → x_keyword_search query="from:handle1 OR from:handle2 <тема>"; при необходимости период since:/until:. Верни ТОЛЬКО валидный JSON: {"posts":[{"url","author","date","text","likes"}]} — все найденные посты одним массивом, без дублей.' \
-  -m grok-4.5 --effort high \
+  -m grok-4.6 --effort xhigh \
   --output-format json --yolo --no-auto-update --disallowed-tools "run_terminal_cmd" --max-turns 6
 ```
 
@@ -124,7 +124,7 @@ url:example.com                                ← по ссылке
 
 ```bash
 ~/.grok/bin/grok -p 'Найди критику, проблемы и негативный опыт с {TOPIC} через x_keyword_search и x_semantic_search. Кто не согласен и почему. Если среди найденного есть высоко-вовлечённый тред (много реплаев/лайков) — вызови по нему x_thread_fetch и включи 2-3 контрастных реплая, пометив их как зависимые источники (реплаи одного треда). Верни ТОЛЬКО JSON {"posts":[{"url","author","date","text","likes"}]}' \
-  -m grok-4.5 --effort high \
+  -m grok-4.6 --effort xhigh \
   --output-format json --yolo --no-auto-update --disallowed-tools "run_terminal_cmd" --max-turns 4
 ```
 

@@ -5,11 +5,12 @@
 Web-поиск через **встроенные инструменты `web_search`/`web_fetch` Grok CLI** — тот же
 headless-запуск, что у Twitter-канала, но с веб-инструментами вместо x_*.
 Биллинг — **подписка (OIDC), marginal cost ≈ $0** (проверено 2026-07-10 на grok 0.2.93 /
-grok-4.5: exit 0, живой URL). MCP `mcp__grok-mcp__web_search` НЕ использовать —
+grok-4.5; пере-сверено 2026-08-13 на grok 1.0.3 / grok-4.6: exit 0, живой URL).
+MCP `mcp__grok-mcp__web_search` НЕ использовать —
 он ходит в xAI API (XAI_API_KEY, платные кредиты team-аккаунта), запрещён by design.
 
 Ориентир по времени: **~90 с на вызов** (сверено 2026-08-06 на grok 0.2.118: 87 с, 4 turns,
-`--effort high --max-turns 6`). Прежняя оценка «~20 сек» устарела вчетверо — на `timeout: 300000`
+`--effort xhigh --max-turns 6`). Прежняя оценка «~20 сек» устарела вчетверо — на `timeout: 300000`
 она не влияет, но при планировании фан-аута вводила в заблуждение.
 
 Базовая команда (Bash, `timeout: 300000` мс на вызов):
@@ -24,15 +25,15 @@ GROK_ISO_HOME="$HOME/.cache/grok-iso-home"; mkdir -p "$GROK_ISO_HOME"
 
 ```bash
 HOME="$GROK_ISO_HOME" GROK_HOME="$HOME/.grok" ~/.grok/bin/grok -p '<ПРОМПТ>' \
-  -m grok-4.5 --effort high \
+  -m grok-4.6 --effort xhigh \
   --output-format json --yolo --no-auto-update \
   --disallowed-tools "run_terminal_cmd" --max-turns 6
 ```
 
-Модель пиним явно: `grok-4.5` (500K ctx) сменила упразднённую `grok-build`; effort'ы `low|medium|high`, high — дефолт. Пин защищает от смены серверного дефолта.
+Модель пиним явно: `grok-4.6` (500K ctx) — серверный дефолт с 2026-08, сменила grok-4.5 (та пока доступна); effort'ы `low|medium|high|xhigh`, high — дефолт. Пин защищает от смены серверного дефолта. effort=xhigh закреплён (директива 2026-08-15, откат снят).
 
-> Передаём `-m grok-4.5`, но `modelUsage` в ответе рапортует ключ `grok-4.5-build` — это
-> серверный алиас, а не сбой пина и не подмена модели (сверено 2026-08-06, exit 0).
+> Передаём `-m grok-4.6`, но `modelUsage` в ответе рапортует ключ `grok-4.6-build` — это
+> серверный алиас, а не сбой пина и не подмена модели (сверено 2026-08-13, exit 0).
 
 > [!warning] `HOME="$GROK_ISO_HOME"` обязателен — иначе `web_fetch` мёртв
 > Grok CLI **безусловно** читает `~/.claude/settings.json` и транслирует `permissions.deny`
@@ -59,21 +60,23 @@ JSON», `.text` = проза-преамбула + JSON в ```` ```json ````-фе
 
 Смысл канала — сравнить находки другого поискового стека; пересказ памяти бесполезен.
 
+**Глубина (2026-08-15):** `web_search` Grok возвращает синтез по сниппетам выдачи; чтение полных страниц — это `web_fetch` (ради него и городится HOME-изоляция). Поэтому каждый промпт требует: ключевые источники ОТКРЫТЬ через web_fetch и цитировать из тела страницы, не из сниппетов (формулировки в командах ниже).
+
 ## Протокол (2 вызова В ОДНОМ сообщении — параллельно)
 
 ### Вызов 1 — Широкий обзор (обязательно, `--max-turns 6`)
 
 ```bash
-HOME="$GROK_ISO_HOME" GROK_HOME="$HOME/.grok" ~/.grok/bin/grok -p 'Исследуй веб по теме: <развёрнутый запрос — тема, аспекты, решение пользователя>. Используй ТОЛЬКО web_search/web_fetch (несколько реальных поисков, НЕ память, НЕ x_*-инструменты). Каждый тезис — с URL и датой источника; тезисы без URL не включай; приоритет 2024-2026. Верни ТОЛЬКО валидный JSON: {"findings":[{"claim","url","date"}],"sources":["url",...]}' \
-  -m grok-4.5 --effort high \
+HOME="$GROK_ISO_HOME" GROK_HOME="$HOME/.grok" ~/.grok/bin/grok -p 'Исследуй веб по теме: <развёрнутый запрос — тема, аспекты, решение пользователя>. Используй ТОЛЬКО web_search/web_fetch (несколько реальных поисков, НЕ память, НЕ x_*-инструменты). Каждый тезис — с URL и датой источника; тезисы без URL не включай; приоритет 2024-2026. Ключевые источники (3-5) ОБЯЗАТЕЛЬНО открой через web_fetch и прочитай полную страницу перед цитированием — не цитируй по сниппетам web_search; в claim включай конкретику из тела страницы. Верни ТОЛЬКО валидный JSON: {"findings":[{"claim","url","date"}],"sources":["url",...]}' \
+  -m grok-4.6 --effort xhigh \
   --output-format json --yolo --no-auto-update --disallowed-tools "run_terminal_cmd" --max-turns 6
 ```
 
 ### Вызов 2 — Контраргументы (обязательно, `--max-turns 4`)
 
 ```bash
-HOME="$GROK_ISO_HOME" GROK_HOME="$HOME/.grok" ~/.grok/bin/grok -p 'Найди в вебе критику, проблемы, провалы и контраргументы по теме: <тема>. ТОЛЬКО web_search/web_fetch (реальные поиски, НЕ память, НЕ x_*). Кто не согласен и почему. Каждый тезис — с URL. Верни ТОЛЬКО JSON {"findings":[{"claim","url","date"}],"sources":["url",...]}' \
-  -m grok-4.5 --effort high \
+HOME="$GROK_ISO_HOME" GROK_HOME="$HOME/.grok" ~/.grok/bin/grok -p 'Найди в вебе критику, проблемы, провалы и контраргументы по теме: <тема>. ТОЛЬКО web_search/web_fetch (реальные поиски, НЕ память, НЕ x_*). Кто не согласен и почему. Каждый тезис — с URL. Топ-источники критики открой через web_fetch (полная страница), не цитируй по сниппетам. Верни ТОЛЬКО JSON {"findings":[{"claim","url","date"}],"sources":["url",...]}' \
+  -m grok-4.6 --effort xhigh \
   --output-format json --yolo --no-auto-update --disallowed-tools "run_terminal_cmd" --max-turns 4
 ```
 

@@ -2,9 +2,9 @@ export const meta = {
   name: 'full-research-core',
   description: 'Ядро full-research: N канальных исследователей → per-claim верификация с brave counter-search (фильтрация) → analyst пишет отчёт в workDir. Vault-контракт — в скилле.',
   phases: [
-    { title: 'Fan-out', detail: 'до 7 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack) параллельно' },
-    { title: 'Verify', detail: 'curator (Opus 5) выделяет ключевые claims → per-claim verifiers: линза-опровержение (Brave) + кросс-тип линза (сообщества/первоисточники) → CONFIRMED/CHALLENGED/OUTDATED' },
-    { title: 'Synthesize', detail: 'analyst (headless-мост: bridgeModel → fallback Opus 5) пишет отчёт (verified:false), фильтрует непрошедшие claims, дедупит web-движки' },
+    { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно' },
+    { title: 'Verify', detail: 'curator (Opus 5) выделяет атомарные claims → per-claim verifiers: линза-опровержение (Brave) + кросс-тип линза (сообщества/первоисточники) → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED (schema v2)' },
+    { title: 'Synthesize', detail: 'analyst (Fable 5) пишет отчёт (verified:false), фильтрует непрошедшие claims, дедупит web-движки' },
   ],
 }
 
@@ -13,16 +13,13 @@ export const meta = {
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
 const QUERY = A.refinedQuery || 'Сравни локальные AI-ассистенты для кодинга в 2026: приватность vs возможности'
 const DECISION = A.decisionContext || ''
+const AI_MODEL = A.aiModel || 'unknown'
 const DATE = A.date || 'DRYRUN-DATE'
 const WORK_DIR = A.workDir || '.full-research/dryrun'
 // ${CLAUDE_PLUGIN_ROOT} в JS НЕ подставляется — скилл передаёт его значением.
 // Дефолт нужен только для dry-run: без pluginRoot агенты не найдут протоколы.
 const PLUGIN_ROOT = A.pluginRoot || '.'
 const VAULT_PATH = A.vaultPath || ''
-// Модель Fable-моста. Пробуем один раз; недоступна → FALLBACK_MODEL.
-// Во frontmatter отчёта пишется та модель, которая реально ответила.
-const BRIDGE_MODEL = A.bridgeModel || 'claude-opus-5'
-const FALLBACK_MODEL = 'claude-opus-5'
 const SUBSTACK_HANDLES = Array.isArray(A.substackHandles) ? A.substackHandles : []
 const VERIFIERS = 2
 const MAX_CLAIMS = 8
@@ -35,40 +32,44 @@ const w = extra => Object.assign({}, WORKER_OPTS, extra)
 // Оркестратор-роли (curator, analyst — большая логика: отбор claims, синтез).
 // curator ВСЕГДА идёт через orchestrator-fable-xhigh (Opus 5) — структурная
 // экстракция claims не intelligence-sensitive, Fable-эджа тут нет.
-// analyst — единственное место, где выигрывает модель с очень большим контекстом
-// (синтез из 400–600K). Такие модели закрыты для субагентов (кап платформы: opts.model,
-// Agent-тул и agentType-frontmatter — всё мапится в Opus), НО доступны отдельному
-// headless-процессу `claude -p --model <id>` (вложенный запуск из workflow-агента
-// проверен: exit 0, ~7 c старт). Поэтому дефолт для analyst — МОСТ: лёгкий воркер
-// записывает ролевой промпт в файл и исполняет его вложенным headless-процессом.
-// Мост пробует args.bridgeModel ОДИН раз; недоступна (нет доступа на подписке,
-// «model not found») → вторая попытка на claude-opus-5, дальше — inline.
-// Отключение моста целиком: args.fableBridge=false → analyst идёт через
-// orchestrator-fable-xhigh (Opus 5).
+// analyst — единственное место с реальным Fable-преимуществом (синтез из
+// 400–600K контекста). Причина моста — ремап алиасов: CLAUDE_CODE_SUBAGENT_MODEL
+// мапит субагентов (opts.model, Agent-тул, agentType-frontmatter) в Opus 5 —
+// это осознанный роутинг (Fable планирует, Opus исполняет), а НЕ закрытость
+// Fable для субагентов (опровергнуто 2026-07-05). Отдельный headless-процесс
+// `claude -p --model claude-fable-5` ремапу не подчиняется (проверено: exit 0, ~7 c старт).
+// Поэтому дефолт для analyst — FABLE-МОСТ: лёгкий воркер записывает ролевой промпт
+// в файл и исполняет его вложенным headless Fable. Отключение: args.fableBridge=false
+// → analyst тоже идёт через orchestrator-fable-xhigh (Opus 5).
 const FABLE_BRIDGE = A.fableBridge !== false
 const ORCH_OPTS = A.orchOpts || { agentType: 'jadlis-research:orchestrator-fable-xhigh' }
 const o = extra => Object.assign({}, ORCH_OPTS, extra)
 
-function bridgePrompt(role, rolePrompt, allowedTools, fieldsHint) {
-  const pf = `${WORK_DIR}/_bridge-${role}-prompt.md`
-  const of = `${WORK_DIR}/_bridge-${role}-out.json`
-  const cmd = m => `cat "${pf}" | claude -p --model ${m} --effort xhigh --allowedTools "${allowedTools}" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --output-format json > "${of}" 2>"${WORK_DIR}/_bridge-${role}.err"; echo "EXIT=$?"`
-  return `Ты — технический МОСТ к отдельной headless-модели. Сам ролевую работу НЕ делай (кроме последнего шага «Деградация»). Шаги:
+function bridgePrompt(role, rolePrompt, allowedTools, fieldsHint, schemaObj) {
+  const pf = `${WORK_DIR}/_fable-${role}-prompt.md`
+  const of = `${WORK_DIR}/_fable-${role}-out.json`
+  const sf = `${WORK_DIR}/_fable-${role}-schema.json`
+  // Производная схема для --json-schema: без корневых $schema/$id/title/description
+  // и числовых/строковых констрейнтов (иначе structured_output тихо отключается).
+  const derived = JSON.parse(JSON.stringify(schemaObj), (k, v) =>
+    (k === 'minLength' || k === 'minimum' || k === 'maximum') ? undefined : v)
+  delete derived.$schema; delete derived.$id; delete derived.title; delete derived.description
+  return `Ты — технический МОСТ к модели Fable 5. Сам ролевую работу НЕ делай (кроме шага «Деградация»). Ровно четыре шага:
 
 1. Через Write запиши в файл ${pf} ДОСЛОВНО весь текст между маркерами <<<ROLE_PROMPT и ROLE_PROMPT>>> (маркеры не включать, текст не менять и не сокращать).
 
-2. ОДИН Bash-вызов (параметр timeout: 600000) — основная модель \`${BRIDGE_MODEL}\`:
-${cmd(BRIDGE_MODEL)}
+2. Через Write запиши в файл ${sf} ДОСЛОВНО JSON между маркерами <<<SCHEMA и SCHEMA>>>.
 
-3. Успех (EXIT=0 и в ${of} поле .result содержит в КОНЦЕ валидный JSON-блок с полями ${fieldsHint}) → извлеки эти поля, верни по своей схеме БЕЗ изменений, и в поле analystModel поставь "${BRIDGE_MODEL}".
+3. ОДИН Bash-вызов (параметр timeout: 600000; --settings глушит хуки, < /dev/null обязателен):
+cat "${pf}" | claude -p --model claude-fable-5 --effort high --allowedTools "${allowedTools}" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}' --json-schema "$(cat "${sf}")" --output-format json > "${of}" 2>"${WORK_DIR}/_fable-${role}.err" < /dev/null; echo "EXIT=$?"
 
-4. Сбой (EXIT≠0 — например «model not found»/нет доступа — или .result без валидного JSON) → **ОДНА** повторная попытка тем же Bash-вызовом, но с моделью \`${FALLBACK_MODEL}\`:
-${cmd(FALLBACK_MODEL)}
-Успех → верни поля, analystModel = "${FALLBACK_MODEL}".
+4. Прочитай ${of} (Read): возьми поле .structured_output — это готовый объект с полями ${fieldsHint}; верни его по своей схеме БЕЗ изменений. Если ключа .structured_output нет — возьми JSON-блок в конце .result.
 
-5. Деградация: и вторая попытка не удалась → выполни ролевой промпт из ${pf} САМОСТОЯТЕЛЬНО, верни результат по схеме, analystModel = "bridge-fallback:inline", и пометь в первом текстовом поле "[bridge-fallback: inline]".
+Деградация: EXIT≠0 или ни .structured_output, ни валидного JSON в .result → один повтор шага 3; если снова сбой — выполни ролевой промпт из ${pf} САМОСТОЯТЕЛЬНО и верни результат по схеме (пометь в первом текстовом поле "[bridge-fallback: opus]"; если ролевой промпт писал файл отчёта с frontmatter — замени в нём ai_model на "claude-opus-5").
 
-ЗАПРЕЩЕНО: повторять шаг 2 больше одного раза и подставлять любую модель, кроме двух названных. analystModel обязан отражать модель, которая реально ответила, — не ту, которую заказывали.
+<<<SCHEMA
+${JSON.stringify(derived)}
+SCHEMA>>>
 
 <<<ROLE_PROMPT
 ${rolePrompt}
@@ -77,8 +78,6 @@ ROLE_PROMPT>>>`
 // Хвост ролевого промпта для headless-исполнения (нет StructuredOutput — финал печатается JSON-блоком)
 const bridgeTail = fieldsHint => `\n\nФИНАЛЬНЫЙ ВЫВОД (ты работаешь в headless-режиме): закончи ответ РОВНО ОДНИМ JSON-объектом с полями ${fieldsHint} внутри блока \`\`\`json ... \`\`\` — и никакого текста после блока.`
 
-// Все семь протоколов лежат в одном каталоге плагина (search-community упразднён —
-// его 4 протокола переехали в full-research/protocols/).
 const PROTO_DIR = `${PLUGIN_ROOT}/skills/full-research/protocols`
 const ALL_CHANNELS = {
   web: { source: 'Web (Brave Search)', prefix: 'w', protocol: `${PROTO_DIR}/web-protocol.md`, file: 'web.md' },
@@ -90,10 +89,13 @@ const ALL_CHANNELS = {
   substack: { source: 'Substack', prefix: 'ss', protocol: `${PROTO_DIR}/substack-protocol.md`, file: 'substack.md' },
   // opt-in канал для RU-тем (платный: ~0,1-0,2 ₽/тема); в дефолтный SELECTED не входит
   yandex: { source: 'Web (Яндекс, Рунет)', prefix: 'y', protocol: `${PROTO_DIR}/yandex-protocol.md`, file: 'web-yandex.md' },
+  // opt-in каналы (2026-08-15): включаются роутинг-деревом SKILL.md, в default не входят
+  youtube: { source: 'YouTube', prefix: 'yt', protocol: `${PROTO_DIR}/youtube-protocol.md`, file: 'youtube.md' },
+  telegram: { source: 'Telegram (публичные каналы)', prefix: 'tg', protocol: `${PROTO_DIR}/telegram-protocol.md`, file: 'telegram.md' },
 }
 // Семья = независимый ТИП источника. web/codexweb/grokweb — три движка над одним
 // открытым вебом: их совпадение НЕ является независимой триангуляцией.
-const FAMILY = { web: 'web', codexweb: 'web', grokweb: 'web', yandex: 'web', reddit: 'reddit', twitter: 'twitter', hackernews: 'hn', substack: 'substack' }
+const FAMILY = { web: 'web', codexweb: 'web', grokweb: 'web', yandex: 'web', reddit: 'reddit', twitter: 'twitter', hackernews: 'hn', substack: 'substack', youtube: 'youtube', telegram: 'telegram' }
 const SELECTED = (Array.isArray(A.channels) && A.channels.length)
   ? A.channels.filter(c => ALL_CHANNELS[c])
   : ['web', 'codexweb', 'grokweb', 'reddit', 'twitter', 'hackernews', 'substack']
@@ -124,10 +126,11 @@ const CHANNEL_SCHEMA = {
     counterarguments: { type: 'array', items: { type: 'string' } },
     sourceQuality: { type: 'string', enum: ['HIGH', 'MEDIUM', 'LOW'] },
     fileWritten: { type: 'string' },
+    snapshots: { type: 'array', items: { type: 'string' }, description: 'пути записанных снапшотов в workDir/snapshots/ (пустой = ни одного HIGH-источника не снапшочено — это видно телеметрии)' },
     startedAt: { type: 'string', description: 'YYYY-MM-DD HH:MM:SS — до первого поиска' },
     finishedAt: { type: 'string', description: 'YYYY-MM-DD HH:MM:SS — после Write' },
   },
-  required: ['source', 'findings', 'citations', 'counterarguments', 'sourceQuality', 'fileWritten'],
+  required: ['source', 'findings', 'citations', 'counterarguments', 'sourceQuality', 'fileWritten', 'snapshots'],
 }
 
 const CURATOR_SCHEMA = {
@@ -158,8 +161,8 @@ const VERIFY_SCHEMA = {
   additionalProperties: false,
   properties: {
     claimId: { type: 'string' },
-    verdict: { type: 'string', enum: ['CONFIRMED', 'CHALLENGED', 'OUTDATED'] },
-    credibility: { type: 'integer', enum: [1, 2, 3, 4, 5, 6], description: 'подтверждённость claim (Admiralty): 1 подтверждён независимо, 2 вероятно верен, 3 возможно верен, 4 сомнителен, 5 неправдоподобен, 6 нельзя оценить' },
+    verdict: { type: 'string', enum: ['CONFIRMED', 'CHALLENGED', 'OUTDATED', 'UNCHECKED'], description: 'UNCHECKED — ОПЕРАЦИОННЫЙ вердикт: не смог проверить (пейволл/сбой инструмента/источник недоступен/бюджет вызовов исчерпан). НЕ доказательный: сбой доступа ≠ опровержение' },
+    credibility: { type: 'integer', enum: [1, 2, 3, 4, 5, 6], description: 'подтверждённость claim (Admiralty): 1 подтверждён независимо, 2 вероятно верен, 3 возможно верен, 4 сомнителен, 5 неправдоподобен, 6 нельзя оценить (для UNCHECKED всегда 6)' },
     evidence: { type: 'string', description: 'что нашёл counter-search' },
     url: { type: 'string' },
   },
@@ -176,9 +179,8 @@ const ANALYST_SCHEMA = {
     relatedCandidates: { type: 'array', items: { type: 'string' }, description: 'ключевые слова/темы для obsidian-поиска связанных заметок (выполнит скилл)' },
     droppedClaims: { type: 'array', items: { type: 'string' }, description: 'claims, отфильтрованные как CHALLENGED/OUTDATED' },
     gaps: { type: 'array', items: { type: 'string' }, description: 'что не покрыто исследованием (для frontmatter и callout методологии)' },
-    analystModel: { type: 'string', description: 'модель, которая РЕАЛЬНО выполнила синтез (мост мог упасть с bridgeModel на fallback)' },
   },
-  required: ['reportPath', 'queryRu', 'mainConclusion', 'relatedCandidates', 'droppedClaims', 'gaps', 'analystModel'],
+  required: ['reportPath', 'queryRu', 'mainConclusion', 'relatedCandidates', 'droppedClaims', 'gaps'],
 }
 
 const TOOL_NOTE = 'ВАЖНО: НЕ используй встроенные WebSearch/WebFetch (забанены). Нужные MCP-инструменты загружай через ToolSearch перед вызовом. Brave (тариф Search): 50 req/s — параллельные вызовы OK. Firecrawl scrape: 1 req/s.'
@@ -215,6 +217,7 @@ ${TOOL_NOTE}
    F — нельзя оценить.
    В reliabilityWhy — одна строка: тип источника / автор и его экспертиза / дата / bias-сигналы.
 4. НЕ спавни sub-agents — делай всё сам. Все выходные данные на РУССКОМ.
+5. СНАПШОТЫ (schema v2, ОБЯЗАТЕЛЬНЫЙ шаг — аудит 2026-08-15 показал 0 снапшотов за все прогоны): для 3-5 САМЫХ ВАЖНЫХ источников (relevance HIGH) сохрани полный извлечённый текст страницы в ${WORK_DIR}/snapshots/${c.prefix}<N>.md (Write; шапка: URL + дата + твой префикс цитаты). Это замороженная доказательная база для верификаторов — они читают один и тот же текст, а не разные версии страницы. ПРАВИЛО: цитата с relevance HIGH БЕЗ снапшота недопустима — не смог достать полный текст (пейволл/CAPTCHA/challenge) → снапшот не пиши, но relevance снизь до MEDIUM и пометь «[no-snapshot: blocked]»; пустой или обрезанный текст — НЕ контент. Пути записанных файлов верни в поле snapshots[] схемы (пустой массив = честное «ни одного»).
 
 ТЕЛЕМЕТРИЯ (обязательно):
 ДО первого поиска выполни Bash \`date '+%Y-%m-%d %H:%M:%S'\` → это startedAt; ПОСЛЕ Write ещё раз → finishedAt. Обе строки запиши в шапку файла (Started:/Finished:) и верни в схеме (startedAt/finishedAt).
@@ -250,6 +253,8 @@ ${files.map(f => `- ${f}`).join('\n')}
 3. Для каждого: statement (проверяемое утверждение), channels (кто поддерживает — используй РОВНО ключи каналов: web, codexweb, grokweb, yandex, reddit, twitter, hackernews, substack; НЕ имена файлов), strength.
    СЕМЬИ ИСТОЧНИКОВ: web/codexweb/grokweb/yandex — ДВИЖКИ над одним открытым вебом (Яндекс — другой индекс, но тот же веб) = ОДНА семья 'web'; reddit, twitter, hackernews, substack — отдельные семьи. strength=STRONG ТОЛЬКО при поддержке 2+ РАЗНЫХ семей (например web+reddit); совпадение только web-движков между собой (w/cx/gw/y) — НЕ независимость, максимум MODERATE.
 
+4. АТОМАРНОСТЬ (schema v2): каждый statement — ОДНО проверяемое фактическое ядро БЕЗ суперлативной/оценочной обёртки. Запрещены в statement: «самый/лучший/#1», «консенсус», «единодушны», «библия/канон», рейтинги-с-чужих-слов. Значимые квалификаторы (даты, версии, условия применимости) СОХРАНЯЙ — атомарность не значит обрубленность. Составное утверждение расщепи на отдельные claims либо возьми только load-bearing ядро.
+
 Каждый claim — конкретное фактическое утверждение, которое можно проверить веб-поиском. Не мнение-вкусовщина. statement пиши НА РУССКОМ (имена собственные/термины — как в источнике). Верни строго по схеме.`
 }
 
@@ -263,7 +268,7 @@ function verifyPrompt(claim, idx) {
 ИНСТРУМЕНТЫ: ToolSearch "select:mcp__plugin_jadlis-research_brave-search__brave_web_search,mcp__plugin_jadlis-research_brave-search__brave_llm_context" → 1-2 запроса (llm_context для содержимого страниц, web_search для охвата; параллельные вызовы OK).`
     : `ЛИНЗА «КРОСС-ТИП» — подтверди или опровергни claim источником ДРУГОГО ТИПА (другой семьи), чем каналы-источники claim:
 ${webOrigin && !communityOrigin
-  ? `- Claim пришёл из web-движков → проверь по СООБЩЕСТВАМ практиков. Предпочтительно HackerNews (1 вызов): ToolSearch "select:mcp__plugin_jadlis-research_hn__search_hn" → 1-2 поиска. Альтернатива — Reddit через execute_operation НАПРЯМУЮ (НЕ вызывай discover_operations/get_operation_schema): ToolSearch "select:mcp__plugin_jadlis-research_reddit__execute_operation" → execute_operation(operation_id="discover_subreddits", parameters={query,limit:5,min_confidence:0.4}) → execute_operation(operation_id="search_subreddit", parameters={subreddit,query,sort:"relevance",time_filter:"all"}).`
+  ? `- Claim пришёл из web-движков → проверь по СООБЩЕСТВАМ практиков. Предпочтительно HackerNews (Bash, без ToolSearch): \`${PLUGIN_ROOT}/scripts/hn-fetch.sh search "<запрос>" --tags story --limit 10\` и/или \`--tags comment\` (полные тексты комментариев прямо в выдаче; exit 3 = поиск HN недоступен → возьми Reddit). Альтернатива — Reddit через execute_operation НАПРЯМУЮ (НЕ вызывай discover_operations/get_operation_schema): ToolSearch "select:mcp__plugin_jadlis-research_reddit__execute_operation" → execute_operation(operation_id="discover_subreddits", parameters={query,limit:5,min_confidence:0.4}) → execute_operation(operation_id="search_subreddit", parameters={subreddit_name,query,sort:"relevance",time_filter:"all"}).`
   : communityOrigin && !webOrigin
     ? `- Claim пришёл из сообществ → проверь по ПЕРВОИСТОЧНИКАМ: официальная дока/changelog/данные вендора. ToolSearch "select:mcp__plugin_jadlis-research_brave-search__brave_llm_context,mcp__plugin_jadlis-research_brave-search__brave_web_search" → 1-2 запроса вида "<claim> official docs", "<тема> changelog", "<тема> 2026".`
     : `- Claim поддержан и web, и сообществами → проверь АКТУАЛЬНОСТЬ по первоисточникам (официальная дока/changelog, "<тема> 2026") через ToolSearch "select:mcp__plugin_jadlis-research_brave-search__brave_llm_context,mcp__plugin_jadlis-research_brave-search__brave_web_search".`}
@@ -278,13 +283,16 @@ ${lens}
 ${TOOL_NOTE}
 При InputValidationError — сначала ToolSearch, затем повтор вызова.
 
+СНАПШОТЫ: если в ${WORK_DIR}/snapshots/ есть файлы (Glob "${WORK_DIR}/snapshots/*.md") — прочитай релевантные claim'у ПЕРЕД live-поиском: это замороженные полные тексты источников каналов, общая доказательная база всех верификаторов.
+
 Оцени:
+- НЕ СМОГ проверить (пейволл, сбой инструмента, источник недоступен, бюджет вызовов исчерпан до получения сигнала)? → UNCHECKED (credibility 6). Сбой доступа — НЕ опровержение; не маскируй его под CHALLENGED.
 - Claim актуален или устарел? → если устарел: OUTDATED.
-- Есть весомые опровержения/противоречия? → CHALLENGED.
+- Есть весомые опровержения/противоречия ПО СУЩЕСТВУ? → CHALLENGED.
 - Подтверждается независимо, опровержений нет? → CONFIRMED.
 - credibility (1-6): 1 — подтверждён независимым источником другого типа; 2 — вероятно верен (логично, согласуется, прямого независимого подтверждения нет); 3 — возможно верен; 4 — сомнителен; 5 — неправдоподобен; 6 — нельзя оценить.
 
-Верни по схеме: claimId="${claim.id}", verdict (CONFIRMED/CHALLENGED/OUTDATED), credibility (1-6), evidence (что нашёл), url (ключевой источник проверки).
+Верни по схеме: claimId="${claim.id}", verdict (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), credibility (1-6), evidence (что нашёл; для UNCHECKED — что именно не удалось и почему), url (ключевой источник проверки; для UNCHECKED — недоступный URL).
 НЕ спавни sub-agents.`
 }
 
@@ -310,7 +318,7 @@ ${JSON.stringify(ledger, null, 2)}
 - Triangulation: тезис подтверждён РАЗНЫМИ типами источников? (web+community=strong; два reddit-поста=weak). Circular reporting: 2 источника на 1 оригинал = 1 источник.
 - WEB-СЕМЬЯ: файлы web.md/web-codex.md/web-grok.md/web-yandex.md — ДВИЖКИ (Brave [w], Codex [cx], Grok [gw], Яндекс [y]) над ОДНИМ открытым вебом. Дедупь их находки по URL. Совпадение движков = усиление ВНУТРИ типа web, НЕ независимая триангуляция (независимость = web+community). Находка, которую дал только ОДИН движок и не подтвердил никто другой — пониженная достоверность (цифра бейджа не выше 3) + краткая пометка "только {движок}".
 - Community consensus = сильный ТОЛЬКО при независимости (разные аккаунты/время, без incentives).
-- Claims из ledger: CONFIRMED → не только разрешают вердикты в выводах, но и РЕНДЕРЯТСЯ ЯВНО в подсекции «Проверенные факты» секции «📚 Контекст и находки» (с evidence и бейджем достоверности) — это подтверждённый фундамент, его нельзя «растворять» в выводах. CHALLENGED/OUTDATED → НЕ в выводы и НЕ в контекст, только строка в callout методологии с причиной отсева.
+- Claims из ledger: CONFIRMED → не только разрешают вердикты в выводах, но и РЕНДЕРЯТСЯ ЯВНО в подсекции «Проверенные факты» секции «📚 Контекст и находки» (с evidence и бейджем достоверности) — это подтверждённый фундамент, его нельзя «растворять» в выводах. ВЕКТОР ГОЛОСОВ виден читателю: у каждого проверенного факта пометка «(2 голоса)» при voteCount=2 или «(1 голос — split: второй верификатор не смог проверить)» при voteCount=1 — читатель обязан различать двойное и одиночное подтверждение. CHALLENGED/OUTDATED → НЕ в выводы и НЕ в контекст, только строка в callout методологии с причиной отсева. UNCHECKED → НЕ в отчёт; в callout методологии одной строкой: «не удалось проверить: N claims (причины кратко)».
 
 БЕЙДЖИ ДОСТОВЕРНОСТИ: каждая ссылка в советах и «Источниках» — вида [w1·B2](URL): буква A-F — reliability источника (из файлов каналов, поле Admiralty), цифра 1-6 — подтверждённость информации. Цифру присваиваешь ТЫ по правилам: 1-2 ТОЛЬКО при независимом подтверждении (CONFIRMED в ledger или 2+ источников разных типов); 3 — единичный правдоподобный источник; 4-5 — сомнительно/неправдоподобно; 6 — нельзя оценить. Шкалы независимы: бывает A6 и E1.
 
@@ -320,7 +328,7 @@ type: research
 created: ${DATE}
 ai_drafted: true
 verified: false
-ai_model: "{модель, которая реально выполнила синтез: если тебя вызвали через мост — та, что указана в инструкции моста как сработавшая; иначе ${FALLBACK_MODEL}. Это же значение верни в поле analystModel}"
+ai_model: "${AI_MODEL}"
 tags: []
 query: "{исходный запрос; внутренние двойные кавычки замени на «»}"
 decision: "{решение пользователя или пусто}"
@@ -342,7 +350,7 @@ work_dir: "${WORK_DIR}"
 8. ## 📚 Контекст и находки — РАЗВЁРНУТАЯ фактура темы (это суть предмета, НЕ процесс исследования). Объём адаптивный: простая тема — компактно, сложная/незнакомая — подробно. Подсекции по необходимости:
    - **Ландшафт темы**: что это, как устроено, ключевые игроки/подходы/термины + механизмы «почему так».
    - **Факты и цифры**: конкретные числа, диапазоны, дословные цитаты источников (ПЕРЕВЕДЁННЫЕ на русский) — каждая с бейджем-ссылкой [pref·Badge](URL).
-   - **Проверенные факты**: claims из ledger с verdict=CONFIRMED — вынеси явно, с доказательством и бейджем достоверности; это подтверждённый фундамент выводов.
+   - **Проверенные факты**: claims из ledger с verdict=CONFIRMED — вынеси явно, с доказательством и бейджем достоверности; это подтверждённый фундамент выводов. Заголовок подсекции — РОВНО \`### Проверенные факты\` (канонический, по нему идёт постпроверка; НЕ сливай с «Факты и цифры»). Если confirmed-claims нет — подсекцию пропусти.
    - **Разногласия и нюансы**: где источники/сообщества расходятся, какие лагеря, что под вопросом — НЕ усреднять до ложного консенсуса.
    В секцию идёт только материал, прошедший кросс-валидацию; claims CHALLENGED/OUTDATED сюда НЕ попадают (они лишь строкой в callout методологии).
 9. ## Кому доверять в этой теме — таблица: Источник | Надёжность (A-F) | Почему.
@@ -372,15 +380,26 @@ const channelResults = (await parallel(SELECTED.map(key => () =>
 ))).filter(Boolean)
 
 const files = channelResults.map(r => r.fileWritten).filter(Boolean)
-const answeredFamilies = [...new Set(channelResults.map(r => FAMILY[r.channelKey]))]
+// Успех канала = non-LOW sourceQuality И непустые валидные citations (с URL).
+// Упавший канал возвращает LOW + пустые citations — в гейты и семьи не считается.
+const okChannel = r => r.sourceQuality !== 'LOW' && Array.isArray(r.citations) && r.citations.some(c => c && c.url)
+const okResults = channelResults.filter(okChannel)
+const channelStatus = SELECTED.map(k => {
+  const r = channelResults.find(x => x.channelKey === k)
+  return { channel: k, answered: !!r, ok: r ? okChannel(r) : false, sourceQuality: r ? r.sourceQuality : null, citations: r ? (r.citations || []).length : 0, snapshots: r ? (r.snapshots || []).length : 0, highCitations: r ? (r.citations || []).filter(c => c && c.relevance === 'HIGH').length : 0 }
+})
+const failedChannels = channelStatus.filter(s => !s.ok).map(s => s.channel)
+const answeredFamilies = [...new Set(okResults.map(r => FAMILY[r.channelKey]))]
 const selectedFamilies = [...new Set(SELECTED.map(k => FAMILY[k]))]
-log(`Каналов завершилось: ${channelResults.length}/${SELECTED.length}; семей источников: ${answeredFamilies.length}/${selectedFamilies.length}`)
+log(`Каналов успешно: ${okResults.length}/${SELECTED.length} (упали/деградировали: ${failedChannels.join(', ') || 'нет'}); семей источников: ${answeredFamilies.length}/${selectedFamilies.length}`)
+const snapshotless = channelStatus.filter(s => s.ok && s.highCitations > 0 && s.snapshots === 0).map(s => s.channel)
+if (snapshotless.length) log(`⚠ HIGH-цитаты БЕЗ снапшотов (нарушение schema v2): ${snapshotless.join(', ')}`)
 
 // Гейт: web/codexweb/grokweb — одна семья (открытый веб). Если выбрано ≥2 семей,
-// а ответила лишь одна — триангуляции не будет. Намеренный web-only (1 семья) — OK.
-if (channelResults.length < MIN_CHANNELS || (selectedFamilies.length >= 2 && answeredFamilies.length < 2)) {
-  log(`Недостаточно независимых источников (агентов: ${channelResults.length}, семей: ${answeredFamilies.length}) — отдаю что есть, без синтеза.`)
-  return { workDir: WORK_DIR, status: 'insufficient-sources', channelsAnswered: channelResults.length, answeredFamilies, files, channelResults, claimLedger: [] }
+// а успешна лишь одна — триангуляции не будет. Намеренный web-only (1 семья) — OK.
+if (okResults.length < MIN_CHANNELS || (selectedFamilies.length >= 2 && answeredFamilies.length < 2)) {
+  log(`Недостаточно независимых источников (успешных каналов: ${okResults.length}, семей: ${answeredFamilies.length}) — отдаю что есть, без синтеза.`)
+  return { workDir: WORK_DIR, status: 'insufficient-sources', channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [] }
 }
 
 // ═══ Phase 2 — Verify (per-claim live counter-search) ═══
@@ -395,35 +414,56 @@ const claimLedger = (await parallel(claims.map(c => () =>
     agent(verifyPrompt(c, i), w({ label: `verify:${c.id}#${i + 1}`, phase: 'Verify', schema: VERIFY_SCHEMA }))
   )).then(votes => {
     const v = votes.filter(Boolean)
-    const verdicts = v.map(x => x.verdict)
-    const verdict = verdicts.includes('OUTDATED') ? 'OUTDATED'
-      : verdicts.includes('CHALLENGED') ? 'CHALLENGED'
-        : (v.length ? 'CONFIRMED' : 'UNVERIFIED')
-    // подтверждённость claim — консервативно: худшая (бо́льшая) из оценок верификаторов
-    const credibility = v.length ? Math.max(...v.map(x => x.credibility || 6)) : 6
-    return { ...c, verdict, credibility, evidence: v.map(x => x.evidence), urls: v.map(x => x.url) }
+    // Schema v2: вектор голосов сохраняется (не схлопывать); UNCHECKED — операционная ось,
+    // вне доказательной. Приоритет только для фактических исходов: OUTDATED > CHALLENGED > CONFIRMED.
+    const all = v.map(x => x.verdict)
+    const real = v.filter(x => x.verdict !== 'UNCHECKED')
+    const verdicts = real.map(x => x.verdict)
+    const verdict = !v.length ? 'UNVERIFIED'
+      : !real.length ? 'UNCHECKED'
+        : verdicts.includes('OUTDATED') ? 'OUTDATED'
+          : verdicts.includes('CHALLENGED') ? 'CHALLENGED'
+            : 'CONFIRMED'
+    // подтверждённость — консервативно по СОДЕРЖАТЕЛЬНЫМ голосам (UNCHECKED не тянет в 6)
+    const credibility = real.length ? Math.max(...real.map(x => x.credibility || 6)) : 6
+    // voteCount: сколько содержательных голосов держат вердикт (CONFIRMED-1 = split, виден в отчёте)
+    return { ...c, verdict, votes: all, voteCount: real.length, credibility, evidence: v.map(x => x.evidence), urls: v.map(x => x.url) }
   })
 ))).filter(Boolean)
 
 const confirmed = claimLedger.filter(c => c.verdict === 'CONFIRMED').length
 const challenged = claimLedger.filter(c => c.verdict === 'CHALLENGED').length
 const outdated = claimLedger.filter(c => c.verdict === 'OUTDATED').length
-log(`Ledger: CONFIRMED=${confirmed}, CHALLENGED=${challenged}, OUTDATED=${outdated}`)
+const unchecked = claimLedger.filter(c => c.verdict === 'UNCHECKED').length
+const confirmedSplit = claimLedger.filter(c => c.verdict === 'CONFIRMED' && c.voteCount === 1).length
+log(`Ledger: CONFIRMED=${confirmed} (из них split/1-голос: ${confirmedSplit}), CHALLENGED=${challenged}, OUTDATED=${outdated}, UNCHECKED=${unchecked}`)
 
 // ═══ Phase 3 — Synthesize ═══
 phase('Synthesize')
 
-const ANALYST_FIELDS = '{reportPath,queryRu,mainConclusion,relatedCandidates,droppedClaims,gaps,analystModel}'
+const ANALYST_FIELDS = '{reportPath,queryRu,mainConclusion,relatedCandidates,droppedClaims,gaps}'
 const report = FABLE_BRIDGE
-  ? await agent(bridgePrompt('analyst', analystPrompt(files, claimLedger) + bridgeTail(ANALYST_FIELDS), 'Read,Write', ANALYST_FIELDS),
+  ? await agent(bridgePrompt('analyst', analystPrompt(files, claimLedger) + bridgeTail(ANALYST_FIELDS), 'Read,Write', ANALYST_FIELDS, ANALYST_SCHEMA),
       w({ label: 'analyst→fable', phase: 'Synthesize', schema: ANALYST_SCHEMA }))
   : await agent(analystPrompt(files, claimLedger), o({ label: 'analyst', phase: 'Synthesize', schema: ANALYST_SCHEMA }))
+
+// Честный ai_model: маркер "[bridge-fallback: opus]" в mainConclusion означает,
+// что синтез исполнил Opus, а не Fable — frontmatter отчёта сверяет Phase C скилла.
+const bridgeFallback = FABLE_BRIDGE && /\[bridge-fallback: opus\]/.test(String(report.mainConclusion || ''))
+const aiModelActual = FABLE_BRIDGE && !bridgeFallback ? AI_MODEL : 'claude-opus-5'
 
 return {
   workDir: WORK_DIR,
   status: 'ok',
+  // Версия схемы ledger/вердиктов: инкрементить при смене VERIFY_SCHEMA/агрегации —
+  // телеметрия сегментирует тренды confirmed по этой версии (сравнивать только внутри одной).
+  // v2 (2026-08-15, вердикт совета): UNCHECKED + вектор голосов + атомарный куратор + снапшоты.
+  ledgerSchemaVersion: 2,
   channelsAnswered: channelResults.length,
   channelsSelected: SELECTED,
+  channelStatus,
+  failedChannels,
+  aiModelActual,
   answeredFamilies,
   timing: channelResults.map(r => ({ channel: r.channelKey, startedAt: r.startedAt || null, finishedAt: r.finishedAt || null })),
   files,
@@ -435,10 +475,6 @@ return {
     mainConclusion: report.mainConclusion,
     droppedClaims: report.droppedClaims || [],
     gaps: report.gaps || [],
-    ledgerSummary: { confirmed, challenged, outdated },
-    // Модель, которая реально выполнила синтез. Мост пробует bridgeModel один раз
-    // и падает на fallback — frontmatter отчёта обязан совпадать с этим значением.
-    analystModel: report.analystModel || (FABLE_BRIDGE ? BRIDGE_MODEL : FALLBACK_MODEL),
-    bridgeModelRequested: FABLE_BRIDGE ? BRIDGE_MODEL : null,
+    ledgerSummary: { confirmed, confirmedSplit, challenged, outdated, unchecked },
   },
 }
