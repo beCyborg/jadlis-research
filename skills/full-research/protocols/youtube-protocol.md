@@ -7,10 +7,10 @@
 
 | Инструмент | Назначение | Цена |
 |---|---|---|
-| `mcp__plugin_jadlis-research_brave-search__brave_web_search` c `site:youtube.com` | Discovery видео — ОСНОВНОЙ | бесплатно (тариф) |
-| `mcp__plugin_jadlis-research_youtube__searchVideos` | Точный поиск по YouTube API | **100 units/вызов из квоты 10k/день — жёсткий кап ≤3 вызова/прогон** |
-| `mcp__plugin_jadlis-research_youtube__getVideoDetails` | Метаданные: просмотры, дата, канал | 1 unit — дёшево |
-| `{PLUGIN_ROOT}/scripts/yt-transcript.py` | ПОЛНЫЙ транскрипт видео | бесплатно (работает с домашнего IP; блокировки только у облачных ASN) |
+| `mcp__brave-search__brave_web_search` c `site:youtube.com` | Discovery видео — ОСНОВНОЙ | бесплатно (тариф) |
+| `mcp__youtube__searchVideos` | Точный поиск по YouTube API | **100 units/вызов из квоты 10k/день — жёсткий кап ≤3 вызова/прогон** |
+| `mcp__youtube__getVideoDetails` | Метаданные: просмотры, дата, канал | 1 unit — дёшево |
+| `{PLUGIN_ROOT}/scripts/yt-transcript.py` | ПОЛНЫЙ транскрипт видео (обёртка: transcript-api → yt-dlp) | бесплатно; работает и через VPN (сверено 2026-08-26) |
 
 ## Протокол
 
@@ -26,10 +26,11 @@ brave_web_search({ "query": "site:youtube.com <ТЕМА + review/vs/опыт>", 
 
 Только если Brave не дал релевантных видео (нишевая тема, свежак):
 ```json
-mcp__plugin_jadlis-research_youtube__searchVideos({ "query": "<ТЕМА>", "maxResults": 10 })
+mcp__youtube__searchVideos({ "query": "<ТЕМА>", "maxResults": 10 })
 ```
 **Гейт:** MCP youtube поднимается только при `YOUTUBE_API_KEY` (userConfig плагина).
 Ключа нет → Layer 2 целиком ПРОПУСКАЕТСЯ, канал работает на Brave + транскриптах.
+
 **Кап ≤3 вызова/прогон** (каждый = 100 units из дневной квоты 10k, общей для
 всех потребителей MCP). Метаданные кандидатов — `getVideoDetails` (дёшево):
 просмотры/дата/канал → отбор 3-5 видео на транскрипты.
@@ -37,12 +38,26 @@ mcp__plugin_jadlis-research_youtube__searchVideos({ "query": "<ТЕМА>", "maxR
 ### Layer 3 — Транскрипты (3-5 видео, Bash)
 
 ```bash
-{PLUGIN_ROOT}/scripts/yt-transcript.py <video_id>
+python3 {PLUGIN_ROOT}/scripts/yt-transcript.py <video_id>            # дефолт языков: en,ru,pl
+python3 {PLUGIN_ROOT}/scripts/yt-transcript.py <video_id> --lang ru,en
 ```
-JSON в stdout: `status`, `text` (полный текст), `language`, **`is_generated`**,
-`duration_minutes`. Manual-сабы (`is_generated: false`) приоритетнее auto.
-Ошибка RequestBlocked/IpBlocked — на домашнем IP редкость; фоллбэк: hosted
-Supadata ($5/300) — НЕ первая ступень, только при блоке.
+JSON в stdout: `status`, `source` (`youtube-transcript-api` | `yt-dlp`), `text` (полный
+текст), `language`, **`is_generated`** (честный: manual vs auto), `duration_minutes`,
+`word_count`, + метаданные `title`/`channel`/`upload_date`/`view_count` (при yt-dlp).
+Manual-сабы (`is_generated: false`) приоритетнее auto; auto берётся трек `*-orig`
+(язык оригинала, не перевод). yt-dlp-путь ретраит 429 на timedtext-эндпоинте и
+перебирает форматы json3→srv3→vtt. ЛИМИТ ОБЪЁМА: держи ≤10-12 транскриптов за проход —
+больше подряд ловит `HTTP 429 Too Many Requests` на ВЕСЬ IP (и yt-dlp, и API), снимается
+кулдауном несколько минут (боевой прогон 2026-08-26: 11/12 ок, дальше IP залимичен).
+Внутри: сначала `get_transcript.py` плагина youtube-tldr (youtube-transcript-api);
+при `IpBlocked` — yt-dlp с загрузкой ОДНОГО выбранного трека. Сверено 2026-08-26:
+youtube-transcript-api даёт IpBlocked и через VPN, и с домашнего IP, а yt-dlp качает
+субтитры в обоих случаях; встроенный yt-dlp-фоллбэк плагина не срабатывает
+(`--sub-langs all` + timeout 30 с). Плагин НЕ править (autoUpdate сносит правки).
+Окно массового IpBlocked (все видео подряд `blocked`) → `YT_TRANSCRIPT_FORCE_YTDLP=1` перед
+командой — сразу yt-dlp, минус один холостой запрос на видео.
+Оба пути упали (`error_type: blocked_or_network`) → фоллбэк: hosted Supadata
+($5/300) — только по подтверждению.
 
 ### Layer 4 — Контраргументы (1-2 вызова)
 
@@ -68,7 +83,7 @@ Brave: `site:youtube.com <ТЕМА> criticism/problems/honest review` → 1-2
 
 ## Фоллбэк
 
-`yt-transcript.py` блокирован → Supadata / youtube-transcript.io (платно, по
-подтверждению) → цитируй по описанию видео + сниппетам с пометкой
+`yt-transcript.py` вернул `blocked_or_network` (оба пути) → Supadata /
+youtube-transcript.io (платно, по подтверждению) → цитируй по описанию видео + сниппетам с пометкой
 «(реконструировано, транскрипт недоступен)». MCP youtube целиком мёртв →
 канал работает на Brave + транскриптах (searchVideos пропускается).

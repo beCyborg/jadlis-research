@@ -205,6 +205,8 @@ CLI-обёртка с троттлингом: `python3 {PLUGIN_ROOT}/scripts/red
    `https://api.pullpush.io/reddit/search/submission/?q=<query>&size=100` (и `.../search/comment/`).
    Лимиты: soft **15 rpm** / hard **30 rpm** (~1000/час) → sleep ~4 с между вызовами, 1 воркер.
    Best-effort: волонтёрский, без SLA, гэпы в данных после 2023 — Arctic Shift первичнее, где хватает.
+   2026-08-26: HTTP 429 на первый же запрос с любого IP (и VPN, и домашний) — при 429 НЕ ретраить,
+   сразу Arctic Shift (`sub`/`comments`) или MCP.
 3. **Бэкфилл за пределами 1000-item cap / глубокая история** → Arctic Shift, при массовых
    объёмах — bulk-dumps Watchful1 (github.com/Watchful1/PushshiftDumps, ~4 ТБ).
 
@@ -216,7 +218,7 @@ CLI-обёртка с троттлингом: `python3 {PLUGIN_ROOT}/scripts/red
 
 При сбое Reddit MCP и бэкендов — `mcp__plugin_jadlis-research_brave-search__brave_web_search`:
 ```json
-{ "query": "site:reddit.com <ЗАПРОС>", "count": 10, "result_filter": "web,discussions" }
+{ "query": "site:reddit.com <ЗАПРОС>", "count": 10, "result_filter": ["web", "discussions"] }
 ```
 
 Вызывай инструмент напрямую. ToolSearch ТОЛЬКО при InputValidationError.
