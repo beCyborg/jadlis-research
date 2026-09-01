@@ -405,8 +405,19 @@ if (okResults.length < MIN_CHANNELS || (selectedFamilies.length >= 2 && answered
 // ═══ Phase 2 — Verify (per-claim live counter-search) ═══
 phase('Verify')
 
-const curated = await agent(curatorPrompt(files), o({ label: 'curator', phase: 'Verify', schema: CURATOR_SCHEMA }))
-const claims = (curated.claims || []).slice(0, MAX_CLAIMS)
+// Устойчивость к падению curator (обрыв сети / лимит квоты / пустой ответ):
+// без гейта null.claims рушил ВЕСЬ прогон уже после успешного fan-out (инцидент 2026-09-01).
+// Один ретрай, затем деградация: синтез идёт с пустым ledger, отчёт всё равно пишется.
+let curated = await agent(curatorPrompt(files), o({ label: 'curator', phase: 'Verify', schema: CURATOR_SCHEMA }))
+if (!curated || !Array.isArray(curated.claims) || !curated.claims.length) {
+  log('Curator не вернул claims — один повтор.')
+  curated = await agent(curatorPrompt(files), o({ label: 'curator-retry', phase: 'Verify', schema: CURATOR_SCHEMA }))
+}
+if (!curated || !Array.isArray(curated.claims)) {
+  log('⚠ Curator недоступен после повтора — иду в синтез с ПУСТЫМ ledger (claims не верифицированы).')
+  curated = { claims: [] }
+}
+const claims = curated.claims.slice(0, MAX_CLAIMS)
 log(`Куратор выделил ${claims.length} ключевых claims на live-проверку.`)
 
 const claimLedger = (await parallel(claims.map(c => () =>
