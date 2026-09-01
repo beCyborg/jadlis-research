@@ -1,10 +1,10 @@
 export const meta = {
   name: 'full-research-core',
-  description: 'Ядро full-research: N канальных исследователей → per-claim верификация с brave counter-search (фильтрация) → analyst пишет отчёт в workDir. Vault-контракт — в скилле.',
+  description: 'Ядро full-research: N канальных исследователей → curator (evidence-префиксы) → urlhealth → per-claim верификация (2 линзы) → эскалация расхождений в Codex → analyst пишет отчёт в workDir. Vault-контракт — в скилле.',
   phases: [
-    { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно' },
-    { title: 'Verify', detail: 'curator (Opus 5) выделяет атомарные claims → per-claim verifiers: линза-опровержение (Brave) + кросс-тип линза (сообщества/первоисточники) → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED (schema v2)' },
-    { title: 'Synthesize', detail: 'analyst (Fable 5) пишет отчёт (verified:false), фильтрует непрошедшие claims, дедупит web-движки' },
+    { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты' },
+    { title: 'Verify', detail: 'curator (Opus 5) выделяет claims с evidence-префиксами → urlhealth (здоровье URL/цитат) → per-claim verifiers: линза-опровержение (Brave) + кросс-тип линза → расхождение голосов → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED (schema v3)' },
+    { title: 'Synthesize', detail: 'analyst (Fable 5.1 через мост) пишет отчёт (verified:false): три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
 
@@ -22,8 +22,10 @@ const PLUGIN_ROOT = A.pluginRoot || '.'
 const VAULT_PATH = A.vaultPath || ''
 const SUBSTACK_HANDLES = Array.isArray(A.substackHandles) ? A.substackHandles : []
 const VERIFIERS = 2
-const MAX_CLAIMS = 8
-const MIN_CHANNELS = 2
+// schema v3: curator эмитит до CLAIM_HARD_CAP claims (сортировка loadBearing desc, strength desc).
+const CLAIM_HARD_CAP = 16
+// Кап эскалаций в Codex на прогон (расхождения голосов сверх капа → исключение по одному голосу + флаг 'cap').
+const ESCALATION_CAP = Number.isFinite(A.escalationCap) ? A.escalationCap : 8
 // Воркер: пиннинг Opus 5 + effort xhigh через субагента researcher-opus-xhigh.
 // Реестр агентов кэшируется на старте сессии — если субагент создан в текущей сессии,
 // оркестратор может передать workerOpts: { model: 'opus' } как фоллбэк.
@@ -37,7 +39,7 @@ const w = extra => Object.assign({}, WORKER_OPTS, extra)
 // мапит субагентов (opts.model, Agent-тул, agentType-frontmatter) в Opus 5 —
 // это осознанный роутинг (Fable планирует, Opus исполняет), а НЕ закрытость
 // Fable для субагентов (опровергнуто 2026-07-05). Отдельный headless-процесс
-// `claude -p --model claude-fable-5` ремапу не подчиняется (проверено: exit 0, ~7 c старт).
+// `claude -p --model claude-fable-5-1` ремапу не подчиняется (проверено: exit 0, ~7 c старт).
 // Поэтому дефолт для analyst — FABLE-МОСТ: лёгкий воркер записывает ролевой промпт
 // в файл и исполняет его вложенным headless Fable. Отключение: args.fableBridge=false
 // → analyst тоже идёт через orchestrator-fable-xhigh (Opus 5).
@@ -54,14 +56,14 @@ function bridgePrompt(role, rolePrompt, allowedTools, fieldsHint, schemaObj) {
   const derived = JSON.parse(JSON.stringify(schemaObj), (k, v) =>
     (k === 'minLength' || k === 'minimum' || k === 'maximum') ? undefined : v)
   delete derived.$schema; delete derived.$id; delete derived.title; delete derived.description
-  return `Ты — технический МОСТ к модели Fable 5. Сам ролевую работу НЕ делай (кроме шага «Деградация»). Ровно четыре шага:
+  return `Ты — технический МОСТ к модели Fable 5.1. Сам ролевую работу НЕ делай (кроме шага «Деградация»). Ровно четыре шага:
 
 1. Через Write запиши в файл ${pf} ДОСЛОВНО весь текст между маркерами <<<ROLE_PROMPT и ROLE_PROMPT>>> (маркеры не включать, текст не менять и не сокращать).
 
 2. Через Write запиши в файл ${sf} ДОСЛОВНО JSON между маркерами <<<SCHEMA и SCHEMA>>>.
 
 3. ОДИН Bash-вызов (параметр timeout: 600000; --settings глушит хуки, < /dev/null обязателен):
-cat "${pf}" | claude -p --model claude-fable-5 --effort high --allowedTools "${allowedTools}" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}' --json-schema "$(cat "${sf}")" --output-format json > "${of}" 2>"${WORK_DIR}/_fable-${role}.err" < /dev/null; echo "EXIT=$?"
+cat "${pf}" | claude -p --model claude-fable-5-1 --effort high --allowedTools "${allowedTools}" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}' --json-schema "$(cat "${sf}")" --output-format json > "${of}" 2>"${WORK_DIR}/_fable-${role}.err" < /dev/null; echo "EXIT=$?"
 
 4. Прочитай ${of} (Read): возьми поле .structured_output — это готовый объект с полями ${fieldsHint}; верни его по своей схеме БЕЗ изменений. Если ключа .structured_output нет — возьми JSON-блок в конце .result.
 
@@ -96,6 +98,7 @@ const ALL_CHANNELS = {
 // Семья = независимый ТИП источника. web/codexweb/grokweb — три движка над одним
 // открытым вебом: их совпадение НЕ является независимой триангуляцией.
 const FAMILY = { web: 'web', codexweb: 'web', grokweb: 'web', yandex: 'web', reddit: 'reddit', twitter: 'twitter', hackernews: 'hn', substack: 'substack', youtube: 'youtube', telegram: 'telegram' }
+const COMMUNITY = ['reddit', 'twitter', 'hackernews', 'substack', 'youtube', 'telegram']
 const SELECTED = (Array.isArray(A.channels) && A.channels.length)
   ? A.channels.filter(c => ALL_CHANNELS[c])
   : ['web', 'codexweb', 'grokweb', 'reddit', 'twitter', 'hackernews', 'substack']
@@ -116,11 +119,12 @@ const CHANNEL_SCHEMA = {
           prefix: { type: 'string', description: 'напр. [w1], [r3]' },
           url: { type: 'string' },
           relevance: { type: 'string', enum: ['HIGH', 'MEDIUM', 'LOW'] },
-          context: { type: 'string', description: 'цитата/пересказ' },
+          context: { type: 'string', description: 'пересказ на русском (что говорит источник)' },
+          quotes: { type: 'array', items: { type: 'string' }, description: 'evidence-пакет (schema v3): 1-3 ДОСЛОВНЫХ спана источника ≤400 симв. каждый, НА ЯЗЫКЕ ОРИГИНАЛА (не переводить); пустой массив = дословного текста нет (сниппет/реконструкция)' },
           reliability: { type: 'string', enum: ['A', 'B', 'C', 'D', 'E', 'F'], description: 'надёжность ИСТОЧНИКА по Admiralty (не правдоподобие информации)' },
           reliabilityWhy: { type: 'string', description: 'одна строка: тип источника / экспертиза автора / свежесть / конфликт интересов' },
         },
-        required: ['prefix', 'url', 'relevance', 'context', 'reliability', 'reliabilityWhy'],
+        required: ['prefix', 'url', 'relevance', 'context', 'quotes', 'reliability', 'reliabilityWhy'],
       },
     },
     counterarguments: { type: 'array', items: { type: 'string' } },
@@ -139,21 +143,50 @@ const CURATOR_SCHEMA = {
   properties: {
     claims: {
       type: 'array',
-      description: 'самые сильные cross-channel claims (до 8) для live-верификации',
+      description: `самые сильные cross-channel claims (до ${CLAIM_HARD_CAP}) для live-верификации`,
       items: {
         type: 'object',
         additionalProperties: false,
         properties: {
           id: { type: 'string' },
-          statement: { type: 'string', description: 'проверяемое фактическое утверждение' },
-          channels: { type: 'array', items: { type: 'string' }, description: 'какие каналы поддерживают' },
+          statement: { type: 'string', description: 'проверяемое утверждение (атомарное)' },
+          channels: { type: 'array', items: { type: 'string' }, description: 'какие каналы поддерживают (ключи каналов)' },
           strength: { type: 'string', enum: ['STRONG', 'MODERATE', 'WEAK'] },
+          loadBearing: { type: 'boolean', description: 'true — на этом claim держится вывод/совет отчёта; false — фоновый факт' },
+          claimType: { type: 'string', enum: ['factual', 'experiential'], description: 'factual — проверяемый факт о мире (цифра, дата, свойство продукта, событие); experiential — обобщение опыта людей («пользователи жалуются на X», «на практике Y работает так»)' },
+          evidencePrefixes: { type: 'array', items: { type: 'string' }, description: 'ТОЛЬКО префиксы цитат из файлов каналов, напр. ["w1","r3","hn2"] — без текста; спаны подставит оркестратор из файлов каналов' },
         },
-        required: ['id', 'statement', 'channels', 'strength'],
+        required: ['id', 'statement', 'channels', 'strength', 'loadBearing', 'claimType', 'evidencePrefixes'],
       },
     },
   },
   required: ['claims'],
+}
+
+const URLHEALTH_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    status: { type: 'string', enum: ['ok', 'partial', 'failed'] },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          prefix: { type: 'string' },
+          url: { type: 'string' },
+          urlStatus: { type: 'string', enum: ['ok', 'blocked', 'dead', 'skipped'] },
+          quoteStatus: { type: 'string', enum: ['matched', 'notFound', 'notChecked'] },
+          fabricationSuspect: { type: 'boolean' },
+        },
+        required: ['prefix', 'url', 'urlStatus', 'quoteStatus', 'fabricationSuspect'],
+      },
+    },
+    elapsedSec: { type: 'number' },
+    note: { type: 'string' },
+  },
+  required: ['status', 'items', 'elapsedSec', 'note'],
 }
 
 const VERIFY_SCHEMA = {
@@ -161,12 +194,28 @@ const VERIFY_SCHEMA = {
   additionalProperties: false,
   properties: {
     claimId: { type: 'string' },
-    verdict: { type: 'string', enum: ['CONFIRMED', 'CHALLENGED', 'OUTDATED', 'UNCHECKED'], description: 'UNCHECKED — ОПЕРАЦИОННЫЙ вердикт: не смог проверить (пейволл/сбой инструмента/источник недоступен/бюджет вызовов исчерпан). НЕ доказательный: сбой доступа ≠ опровержение' },
+    verdict: { type: 'string', enum: ['CONFIRMED', 'CHALLENGED', 'OUTDATED', 'UNCHECKED'], description: 'UNCHECKED — ОПЕРАЦИОННЫЙ вердикт: не смог проверить (пейволл/сбой инструмента/источник недоступен/бюджет вызовов исчерпан/подтверждения не нашёл). НЕ доказательный: отсутствие подтверждения ≠ опровержение' },
     credibility: { type: 'integer', enum: [1, 2, 3, 4, 5, 6], description: 'подтверждённость claim (Admiralty): 1 подтверждён независимо, 2 вероятно верен, 3 возможно верен, 4 сомнителен, 5 неправдоподобен, 6 нельзя оценить (для UNCHECKED всегда 6)' },
     evidence: { type: 'string', description: 'что нашёл counter-search' },
     url: { type: 'string' },
+    numberVerbatim: { type: ['string', 'null'], description: 'для числовых claims — ДОСЛОВНО число/дата/версия из найденного источника (как написано, без нормализации); null — claim не числовой или число не найдено' },
   },
-  required: ['claimId', 'verdict', 'credibility', 'evidence', 'url'],
+  required: ['claimId', 'verdict', 'credibility', 'evidence', 'url', 'numberVerbatim'],
+}
+
+const ESCALATION_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    claimId: { type: 'string' },
+    status: { type: 'string', enum: ['ok', 'no-binary', 'quota', 'timeout', 'invalid-output', 'no-live-search'], description: 'ok — Codex ответил и делал живой поиск; остальное — причина, по которой третий голос не состоялся' },
+    confirmsExclusion: { type: 'boolean', description: 'true — Codex подтверждает, что claim следует исключить (опровергнут/устарел); false — исключение не подтверждено' },
+    verdictSuggested: { type: 'string', enum: ['CONFIRMED', 'CHALLENGED', 'OUTDATED', 'UNCHECKED'] },
+    reasoning: { type: 'string' },
+    urls: { type: 'array', items: { type: 'string' } },
+    liveSearchEvents: { type: 'integer', description: 'сколько событий web_search в JSONL-выводе codex' },
+  },
+  required: ['claimId', 'status', 'confirmsExclusion', 'verdictSuggested', 'reasoning', 'urls', 'liveSearchEvents'],
 }
 
 const ANALYST_SCHEMA = {
@@ -178,9 +227,10 @@ const ANALYST_SCHEMA = {
     mainConclusion: { type: 'string' },
     relatedCandidates: { type: 'array', items: { type: 'string' }, description: 'ключевые слова/темы для obsidian-поиска связанных заметок (выполнит скилл)' },
     droppedClaims: { type: 'array', items: { type: 'string' }, description: 'claims, отфильтрованные как CHALLENGED/OUTDATED' },
+    disputedClaims: { type: 'array', items: { type: 'string' }, description: 'claims DISPUTED — вынесены в «Спорные факты», в выводы не вошли' },
     gaps: { type: 'array', items: { type: 'string' }, description: 'что не покрыто исследованием (для frontmatter и callout методологии)' },
   },
-  required: ['reportPath', 'queryRu', 'mainConclusion', 'relatedCandidates', 'droppedClaims', 'gaps'],
+  required: ['reportPath', 'queryRu', 'mainConclusion', 'relatedCandidates', 'droppedClaims', 'disputedClaims', 'gaps'],
 }
 
 const TOOL_NOTE = 'ВАЖНО: НЕ используй встроенные WebSearch/WebFetch (забанены). Нужные MCP-инструменты загружай через ToolSearch перед вызовом. Brave (тариф Search): 50 req/s — параллельные вызовы OK. Firecrawl scrape: 1 req/s.'
@@ -216,8 +266,9 @@ ${TOOL_NOTE}
    E — заинтересованный источник: маркетинг, продажи, аффилированность;
    F — нельзя оценить.
    В reliabilityWhy — одна строка: тип источника / автор и его экспертиза / дата / bias-сигналы.
-4. НЕ спавни sub-agents — делай всё сам. Все выходные данные на РУССКОМ.
-5. СНАПШОТЫ (schema v2, ОБЯЗАТЕЛЬНЫЙ шаг — аудит 2026-08-15 показал 0 снапшотов за все прогоны): для 3-5 САМЫХ ВАЖНЫХ источников (relevance HIGH) сохрани полный извлечённый текст страницы в ${WORK_DIR}/snapshots/${c.prefix}<N>.md (Write; шапка: URL + дата + твой префикс цитаты). Это замороженная доказательная база для верификаторов — они читают один и тот же текст, а не разные версии страницы. ПРАВИЛО: цитата с relevance HIGH БЕЗ снапшота недопустима — не смог достать полный текст (пейволл/CAPTCHA/challenge) → снапшот не пиши, но relevance снизь до MEDIUM и пометь «[no-snapshot: blocked]»; пустой или обрезанный текст — НЕ контент. Пути записанных файлов верни в поле snapshots[] схемы (пустой массив = честное «ни одного»).
+4. НЕ спавни sub-agents — делай всё сам. Все выходные данные на РУССКОМ — КРОМЕ поля quotes (см. п. 6).
+5. СНАПШОТЫ (schema v2, ОБЯЗАТЕЛЬНЫЙ шаг — аудит 2026-08-15 показал 0 снапшотов за все прогоны): для 3-5 САМЫХ ВАЖНЫХ источников (relevance HIGH) сохрани полный извлечённый текст страницы в ${WORK_DIR}/snapshots/${c.prefix}<N>.md (Write; шапка: URL + дата + твой префикс цитаты). Это замороженная доказательная база для верификаторов — они читают один и тот же текст, а не разные версии страницы. ПРАВИЛО: цитата с relevance HIGH БЕЗ снапшота недопустима — не смог достать полный текст (пейволл/CAPTCHA/challenge) → снапшот не пиши, но relevance снизь до MEDIUM и пометь «[no-snapshot: blocked]»; пустой или обрезанный текст — НЕ контент. Пути записанных файлов верни в поле snapshots[] схемы (пустой массив = честное «ни одного»). Оркестратор энфорсит правило кодом: у канала с HIGH-цитатами и нулём снапшотов все HIGH понижаются до MEDIUM.
+6. EVIDENCE-ПАКЕТ (schema v3): у каждой цитаты поле quotes — 1-3 ДОСЛОВНЫХ фрагмента текста источника (≤400 симв. каждый), НА ЯЗЫКЕ ОРИГИНАЛА — это исключение из правила «всё на русском»: спаны сверяются со снапшотом и первоисточником символ в символ, перевод их обесценивает. Пересказ на русском — в context. Дословного текста нет (сниппет поисковика, реконструкция, недоступная страница) → quotes: [] — не сочиняй.
 
 ТЕЛЕМЕТРИЯ (обязательно):
 ДО первого поиска выполни Bash \`date '+%Y-%m-%d %H:%M:%S'\` → это startedAt; ПОСЛЕ Write ещё раз → finishedAt. Обе строки запиши в шапку файла (Started:/Finished:) и верни в схеме (startedAt/finishedAt).
@@ -229,12 +280,13 @@ Started: {startedAt} / Finished: {finishedAt}
 ## Ключевые находки
 ## Цитаты
 ### [${c.prefix}1] {описание}
-**Источник:** {URL} / **Контекст:** {цитата} / **Релевантность:** HIGH/MEDIUM/LOW / **Admiralty:** {A-F} — {reliabilityWhy}
+**Источник:** {URL} / **Контекст:** {пересказ на русском} / **Релевантность:** HIGH/MEDIUM/LOW / **Admiralty:** {A-F} — {reliabilityWhy}
+**Quotes:** «{дословный спан 1}» · «{дословный спан 2}» (на языке оригинала; пусто — «—»)
 ## Контраргументы (найдены на ${c.source})
 ## Оценка источников
 (для каждой цитаты: Evidence type / Author / Date / Bias signals / Cites original)
 
-После записи верни структуру (schema): source="${c.source}", findings[], citations[{prefix,url,relevance,context,reliability,reliabilityWhy}], counterarguments[], sourceQuality, fileWritten="${WORK_DIR}/${c.file}".
+После записи верни структуру (schema): source="${c.source}", findings[], citations[{prefix,url,relevance,context,quotes,reliability,reliabilityWhy}], counterarguments[], sourceQuality, fileWritten="${WORK_DIR}/${c.file}".
 Если канал недоступен после фоллбэков — верни sourceQuality="LOW", пустые citations и отметь это в findings.`
 }
 
@@ -243,62 +295,150 @@ function curatorPrompt(files) {
   return `Ты — куратор кросс-канальной верификации. Прочитай результаты каналов и выдели самые СИЛЬНЫЕ claims для live-проверки.
 
 ЗАПРОС: ${QUERY}
+${DECISION ? `РЕШЕНИЕ ПОЛЬЗОВАТЕЛЯ: ${DECISION}` : ''}
 
 Файлы каналов (Read каждый):
 ${files.map(f => `- ${f}`).join('\n')}
 
 Задача:
 1. Прочитай все файлы.
-2. Выдели до ${MAX_CLAIMS} самых важных фактических claims (приоритет тем, что повторяются в разных каналах ИЛИ являются load-bearing для выводов).
-3. Для каждого: statement (проверяемое утверждение), channels (кто поддерживает — используй РОВНО ключи каналов: web, codexweb, grokweb, yandex, reddit, twitter, hackernews, substack; НЕ имена файлов), strength.
-   СЕМЬИ ИСТОЧНИКОВ: web/codexweb/grokweb/yandex — ДВИЖКИ над одним открытым вебом (Яндекс — другой индекс, но тот же веб) = ОДНА семья 'web'; reddit, twitter, hackernews, substack — отдельные семьи. strength=STRONG ТОЛЬКО при поддержке 2+ РАЗНЫХ семей (например web+reddit); совпадение только web-движков между собой (w/cx/gw/y) — НЕ независимость, максимум MODERATE.
+2. Выдели до ${CLAIM_HARD_CAP} самых важных claims (приоритет тем, что повторяются в разных каналах ИЛИ являются load-bearing для выводов под решение). Оркестратор оставит первые ${CLAIM_HARD_CAP} по порядку «loadBearing → strength», поэтому сначала выпиши несущие claims.
+3. Для каждого: statement (проверяемое утверждение), channels (кто поддерживает — используй РОВНО ключи каналов: web, codexweb, grokweb, yandex, reddit, twitter, hackernews, substack, youtube, telegram; НЕ имена файлов), strength, loadBearing, claimType, evidencePrefixes.
+   СЕМЬИ ИСТОЧНИКОВ: web/codexweb/grokweb/yandex — ДВИЖКИ над одним открытым вебом (Яндекс — другой индекс, но тот же веб) = ОДНА семья 'web'; reddit, twitter, hackernews, substack, youtube, telegram — отдельные семьи. strength=STRONG ТОЛЬКО при поддержке 2+ РАЗНЫХ семей (например web+reddit); совпадение только web-движков между собой (w/cx/gw/y) — НЕ независимость, максимум MODERATE.
+   claimType: factual — проверяемый факт о мире (цифра, дата, версия, свойство продукта, событие, цена); experiential — обобщение живого опыта людей («на практике X ломается при Y», «пользователи массово жалуются на Z»). Для experiential-claims первое лицо с конкретикой из сообществ — полноценное свидетельство, не «мнение».
+   evidencePrefixes: ТОЛЬКО префиксы цитат из файлов каналов (например ["w1","r3","hn2"] — БЕЗ скобок и БЕЗ текста). Текст спанов ты НЕ возвращаешь — оркестратор подставит quotes из файлов каналов по префиксам. Неизвестный префикс будет отброшен; claim без единого реального префикса помечается evidenceless и не может быть STRONG. Минимум один префикс на claim, лучше 2-4 из разных каналов.
 
-4. АТОМАРНОСТЬ (schema v2): каждый statement — ОДНО проверяемое фактическое ядро БЕЗ суперлативной/оценочной обёртки. Запрещены в statement: «самый/лучший/#1», «консенсус», «единодушны», «библия/канон», рейтинги-с-чужих-слов. Значимые квалификаторы (даты, версии, условия применимости) СОХРАНЯЙ — атомарность не значит обрубленность. Составное утверждение расщепи на отдельные claims либо возьми только load-bearing ядро.
+4. АТОМАРНОСТЬ (schema v2): каждый statement — ОДНО проверяемое фактическое ядро БЕЗ суперлативной/оценочной обёртки. Запрещены в statement: «самый/лучший/#1», «консенсус», «единодушны», «библия/канон», рейтинги-с-чужих-слов. Значимые квалификаторы (даты, версии, условия применимости) СОХРАНЯЙ — атомарность не значит обрубленность. Составное утверждение расщепи на отдельные claims либо возьми только load-bearing ядро. Числа/даты/версии в statement пиши так, как в источнике (не округляй).
 
-Каждый claim — конкретное фактическое утверждение, которое можно проверить веб-поиском. Не мнение-вкусовщина. statement пиши НА РУССКОМ (имена собственные/термины — как в источнике). Верни строго по схеме.`
+Каждый claim — конкретное утверждение, которое можно проверить веб-поиском или по сообществам. Не мнение-вкусовщина. statement пиши НА РУССКОМ (имена собственные/термины/числа — как в источнике). Верни строго по схеме.`
+}
+
+// ── urlhealth (A2): один лёгкий агент запускает скрипт по evidence-URL выделенных claims ──
+function urlhealthPrompt(items) {
+  const inFile = `${WORK_DIR}/_urlhealth-in.json`
+  const outFile = `${WORK_DIR}/_urlhealth.json`
+  return `Ты — технический исполнитель шага urlhealth. Ролевой работы нет — три шага, без рассуждений:
+
+1. Через Write запиши в ${inFile} ДОСЛОВНО JSON между маркерами <<<IN и IN>>>.
+2. ОДИН Bash-вызов (timeout: 180000):
+python3 "${PLUGIN_ROOT}/scripts/urlhealth.py" --in "${inFile}" --workdir "${WORK_DIR}" --deadline 90 --per-url 10 > "${outFile}" 2>"${WORK_DIR}/_urlhealth.err"; echo "EXIT=$?"
+3. Прочитай ${outFile} (Read) и верни по схеме: status ("ok" если partial=false и нет поля error; "partial" если partial=true; "failed" если файл пуст/не JSON/есть error), items — массив {prefix,url,urlStatus,quoteStatus,fabricationSuspect} из .items (urlStatus не из набора ok|blocked|dead → "skipped"; quoteStatus не из набора → "notChecked"; fabricationSuspect отсутствует → false), elapsedSec из .elapsedSec (нет → 0), note — краткая строка (summary счётчиков или текст ошибки).
+Файл не появился или не разобрался → status="failed", items=[], note с причиной. НЕ чини скрипт, НЕ повторяй запросы вручную, НЕ спавни sub-agents.
+
+<<<IN
+${JSON.stringify(items)}
+IN>>>`
 }
 
 // ── Промпт верификатора (per-claim; две разные линзы: опровержение через Brave
 //    и кросс-типовая проверка через контр-канал ДРУГОЙ семьи источников) ──
+const BRAVE_TOOLS = 'mcp__plugin_jadlis-research_brave-search__brave_web_search,mcp__plugin_jadlis-research_brave-search__brave_llm_context'
+const HN_CMD = `\`${PLUGIN_ROOT}/scripts/hn-fetch.sh search "<запрос>" --tags story --limit 10\` и/или \`--tags comment\` (полные тексты комментариев прямо в выдаче; exit 3 = поиск HN недоступен → возьми Reddit)`
+const REDDIT_CMD = `ToolSearch "select:mcp__plugin_jadlis-research_reddit__execute_operation" → execute_operation(operation_id="discover_subreddits", parameters={query,limit:5,min_confidence:0.4}) → execute_operation(operation_id="search_subreddit", parameters={subreddit_name,query,sort:"relevance",time_filter:"all"}) — НЕ вызывай discover_operations/get_operation_schema`
+
+function evidenceBlock(claim) {
+  const ev = claim.evidence || []
+  if (!ev.length) return 'EVIDENCE: куратор не привязал ни одной реальной цитаты (evidenceless) — проверяй claim с нуля.'
+  return `EVIDENCE (дословные спаны источников каналов — проверяй ИХ, а не пересказ):
+${ev.map(e => `- [${e.prefix}] ${e.url}${e.snapshotPath ? ` (снапшот: ${e.snapshotPath})` : ''}${e.health ? ` [url:${e.health.urlStatus}, quote:${e.health.quoteStatus}${e.health.fabricationSuspect ? ', FABRICATION-SUSPECT' : ''}]` : ''}
+${(e.quotes || []).length ? e.quotes.map(q => `  «${q}»`).join('\n') : '  (дословного спана нет — только пересказ: ' + String(e.context || '').slice(0, 300) + ')'}`).join('\n')}
+Пометка FABRICATION-SUSPECT / url:dead / quote:notFound = спан не подтверждён снапшотом или источник мёртв — считай такой спан НЕ доказательством; url:blocked / quote:notChecked — нейтрально (доступ ограничен, не вина источника).`
+}
+
 function verifyPrompt(claim, idx) {
-  const communityOrigin = (claim.channels || []).some(ch => ['reddit', 'twitter', 'hackernews', 'substack'].includes(ch))
-  const webOrigin = (claim.channels || []).some(ch => FAMILY[ch] === 'web')
+  const chans = claim.channels || []
+  const communityOrigin = chans.some(ch => COMMUNITY.includes(ch))
+  const webOrigin = chans.some(ch => FAMILY[ch] === 'web')
+  const experiential = claim.claimType === 'experiential'
+  // Кросс-community: другая семья сообществ, чем каналы-источники claim.
+  const fromHN = chans.includes('hackernews')
+  const crossCommunity = fromHN
+    ? `Reddit (другая семья, чем HN): ${REDDIT_CMD}`
+    : `HackerNews (Bash, без ToolSearch): ${HN_CMD}${chans.includes('reddit') ? '' : `; альтернатива — Reddit: ${REDDIT_CMD}`}`
   const lens = idx === 0
     ? `ЛИНЗА «ОПРОВЕРЖЕНИЕ» (Brave): ищи ОПРОВЕРГАЮЩИЕ доказательства — контраргументы, противоречия, разоблачения. Запросы вида "<тема> problems", "<claim> debunked", "<тема> criticism".
-ИНСТРУМЕНТЫ: ToolSearch "select:mcp__plugin_jadlis-research_brave-search__brave_web_search,mcp__plugin_jadlis-research_brave-search__brave_llm_context" → 1-2 запроса (llm_context для содержимого страниц, web_search для охвата; параллельные вызовы OK).`
+ИНСТРУМЕНТЫ: ToolSearch "select:${BRAVE_TOOLS}" → 1-2 запроса (llm_context для содержимого страниц, web_search для охвата; параллельные вызовы OK).`
     : `ЛИНЗА «КРОСС-ТИП» — подтверди или опровергни claim источником ДРУГОГО ТИПА (другой семьи), чем каналы-источники claim:
 ${webOrigin && !communityOrigin
-  ? `- Claim пришёл из web-движков → проверь по СООБЩЕСТВАМ практиков. Предпочтительно HackerNews (Bash, без ToolSearch): \`${PLUGIN_ROOT}/scripts/hn-fetch.sh search "<запрос>" --tags story --limit 10\` и/или \`--tags comment\` (полные тексты комментариев прямо в выдаче; exit 3 = поиск HN недоступен → возьми Reddit). Альтернатива — Reddit через execute_operation НАПРЯМУЮ (НЕ вызывай discover_operations/get_operation_schema): ToolSearch "select:mcp__plugin_jadlis-research_reddit__execute_operation" → execute_operation(operation_id="discover_subreddits", parameters={query,limit:5,min_confidence:0.4}) → execute_operation(operation_id="search_subreddit", parameters={subreddit_name,query,sort:"relevance",time_filter:"all"}).`
+  ? `- Claim пришёл из web-движков → проверь по СООБЩЕСТВАМ практиков. Предпочтительно HackerNews (Bash, без ToolSearch): ${HN_CMD}. Альтернатива — Reddit через execute_operation НАПРЯМУЮ: ${REDDIT_CMD}.`
   : communityOrigin && !webOrigin
-    ? `- Claim пришёл из сообществ → проверь по ПЕРВОИСТОЧНИКАМ: официальная дока/changelog/данные вендора. ToolSearch "select:mcp__plugin_jadlis-research_brave-search__brave_llm_context,mcp__plugin_jadlis-research_brave-search__brave_web_search" → 1-2 запроса вида "<claim> official docs", "<тема> changelog", "<тема> 2026".`
-    : `- Claim поддержан и web, и сообществами → проверь АКТУАЛЬНОСТЬ по первоисточникам (официальная дока/changelog, "<тема> 2026") через ToolSearch "select:mcp__plugin_jadlis-research_brave-search__brave_llm_context,mcp__plugin_jadlis-research_brave-search__brave_web_search".`}
+    ? `- Claim пришёл из сообществ (W2, порядок ОБЯЗАТЕЛЕН): (1) СНАЧАЛА кросс-community — ${crossCommunity}: ищешь НЕЗАВИСИМЫЕ свидетельства других людей (другие аккаунты, другая площадка, другое время); (2) ПОТОМ первоисточники: ToolSearch "select:${BRAVE_TOOLS}" → 1 запрос вида "<claim> official docs" / "<тема> changelog". ${experiential ? 'Claim experiential: первое лицо с конкретикой (Admiralty C — «у меня на проде X сломалось при Y») — ПОЛНОЦЕННОЕ независимое свидетельство; отсутствие упоминания в официальной доке НЕ опровергает опыт людей.' : 'Claim factual: опыт людей подтверждает, но решает первоисточник.'}`
+    : `- Claim поддержан и web, и сообществами → проверь АКТУАЛЬНОСТЬ по первоисточникам (официальная дока/changelog, "<тема> 2026") через ToolSearch "select:${BRAVE_TOOLS}".`}
 БЮДЖЕТ: ≤3 tool calls, загрузи РОВНО ОДИН набор инструментов. ЗАПРЕЩЕНО: Grok CLI (~/.grok/bin/grok) и mcp__grok-mcp__x_search — слишком медленно/дорого для верификации; Яндекс (yandex-search.sh) — платный, в верификации не используется; Reddit discover_operations/get_operation_schema — вызывай execute_operation напрямую.`
+  const numericBlock = claim.numeric ? `
+ЧИСЛОВОЙ CLAIM — правила нормализации (расхождение формы записи НЕ есть расхождение по существу): «1 000» = «1000» = «1k»; «10 %» = «10%»; «$1.2B» = «1,2 млрд $»; округление в пределах ±2% — совпадение; разные единицы — переведи перед сравнением; дата в другом формате — та же дата. CHALLENGED по числу — только если найденное число расходится ПО СУЩЕСТВУ (другой порядок, другой год, другая версия). Найденное число верни ДОСЛОВНО в numberVerbatim (как написано в источнике).` : ''
   return `Ты — adversarial-верификатор №${idx + 1}. Проверь claim через НЕЗАВИСИМЫЙ live-поиск. Не верь исходному исследованию.
 
 CLAIM: "${claim.statement}"
-(каналы-источники: ${(claim.channels || []).join(', ') || '—'}; заявленная сила: ${claim.strength})
+(каналы-источники: ${chans.join(', ') || '—'}; заявленная сила: ${claim.strength}; тип: ${claim.claimType || 'factual'}${claim.loadBearing ? '; НЕСУЩИЙ для выводов' : ''})
 
-${lens}
+${evidenceBlock(claim)}
+
+${lens}${numericBlock}
 
 ${TOOL_NOTE}
 При InputValidationError — сначала ToolSearch, затем повтор вызова.
 
-СНАПШОТЫ: если в ${WORK_DIR}/snapshots/ есть файлы (Glob "${WORK_DIR}/snapshots/*.md") — прочитай релевантные claim'у ПЕРЕД live-поиском: это замороженные полные тексты источников каналов, общая доказательная база всех верификаторов.
+СНАПШОТЫ: пути снапшотов указаны в EVIDENCE — прочитай их ПЕРЕД live-поиском (Read): это замороженные полные тексты источников каналов, общая доказательная база всех верификаторов. Если у claim снапшотов нет — Glob "${WORK_DIR}/snapshots/*.md" и прочитай релевантные.
 
 Оцени:
-- НЕ СМОГ проверить (пейволл, сбой инструмента, источник недоступен, бюджет вызовов исчерпан до получения сигнала)? → UNCHECKED (credibility 6). Сбой доступа — НЕ опровержение; не маскируй его под CHALLENGED.
-- Claim актуален или устарел? → если устарел: OUTDATED.
-- Есть весомые опровержения/противоречия ПО СУЩЕСТВУ? → CHALLENGED.
+- НЕ СМОГ проверить (пейволл, сбой инструмента, источник недоступен, бюджет вызовов исчерпан до получения сигнала) ИЛИ просто НЕ НАШЁЛ ни подтверждения, ни опровержения? → UNCHECKED (credibility 6). ОТСУТСТВИЕ ПОДТВЕРЖДЕНИЯ ≠ ОПРОВЕРЖЕНИЕ: «не нашёл в вебе/сообществах» — это UNCHECKED, не CHALLENGED.
+- Claim актуален или устарел? → если устарел (есть более новые данные, которые его отменяют): OUTDATED.
+- Есть весомые опровержения/противоречия ПО СУЩЕСТВУ (найденный источник прямо противоречит)? → CHALLENGED.
 - Подтверждается независимо, опровержений нет? → CONFIRMED.
 - credibility (1-6): 1 — подтверждён независимым источником другого типа; 2 — вероятно верен (логично, согласуется, прямого независимого подтверждения нет); 3 — возможно верен; 4 — сомнителен; 5 — неправдоподобен; 6 — нельзя оценить.
 
-Верни по схеме: claimId="${claim.id}", verdict (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), credibility (1-6), evidence (что нашёл; для UNCHECKED — что именно не удалось и почему), url (ключевой источник проверки; для UNCHECKED — недоступный URL).
+Верни по схеме: claimId="${claim.id}", verdict (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), credibility (1-6), evidence (что нашёл; для UNCHECKED — что именно не удалось и почему), url (ключевой источник проверки; для UNCHECKED — недоступный URL или пустая строка), numberVerbatim (число дословно или null).
 НЕ спавни sub-agents.`
 }
 
+// ── Эскалация расхождения голосов: третий голос Codex (GPT-5.6 Sol) с гейтом живого поиска ──
+function escalationPrompt(claim, votes) {
+  const pf = `${WORK_DIR}/_codex-esc-${claim.id}-prompt.md`
+  const jf = `${WORK_DIR}/_codex-esc-${claim.id}.jsonl`
+  const lf = `${WORK_DIR}/_codex-esc-${claim.id}-last.md`
+  const exclusionVote = votes.find(v => v.verdict === 'CHALLENGED' || v.verdict === 'OUTDATED')
+  const rolePrompt = `You are a third, independent adversarial verifier (tie-breaker). Two verifiers disagreed about a claim from a multi-source research run. Use LIVE web search (mandatory: at least one search) and decide whether the claim should be EXCLUDED from the report.
+
+CLAIM (Russian): "${claim.statement}"
+Claim type: ${claim.claimType || 'factual'}; origin channels: ${(claim.channels || []).join(', ') || '-'}.
+
+EVIDENCE SPANS from the original sources (verbatim, original language):
+${(claim.evidence || []).map(e => `- [${e.prefix}] ${e.url}\n${(e.quotes || []).map(q => `  "${q}"`).join('\n') || '  (no verbatim span)'}`).join('\n') || '- (none)'}
+
+VERIFIER VOTES:
+${votes.map((v, i) => `- verifier ${i + 1}: ${v.verdict} (credibility ${v.credibility}) — ${String(v.evidence || '').slice(0, 600)}${v.url ? ` [${v.url}]` : ''}`).join('\n')}
+
+ARGUMENT FOR EXCLUSION (from the ${exclusionVote ? exclusionVote.verdict : 'dissenting'} vote): ${exclusionVote ? String(exclusionVote.evidence || '').slice(0, 800) : '(none given)'}
+
+Rules: absence of confirmation is NOT refutation (that is UNCHECKED). Numeric differences that are only formatting/rounding (±2%) are NOT a refutation. Confirm exclusion (CHALLENGED/OUTDATED) ONLY if you find a source that directly contradicts or supersedes the claim. Cite URLs.
+
+Answer with EXACTLY one JSON object as the final message, no prose after it:
+{"confirmsExclusion": true|false, "verdictSuggested": "CONFIRMED"|"CHALLENGED"|"OUTDATED"|"UNCHECKED", "reasoning": "<=600 chars", "urls": ["..."]}`
+  return `Ты — технический МОСТ к Codex CLI (третий голос верификации). Ролевую работу сам НЕ делай. Ровно четыре шага:
+
+1. Через Write запиши в ${pf} ДОСЛОВНО текст между маркерами <<<ROLE_PROMPT и ROLE_PROMPT>>>.
+
+2. Проверь бинарник: Bash \`command -v codex >/dev/null && echo HAVE || echo NONE\`. NONE → верни status="no-binary" (остальные поля: confirmsExclusion=false, verdictSuggested="UNCHECKED", reasoning="codex binary missing", urls=[], liveSearchEvents=0) и остановись.
+
+3. ОДИН Bash-вызов (параметр timeout: 300000; < /dev/null обязателен):
+codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c 'tools.web_search={mode="live"}' --json -o "${lf}" "$(cat "${pf}")" < /dev/null > "${jf}" 2>"${WORK_DIR}/_codex-esc-${claim.id}.err"; echo "EXIT=$?"
+
+4. Разбор:
+   - EXIT≠0 и в ${jf}/.err есть «usage limit» / «quota» / «rate limit» / 429 → status="quota". Bash-таймаут (вызов прерван) → status="timeout".
+   - Гейт живого поиска: Bash \`grep -c '"web_search' "${jf}"\` → liveSearchEvents. 0 → status="no-live-search" (Codex отвечал по памяти — такой голос не считается).
+   - Финальный JSON: прочитай ${lf} (Read); если файла нет — последняя строка ${jf} с item.type=="agent_message" (поле .item.text). Извлеки JSON-объект (последний блок {...}). Не разобрался → status="invalid-output".
+   - Всё ок → status="ok", поля из JSON. verdictSuggested вне enum → "UNCHECKED".
+Верни строго по схеме: claimId="${claim.id}", status, confirmsExclusion, verdictSuggested, reasoning, urls, liveSearchEvents. НЕ спавни sub-agents, НЕ повторяй вызов codex (ретраев нет — квота общая с /verif).
+
+<<<ROLE_PROMPT
+${rolePrompt}
+ROLE_PROMPT>>>`
+}
+
 // ── Промпт аналитика (decision-first отчёт: выводы и действия читателю, процесс — в callout/frontmatter) ──
-function analystPrompt(files, ledger) {
-  return `Ты — аналитик. Прочитай результаты каналов, проведи кросс-валидацию и напиши финальный отчёт на РУССКОМ в формате DECISION-FIRST + КОНТЕКСТ: сверху — выводы и советы под решение (это видит читатель в первую очередь); ниже — отдельная секция «📚 Контекст и находки» с наресёрченной фактурой темы. В свёрнутый callout «Методология» убирается ТОЛЬКО мета-процесс (как искал, что отсеял), а НЕ содержательный контекст предмета. ВАЖНО: claims с verdict CHALLENGED/OUTDATED ни в выводы, ни в контекст НЕ попадают — фильтруй, а не дописывай критику.
+function analystPrompt(files, ledger, stats) {
+  return `Ты — аналитик. Прочитай результаты каналов, проведи кросс-валидацию и напиши финальный отчёт на РУССКОМ в формате DECISION-FIRST + КОНТЕКСТ: сверху — выводы и советы под решение (это видит читатель в первую очередь); ниже — отдельная секция «📚 Контекст и находки» с наресёрченной фактурой темы. В свёрнутый callout «Методология» убирается ТОЛЬКО мета-процесс (как искал, что отсеял), а НЕ содержательный контекст предмета. ВАЖНО: claims с verdict CHALLENGED/OUTDATED ни в выводы, ни в контекст НЕ попадают — фильтруй, а не дописывай критику. Claims DISPUTED — в отдельную подсекцию «Спорные факты», в выводы НЕ входят.
 
 ЗАПРОС: ${QUERY}
 ${DECISION ? `РЕШЕНИЕ ПОЛЬЗОВАТЕЛЯ (весь отчёт строится под него): ${DECISION}` : 'РЕШЕНИЕ ПОЛЬЗОВАТЕЛЯ: не задано — выведи вердикт под самое вероятное решение по запросу.'}
@@ -311,14 +451,17 @@ ${files.map(f => `- ${f}`).join('\n')}
 показывает тон, плотность и оформление. Обязательный контракт — спека формата выше;
 структуру и объём адаптируй под тему, скелет примера не копируй буквально.
 
-CROSS-VERIFICATION LEDGER (live-проверка claims; у каждого verdict и credibility 1-6):
-${JSON.stringify(ledger, null, 2)}
+CROSS-VERIFICATION LEDGER (live-проверка claims; у каждого verdict, credibility 1-6, вектор голосов votes[], claimType, loadBearing, evidence-спаны, при эскалации — escalation):
+${JSON.stringify(ledger.map(c => ({ id: c.id, statement: c.statement, channels: c.channels, strength: c.strength, claimType: c.claimType, loadBearing: c.loadBearing, verdict: c.verdict, votes: c.votes, voteCount: c.voteCount, credibility: c.credibility, evidence: c.verifierEvidence, urls: c.urls, evidenceRefs: (c.evidence || []).map(e => e.prefix), weakEvidence: !!c.weakEvidence, evidenceless: !!c.evidenceless, escalation: c.escalation ? { status: c.escalation.status, confirmsExclusion: c.escalation.confirmsExclusion, reasoning: c.escalation.reasoning } : null, escalationSkipped: c.escalationSkipped || null })), null, 2)}
+
+СВОДКА LEDGER: ${JSON.stringify(stats)}
 
 КРОСС-ВАЛИДАЦИЯ (для отбора материала; сам процесс в отчёт НЕ пишется):
 - Triangulation: тезис подтверждён РАЗНЫМИ типами источников? (web+community=strong; два reddit-поста=weak). Circular reporting: 2 источника на 1 оригинал = 1 источник.
 - WEB-СЕМЬЯ: файлы web.md/web-codex.md/web-grok.md/web-yandex.md — ДВИЖКИ (Brave [w], Codex [cx], Grok [gw], Яндекс [y]) над ОДНИМ открытым вебом. Дедупь их находки по URL. Совпадение движков = усиление ВНУТРИ типа web, НЕ независимая триангуляция (независимость = web+community). Находка, которую дал только ОДИН движок и не подтвердил никто другой — пониженная достоверность (цифра бейджа не выше 3) + краткая пометка "только {движок}".
 - Community consensus = сильный ТОЛЬКО при независимости (разные аккаунты/время, без incentives).
-- Claims из ledger: CONFIRMED → не только разрешают вердикты в выводах, но и РЕНДЕРЯТСЯ ЯВНО в подсекции «Проверенные факты» секции «📚 Контекст и находки» (с evidence и бейджем достоверности) — это подтверждённый фундамент, его нельзя «растворять» в выводах. ВЕКТОР ГОЛОСОВ виден читателю: у каждого проверенного факта пометка «(2 голоса)» при voteCount=2 или «(1 голос — split: второй верификатор не смог проверить)» при voteCount=1 — читатель обязан различать двойное и одиночное подтверждение. CHALLENGED/OUTDATED → НЕ в выводы и НЕ в контекст, только строка в callout методологии с причиной отсева. UNCHECKED → НЕ в отчёт; в callout методологии одной строкой: «не удалось проверить: N claims (причины кратко)».
+- ВЕСА (schema v3): вес утверждения складывается из четырёх осей — (1) независимость: число РАЗНЫХ семей источников (web, reddit, hn, twitter, substack, youtube, telegram); (2) надёжность источника: Admiralty A-F из файлов каналов; (3) тип claim: для factual решает первоисточник (веб/дока — приоритетная семья), для experiential решают сообщества (первое лицо с конкретикой, Admiralty C, — полноценное свидетельство, веб лишь дополняет); (4) подтверждённость: credibility 1-6 из ledger. Не применяй глобальный приоритет «соцсети важнее веба» или наоборот — семья приоритетна ПО ТИПУ claim.
+- Claims из ledger: CONFIRMED → не только разрешают вердикты в выводах, но и РЕНДЕРЯТСЯ ЯВНО в подсекции «Проверенные факты» секции «📚 Контекст и находки» (с evidence и бейджем достоверности) — это подтверждённый фундамент, его нельзя «растворять» в выводах. ВЕКТОР ГОЛОСОВ виден читателю: у каждого проверенного факта пометка «(2 голоса)» при voteCount=2 или «(1 голос — split: второй верификатор не смог проверить)» при voteCount=1 — читатель обязан различать двойное и одиночное подтверждение. DISPUTED → подсекция «Спорные факты» (голоса разошлись, третий голос исключение не подтвердил): статement + в чём расхождение + бейдж; в выводы и советы НЕ входит. CHALLENGED/OUTDATED → НЕ в выводы и НЕ в контекст, только строка в callout методологии с причиной отсева. UNCHECKED → НЕ в отчёт; в callout методологии одной строкой: «не удалось проверить: N claims (причины кратко)». weakEvidence/evidenceless → бейдж не выше 3 даже при CONFIRMED.
 
 БЕЙДЖИ ДОСТОВЕРНОСТИ: каждая ссылка в советах и «Источниках» — вида [w1·B2](URL): буква A-F — reliability источника (из файлов каналов, поле Admiralty), цифра 1-6 — подтверждённость информации. Цифру присваиваешь ТЫ по правилам: 1-2 ТОЛЬКО при независимом подтверждении (CONFIRMED в ledger или 2+ источников разных типов); 3 — единичный правдоподобный источник; 4-5 — сомнительно/неправдоподобно; 6 — нельзя оценить. Шкалы независимы: бывает A6 и E1.
 
@@ -333,11 +476,19 @@ tags: []
 query: "{исходный запрос; внутренние двойные кавычки замени на «»}"
 decision: "{решение пользователя или пусто}"
 channels: [{ключи выбранных каналов; web-движки (web/codexweb/grokweb) схлопни в один "web"; yandex (если был выбран) — отдельным ключом}]
-claims_confirmed: {N}
-claims_dropped: {N}
+ledger_schema: 3
+claims_confirmed: ${stats.confirmed}
+claims_disputed: ${stats.disputed}
+claims_dropped: ${stats.challenged + stats.outdated}
+claims_unchecked: ${stats.unchecked}
+votes_confirmed_2: ${stats.confirmed - stats.confirmedSplit}
+votes_confirmed_1: ${stats.confirmedSplit}
+escalations: ${stats.escalated}
+credibility_median: ${stats.credibilityMedian}
 gaps: [{2-4 строки-пробела}]
 work_dir: "${WORK_DIR}"
 ---
+(числовые поля ledger — ровно эти значения; оркестратор сверит их со сводкой и поправит детерминированно)
 
 Секции по эталону:
 1. # {Тема кратко} + строка **Дата:** | **Источники:**
@@ -351,12 +502,13 @@ work_dir: "${WORK_DIR}"
    - **Ландшафт темы**: что это, как устроено, ключевые игроки/подходы/термины + механизмы «почему так».
    - **Факты и цифры**: конкретные числа, диапазоны, дословные цитаты источников (ПЕРЕВЕДЁННЫЕ на русский) — каждая с бейджем-ссылкой [pref·Badge](URL).
    - **Проверенные факты**: claims из ledger с verdict=CONFIRMED — вынеси явно, с доказательством и бейджем достоверности; это подтверждённый фундамент выводов. Заголовок подсекции — РОВНО \`### Проверенные факты\` (канонический, по нему идёт постпроверка; НЕ сливай с «Факты и цифры»). Если confirmed-claims нет — подсекцию пропусти.
+   - **Спорные факты**: claims с verdict=DISPUTED — заголовок РОВНО \`### Спорные факты\` (канонический); каждая строка: statement, кто что нашёл (голоса), почему не решено; бейдж не выше 4. Нет DISPUTED — подсекцию пропусти.
    - **Разногласия и нюансы**: где источники/сообщества расходятся, какие лагеря, что под вопросом — НЕ усреднять до ложного консенсуса.
    В секцию идёт только материал, прошедший кросс-валидацию; claims CHALLENGED/OUTDATED сюда НЕ попадают (они лишь строкой в callout методологии).
 9. ## Кому доверять в этой теме — таблица: Источник | Надёжность (A-F) | Почему.
 10. ## Источники — подсекции по каналам; web-движки — ОДНА подсекция "### Web" (движок различим по префиксу w/cx/gw/y, дубли URL между движками не повторять); каждая строка: [префикс·Бейдж](URL) Название — одна строка на русском о чём.
 11. ## Связанные заметки — ПУСТАЯ секция-заглушка (wikilinks добавит оркестратор).
-12. > [!note]- Методология и проверка — ОДИН СВЁРНУТЫЙ callout ≤20 строк в самом конце: каналы и число источников; проверено K claims: X подтверждено, Y отсеяно (список отсеянных + причина: оспорено/устарело); gaps; bias выборки; дата данных; «полный процесс — в work_dir из frontmatter».
+12. > [!note]- Методология и проверка — ОДИН СВЁРНУТЫЙ callout ≤25 строк в самом конце: каналы и число источников; проверено K claims: X подтверждено (из них Y одним голосом), Z спорных (эскалировано в третий голос: N), W отсеяно (список отсеянных + причина: оспорено/устарело), не удалось проверить: U; блок **«Веса»** — 2-4 строки: формула (семьи → независимость; Admiralty A-F → надёжность источника; claimType → приоритетная семья; credibility 1-6 → подтверждённость) и какие семьи внесли вклад в каждый ключевой вывод (например «вывод 1: web A + reddit C, factual → приоритет web»); gaps; bias выборки; дата данных; «полный процесс — в work_dir из frontmatter».
 
 ПРАВИЛА ТЕКСТА:
 - Рубрики 4-7: каждый совет — callout > [!tip] (делать/принимать/относиться/учитывать) или > [!failure] (не делать/не принимать/игнорировать). Заголовок callout — конкретное действие; тело — одна строка «почему» + бейджи-ссылки. 2-4 совета на рубрику; если по рубрике сказать нечего — пропусти её целиком, не выдумывай.
@@ -366,8 +518,8 @@ work_dir: "${WORK_DIR}"
 - Ссылки ТОЛЬКО одинарные скобки: [w1·B2](URL). ❌ НЕ [[w1]](URL). НЕ ставь wikilinks.
 
 СОХРАНЕНИЕ: через Write сохрани draft-отчёт в ${WORK_DIR}/report.md (НЕ в vault — запись в vault сделает оркестратор).
-После записи верни по схеме: reportPath="${WORK_DIR}/report.md", queryRu (краткая русская формулировка ≤25 симв для имени файла), mainConclusion, relatedCandidates (3-6 ключевых слов/тем для obsidian-поиска связанных заметок), droppedClaims (что отфильтровано как CHALLENGED/OUTDATED), gaps (те же, что в frontmatter).
-НЕ спавни sub-agents, НЕ вызывай skills, читай только файлы каналов в ${WORK_DIR} и эталон.`
+После записи верни по схеме: reportPath="${WORK_DIR}/report.md", queryRu (краткая русская формулировка ≤25 симв для имени файла), mainConclusion, relatedCandidates (3-6 ключевых слов/тем для obsidian-поиска связанных заметок), droppedClaims (что отфильтровано как CHALLENGED/OUTDATED), disputedClaims (что вынесено в «Спорные факты»), gaps (те же, что в frontmatter).
+НЕ спавни sub-agents, НЕ вызывай skills, читай только файлы каналов в ${WORK_DIR}, снапшоты и эталон.`
 }
 
 // ═══ Phase 1 — Fan-out ═══
@@ -384,22 +536,36 @@ const files = channelResults.map(r => r.fileWritten).filter(Boolean)
 // Упавший канал возвращает LOW + пустые citations — в гейты и семьи не считается.
 const okChannel = r => r.sourceQuality !== 'LOW' && Array.isArray(r.citations) && r.citations.some(c => c && c.url)
 const okResults = channelResults.filter(okChannel)
+
+// H9 — гейт снапшотов, детерминированно: правило промпта «HIGH без снапшота недопустима»
+// энфорсится кодом — у канала с HIGH-цитатами и нулём снапшотов все HIGH → MEDIUM.
+const snapshotDemotions = {}
+for (const r of channelResults) {
+  const cits = Array.isArray(r.citations) ? r.citations : []
+  const highs = cits.filter(c => c && c.relevance === 'HIGH')
+  const snaps = Array.isArray(r.snapshots) ? r.snapshots.filter(Boolean) : []
+  if (highs.length && !snaps.length) {
+    highs.forEach(c => { c.relevance = 'MEDIUM'; c.snapshotDemoted = true })
+    snapshotDemotions[r.channelKey] = highs.length
+  }
+}
+if (Object.keys(snapshotDemotions).length) log(`⚠ Гейт снапшотов: HIGH→MEDIUM у каналов без снапшотов: ${Object.entries(snapshotDemotions).map(([k, n]) => `${k}(${n})`).join(', ')}`)
+
 const channelStatus = SELECTED.map(k => {
   const r = channelResults.find(x => x.channelKey === k)
-  return { channel: k, answered: !!r, ok: r ? okChannel(r) : false, sourceQuality: r ? r.sourceQuality : null, citations: r ? (r.citations || []).length : 0, snapshots: r ? (r.snapshots || []).length : 0, highCitations: r ? (r.citations || []).filter(c => c && c.relevance === 'HIGH').length : 0 }
+  const cits = r ? (r.citations || []) : []
+  return { channel: k, answered: !!r, ok: r ? okChannel(r) : false, sourceQuality: r ? r.sourceQuality : null, citations: cits.length, snapshots: r ? (r.snapshots || []).length : 0, highCitations: cits.filter(c => c && c.relevance === 'HIGH').length, quotedCitations: cits.filter(c => c && Array.isArray(c.quotes) && c.quotes.length).length, snapshotDemoted: snapshotDemotions[k] || 0 }
 })
 const failedChannels = channelStatus.filter(s => !s.ok).map(s => s.channel)
 const answeredFamilies = [...new Set(okResults.map(r => FAMILY[r.channelKey]))]
 const selectedFamilies = [...new Set(SELECTED.map(k => FAMILY[k]))]
 log(`Каналов успешно: ${okResults.length}/${SELECTED.length} (упали/деградировали: ${failedChannels.join(', ') || 'нет'}); семей источников: ${answeredFamilies.length}/${selectedFamilies.length}`)
-const snapshotless = channelStatus.filter(s => s.ok && s.highCitations > 0 && s.snapshots === 0).map(s => s.channel)
-if (snapshotless.length) log(`⚠ HIGH-цитаты БЕЗ снапшотов (нарушение schema v2): ${snapshotless.join(', ')}`)
 
 // Гейт: web/codexweb/grokweb — одна семья (открытый веб). Если выбрано ≥2 семей,
 // а успешна лишь одна — триангуляции не будет. Намеренный web-only (1 семья) — OK.
-if (okResults.length < MIN_CHANNELS || (selectedFamilies.length >= 2 && answeredFamilies.length < 2)) {
+if (okResults.length < 2 || (selectedFamilies.length >= 2 && answeredFamilies.length < 2)) {
   log(`Недостаточно независимых источников (успешных каналов: ${okResults.length}, семей: ${answeredFamilies.length}) — отдаю что есть, без синтеза.`)
-  return { workDir: WORK_DIR, status: 'insufficient-sources', channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [] }
+  return { workDir: WORK_DIR, status: 'insufficient-sources', ledgerSchemaVersion: 3, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [] }
 }
 
 // ═══ Phase 2 — Verify (per-claim live counter-search) ═══
@@ -417,59 +583,192 @@ if (!curated || !Array.isArray(curated.claims)) {
   log('⚠ Curator недоступен после повтора — иду в синтез с ПУСТЫМ ledger (claims не верифицированы).')
   curated = { claims: [] }
 }
-const claims = curated.claims.slice(0, MAX_CLAIMS)
-log(`Куратор выделил ${claims.length} ключевых claims на live-проверку.`)
 
-const claimLedger = (await parallel(claims.map(c => () =>
+// Индекс цитат по префиксу: curator возвращает только префиксы, спаны подставляет JS
+// (curator физически не может выдумать цитату — только сослаться на несуществующую).
+const normPrefix = p => String(p || '').replace(/[\[\]\s]/g, '').toLowerCase()
+const citationIndex = {}
+for (const r of channelResults) {
+  const snaps = (Array.isArray(r.snapshots) ? r.snapshots : []).filter(Boolean)
+  for (const c of (r.citations || [])) {
+    if (!c || !c.prefix) continue
+    const p = normPrefix(c.prefix)
+    const snap = snaps.find(s => String(s).split('/').pop().replace(/\.md$/i, '').toLowerCase() === p) || null
+    if (!citationIndex[p]) citationIndex[p] = { prefix: p, url: c.url, quotes: Array.isArray(c.quotes) ? c.quotes.filter(Boolean).map(q => String(q).slice(0, 400)) : [], context: c.context || '', reliability: c.reliability || 'F', relevance: c.relevance, channel: r.channelKey, snapshotPath: snap }
+  }
+}
+const STRENGTH_RANK = { STRONG: 3, MODERATE: 2, WEAK: 1 }
+const NUMERIC_RE = /\d/
+const allClaims = curated.claims.map((c, i) => {
+  const prefixes = Array.isArray(c.evidencePrefixes) ? c.evidencePrefixes.map(normPrefix).filter(Boolean) : []
+  const evidence = []; const evidenceOrphans = []
+  for (const p of [...new Set(prefixes)]) (citationIndex[p] ? evidence : evidenceOrphans).push(citationIndex[p] ? { ...citationIndex[p] } : p)
+  const evidenceless = evidence.length === 0
+  let strength = c.strength || 'WEAK'
+  if (evidenceless && strength === 'STRONG') strength = 'MODERATE'
+  return { ...c, id: c.id || `c${i + 1}`, strength, loadBearing: !!c.loadBearing, claimType: c.claimType === 'experiential' ? 'experiential' : 'factual', numeric: NUMERIC_RE.test(String(c.statement || '')), evidence, evidenceOrphans, evidenceless }
+})
+allClaims.sort((a, b) => (Number(b.loadBearing) - Number(a.loadBearing)) || ((STRENGTH_RANK[b.strength] || 0) - (STRENGTH_RANK[a.strength] || 0)))
+const claims = allClaims.slice(0, CLAIM_HARD_CAP)
+const claimsDroppedByCap = allClaims.length - claims.length
+const orphanTotal = claims.reduce((n, c) => n + c.evidenceOrphans.length, 0)
+log(`Куратор выделил ${allClaims.length} claims → на live-проверку ${claims.length} (кап ${CLAIM_HARD_CAP}, отброшено ${claimsDroppedByCap}); несущих: ${claims.filter(c => c.loadBearing).length}, experiential: ${claims.filter(c => c.claimType === 'experiential').length}, без evidence: ${claims.filter(c => c.evidenceless).length}, неизвестных префиксов: ${orphanTotal}`)
+
+// ── urlhealth (A2): только evidence-URL выделенных claims; сбой шага не роняет прогон ──
+let evidenceHealth = 'skipped'
+let urlhealthSummary = null
+try {
+  const seen = new Set()
+  const items = []
+  for (const c of claims) for (const e of c.evidence) {
+    if (!e.url || seen.has(e.prefix)) continue
+    seen.add(e.prefix)
+    items.push({ prefix: e.prefix, url: e.url, quote: (e.quotes || [])[0] || '', snapshotPath: e.snapshotPath })
+  }
+  if (items.length) {
+    const uh = await agent(urlhealthPrompt(items), w({ label: 'urlhealth', phase: 'Verify', schema: URLHEALTH_SCHEMA }))
+    if (uh && Array.isArray(uh.items) && uh.status !== 'failed') {
+      const byPrefix = {}
+      for (const it of uh.items) byPrefix[normPrefix(it.prefix)] = it
+      const counts = { ok: 0, blocked: 0, dead: 0, skipped: 0, matched: 0, notFound: 0, notChecked: 0, fabricationSuspect: 0 }
+      for (const it of uh.items) { counts[it.urlStatus] = (counts[it.urlStatus] || 0) + 1; counts[it.quoteStatus] = (counts[it.quoteStatus] || 0) + 1; if (it.fabricationSuspect) counts.fabricationSuspect++ }
+      // Политика: dead / fabricationSuspect / notFound → спан weak; blocked / notChecked НИКОГДА не понижают.
+      for (const c of claims) {
+        for (const e of c.evidence) {
+          const h = byPrefix[e.prefix]
+          if (!h) continue
+          e.health = { urlStatus: h.urlStatus, quoteStatus: h.quoteStatus, fabricationSuspect: !!h.fabricationSuspect }
+          e.weak = h.urlStatus === 'dead' || !!h.fabricationSuspect || h.quoteStatus === 'notFound'
+        }
+        const checked = c.evidence.filter(e => e.health)
+        c.weakEvidence = checked.length > 0 && checked.every(e => e.weak)
+        if (c.weakEvidence && c.strength === 'STRONG') { c.strength = 'MODERATE'; c.strengthDemoted = 'weak-evidence' }
+      }
+      evidenceHealth = uh.status
+      urlhealthSummary = { ...counts, items: uh.items.length, elapsedSec: uh.elapsedSec, note: uh.note }
+      log(`urlhealth (${uh.status}, ${uh.elapsedSec}s): url ok=${counts.ok} blocked=${counts.blocked} dead=${counts.dead} skipped=${counts.skipped}; quote matched=${counts.matched} notFound=${counts.notFound} notChecked=${counts.notChecked}; fabricationSuspect=${counts.fabricationSuspect}; claims weakEvidence=${claims.filter(c => c.weakEvidence).length}`)
+    } else {
+      log(`⚠ urlhealth не дал результата (${uh && uh.note ? uh.note : 'нет ответа'}) — шаг пропущен.`)
+    }
+  } else {
+    log('urlhealth: у выделенных claims нет evidence-URL — шаг пропущен.')
+  }
+} catch (e) {
+  log(`⚠ urlhealth упал (${e && e.message ? e.message : e}) — шаг пропущен, прогон продолжается.`)
+}
+
+// ── Голоса верификаторов ──
+const voted = (await parallel(claims.map(c => () =>
   parallel(Array.from({ length: VERIFIERS }, (_, i) => () =>
     agent(verifyPrompt(c, i), w({ label: `verify:${c.id}#${i + 1}`, phase: 'Verify', schema: VERIFY_SCHEMA }))
-  )).then(votes => {
-    const v = votes.filter(Boolean)
-    // Schema v2: вектор голосов сохраняется (не схлопывать); UNCHECKED — операционная ось,
-    // вне доказательной. Приоритет только для фактических исходов: OUTDATED > CHALLENGED > CONFIRMED.
-    const all = v.map(x => x.verdict)
-    const real = v.filter(x => x.verdict !== 'UNCHECKED')
-    const verdicts = real.map(x => x.verdict)
-    const verdict = !v.length ? 'UNVERIFIED'
-      : !real.length ? 'UNCHECKED'
-        : verdicts.includes('OUTDATED') ? 'OUTDATED'
-          : verdicts.includes('CHALLENGED') ? 'CHALLENGED'
-            : 'CONFIRMED'
-    // подтверждённость — консервативно по СОДЕРЖАТЕЛЬНЫМ голосам (UNCHECKED не тянет в 6)
-    const credibility = real.length ? Math.max(...real.map(x => x.credibility || 6)) : 6
-    // voteCount: сколько содержательных голосов держат вердикт (CONFIRMED-1 = split, виден в отчёте)
-    return { ...c, verdict, votes: all, voteCount: real.length, credibility, evidence: v.map(x => x.evidence), urls: v.map(x => x.url) }
-  })
+  )).then(votes => ({ claim: c, votes: votes.filter(Boolean) }))
 ))).filter(Boolean)
 
-const confirmed = claimLedger.filter(c => c.verdict === 'CONFIRMED').length
-const challenged = claimLedger.filter(c => c.verdict === 'CHALLENGED').length
-const outdated = claimLedger.filter(c => c.verdict === 'OUTDATED').length
-const unchecked = claimLedger.filter(c => c.verdict === 'UNCHECKED').length
+// ── Агрегация голосов (schema v3) — таблица истинности ──
+//   CONFIRMED+CONFIRMED → CONFIRMED; CONFIRMED+UNCHECKED → CONFIRMED (1 голос, split);
+//   согласное исключение (CHALLENGED/OUTDATED × CHALLENGED/OUTDATED) → исключение без Codex;
+//   UNCHECKED+UNCHECKED → UNCHECKED; расхождение (CONFIRMED vs CHALLENGED/OUTDATED,
+//   CHALLENGED/OUTDATED vs UNCHECKED) → третий голос Codex (кап ESCALATION_CAP).
+const EXCL = v => v === 'CHALLENGED' || v === 'OUTDATED'
+const pickExclusion = verdicts => verdicts.includes('OUTDATED') ? 'OUTDATED' : 'CHALLENGED'
+function aggregate(c, v) {
+  const all = v.map(x => x.verdict)
+  const real = v.filter(x => x.verdict !== 'UNCHECKED')
+  const verdicts = real.map(x => x.verdict)
+  let verdict, needsEscalation = false
+  if (!v.length) verdict = 'UNVERIFIED'
+  else if (!real.length) verdict = 'UNCHECKED'
+  else if (verdicts.every(x => x === 'CONFIRMED')) verdict = 'CONFIRMED'
+  else if (verdicts.every(EXCL) && real.length >= 2) verdict = pickExclusion(verdicts)
+  else { verdict = pickExclusion(verdicts); needsEscalation = true } // CONFIRMED vs EXCL, или EXCL один при UNCHECKED
+  // подтверждённость — консервативно по СОДЕРЖАТЕЛЬНЫМ голосам (UNCHECKED не тянет в 6)
+  const credibility = real.length ? Math.max(...real.map(x => x.credibility || 6)) : 6
+  return { ...c, verdict, votes: all, voteCount: real.length, credibility, verifierEvidence: v.map(x => x.evidence), urls: v.map(x => x.url), numbersVerbatim: v.map(x => x.numberVerbatim || null), rawVotes: v, needsEscalation }
+}
+let claimLedger = voted.map(({ claim, votes }) => aggregate(claim, votes))
+
+const escalationCandidates = claimLedger.filter(c => c.needsEscalation)
+escalationCandidates.sort((a, b) => Number(b.loadBearing) - Number(a.loadBearing))
+const toEscalate = escalationCandidates.slice(0, ESCALATION_CAP)
+escalationCandidates.slice(ESCALATION_CAP).forEach(c => { c.escalationSkipped = 'cap' })
+log(`Расхождений голосов: ${escalationCandidates.length}; эскалирую в Codex: ${toEscalate.length} (кап ${ESCALATION_CAP})`)
+
+const escalationStats = { candidates: escalationCandidates.length, escalated: 0, confirmedExclusion: 0, disputed: 0, skipped: {}, cap: ESCALATION_CAP }
+if (toEscalate.length) {
+  const results = await parallel(toEscalate.map(c => async () => {
+    try {
+      return await agent(escalationPrompt(c, c.rawVotes), w({ label: `escalate:${c.id}`, phase: 'Verify', schema: ESCALATION_SCHEMA }))
+    } catch (e) {
+      // `budget`/сбой бросает — без catch claim исчез бы из ledger вместе с оплаченными голосами
+      return { claimId: c.id, status: /budget/i.test(String(e && e.message)) ? 'budget' : 'timeout', confirmsExclusion: false, verdictSuggested: 'UNCHECKED', reasoning: String(e && e.message || e), urls: [], liveSearchEvents: 0 }
+    }
+  }))
+  toEscalate.forEach((c, i) => {
+    const r = results[i]
+    if (!r || r.status !== 'ok') {
+      c.escalationSkipped = (r && r.status) || 'invalid-output'
+      c.escalation = r || null
+      return // исключение по одному голосу как в v2 + флаг
+    }
+    escalationStats.escalated++
+    c.escalation = r
+    c.votes = [...c.votes, `codex:${r.verdictSuggested}`]
+    if (r.confirmsExclusion) {
+      c.verdict = r.verdictSuggested === 'OUTDATED' || c.verdict === 'OUTDATED' ? 'OUTDATED' : 'CHALLENGED'
+      escalationStats.confirmedExclusion++
+    } else {
+      // Агрегат JS, НЕ enum верификатора: голоса разошлись, исключение не подтверждено.
+      c.verdict = 'DISPUTED'
+      c.credibility = Math.max(4, c.credibility || 4)
+      escalationStats.disputed++
+    }
+  })
+}
+for (const c of claimLedger) {
+  if (c.escalationSkipped) escalationStats.skipped[c.escalationSkipped] = (escalationStats.skipped[c.escalationSkipped] || 0) + 1
+  delete c.needsEscalation
+}
+
+const count = v => claimLedger.filter(c => c.verdict === v).length
+const confirmed = count('CONFIRMED')
+const challenged = count('CHALLENGED')
+const outdated = count('OUTDATED')
+const unchecked = count('UNCHECKED')
+const disputed = count('DISPUTED')
 const confirmedSplit = claimLedger.filter(c => c.verdict === 'CONFIRMED' && c.voteCount === 1).length
-log(`Ledger: CONFIRMED=${confirmed} (из них split/1-голос: ${confirmedSplit}), CHALLENGED=${challenged}, OUTDATED=${outdated}, UNCHECKED=${unchecked}`)
+const weakEvidence = claimLedger.filter(c => c.weakEvidence).length
+const evidencelessN = claimLedger.filter(c => c.evidenceless).length
+const credVals = claimLedger.filter(c => c.verdict !== 'UNCHECKED' && c.verdict !== 'UNVERIFIED').map(c => c.credibility).sort((a, b) => a - b)
+const credibilityMedian = credVals.length ? (credVals.length % 2 ? credVals[(credVals.length - 1) / 2] : (credVals[credVals.length / 2 - 1] + credVals[credVals.length / 2]) / 2) : null
+const ledgerSummary = { total: claimLedger.length, confirmed, confirmedSplit, challenged, outdated, unchecked, disputed, escalated: escalationStats.escalated, escalationSkipped: Object.values(escalationStats.skipped).reduce((a, b) => a + b, 0), weakEvidence, evidenceless: evidencelessN, credibilityMedian, claimsDroppedByCap }
+log(`Ledger v3: CONFIRMED=${confirmed} (split: ${confirmedSplit}), DISPUTED=${disputed}, CHALLENGED=${challenged}, OUTDATED=${outdated}, UNCHECKED=${unchecked}; эскалаций ${escalationStats.escalated}, пропущено ${ledgerSummary.escalationSkipped}; weakEvidence=${weakEvidence}; медиана credibility=${credibilityMedian}`)
 
 // ═══ Phase 3 — Synthesize ═══
 phase('Synthesize')
 
-const ANALYST_FIELDS = '{reportPath,queryRu,mainConclusion,relatedCandidates,droppedClaims,gaps}'
+const ANALYST_FIELDS = '{reportPath,queryRu,mainConclusion,relatedCandidates,droppedClaims,disputedClaims,gaps}'
 const report = FABLE_BRIDGE
-  ? await agent(bridgePrompt('analyst', analystPrompt(files, claimLedger) + bridgeTail(ANALYST_FIELDS), 'Read,Write', ANALYST_FIELDS, ANALYST_SCHEMA),
+  ? await agent(bridgePrompt('analyst', analystPrompt(files, claimLedger, ledgerSummary) + bridgeTail(ANALYST_FIELDS), 'Read,Write,Glob', ANALYST_FIELDS, ANALYST_SCHEMA),
       w({ label: 'analyst→fable', phase: 'Synthesize', schema: ANALYST_SCHEMA }))
-  : await agent(analystPrompt(files, claimLedger), o({ label: 'analyst', phase: 'Synthesize', schema: ANALYST_SCHEMA }))
+  : await agent(analystPrompt(files, claimLedger, ledgerSummary), o({ label: 'analyst', phase: 'Synthesize', schema: ANALYST_SCHEMA }))
 
 // Честный ai_model: маркер "[bridge-fallback: opus]" в mainConclusion означает,
 // что синтез исполнил Opus, а не Fable — frontmatter отчёта сверяет Phase C скилла.
 const bridgeFallback = FABLE_BRIDGE && /\[bridge-fallback: opus\]/.test(String(report.mainConclusion || ''))
 const aiModelActual = FABLE_BRIDGE && !bridgeFallback ? AI_MODEL : 'claude-opus-5'
 
+// Ledger наружу — без сырых голосов (rawVotes дублируют evidence/urls)
+const ledgerOut = claimLedger.map(({ rawVotes, ...c }) => c)
+
 return {
   workDir: WORK_DIR,
   status: 'ok',
   // Версия схемы ledger/вердиктов: инкрементить при смене VERIFY_SCHEMA/агрегации —
   // телеметрия сегментирует тренды confirmed по этой версии (сравнивать только внутри одной).
-  // v2 (2026-08-15, вердикт совета): UNCHECKED + вектор голосов + атомарный куратор + снапшоты.
-  ledgerSchemaVersion: 2,
+  // v2 (2026-08-15): UNCHECKED + вектор голосов + атомарный куратор + снапшоты.
+  // v3 (2026-09-01): evidence-префиксы curator + urlhealth + линза W2 + эскалация Codex +
+  //   DISPUTED + numberVerbatim + кап 16 claims + снапшот-гейт кодом.
+  ledgerSchemaVersion: 3,
   channelsAnswered: channelResults.length,
   channelsSelected: SELECTED,
   channelStatus,
@@ -478,14 +777,18 @@ return {
   answeredFamilies,
   timing: channelResults.map(r => ({ channel: r.channelKey, startedAt: r.startedAt || null, finishedAt: r.finishedAt || null })),
   files,
-  claimLedger,
+  claimLedger: ledgerOut,
+  evidenceHealth,
+  urlhealthSummary,
+  escalationStats,
   reportPath: report.reportPath || `${WORK_DIR}/report.md`,
   queryRu: report.queryRu,
   relatedCandidates: report.relatedCandidates || [],
   synthMeta: {
     mainConclusion: report.mainConclusion,
     droppedClaims: report.droppedClaims || [],
+    disputedClaims: report.disputedClaims || [],
     gaps: report.gaps || [],
-    ledgerSummary: { confirmed, confirmedSplit, challenged, outdated, unchecked },
+    ledgerSummary,
   },
 }

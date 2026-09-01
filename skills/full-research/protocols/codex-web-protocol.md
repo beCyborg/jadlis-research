@@ -88,3 +88,19 @@ codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c model_reasoning_
 - `codex login status` — истёкшая авторизация ChatGPT.
 - Сообщения об отключённом web search в stderr — конфиг-ключ `tools.web_search` переименован
   (проверь `codex exec --help` и `~/.codex/config.toml`).
+
+## Эскалация верификации (третий голос, schema v3)
+
+Помимо канала, Codex используется workflow `full-research-core` как **третий, разнородный голос** при расхождении двух верификаторов (`CONFIRMED` vs `CHALLENGED/OUTDATED`, либо `CHALLENGED/OUTDATED` vs `UNCHECKED`). Согласные голоса в Codex не ходят: `CONFIRMED×2` → подтверждено, согласное исключение → отсеяно, `UNCHECKED×2` → не проверено. Кап — 8 эскалаций на прогон (`args.escalationCap`), сверх капа — исключение по одному голосу + флаг `escalationSkipped: 'cap'`.
+
+Вызов (делает лёгкий субагент-мост, промпт `escalationPrompt` в core.js):
+
+```bash
+codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c 'tools.web_search={mode="live"}' --json -o "<workDir>/_codex-esc-<claimId>-last.md" "$(cat "<workDir>/_codex-esc-<claimId>-prompt.md")" < /dev/null > "<workDir>/_codex-esc-<claimId>.jsonl"
+```
+
+- **Гейт живого поиска:** в JSONL должно быть ≥1 события `web_search` (`grep -c '"web_search'`); 0 → голос не считается (`escalationSkipped: 'no-live-search'`) — Codex отвечал по памяти.
+- Codex подтверждает исключение → claim `CHALLENGED`/`OUTDATED` (отсеян). Не подтверждает → `DISPUTED` (агрегат JS, не enum верификатора): credibility ≥4, в отчёте секция `### Спорные факты`, в выводы не входит.
+- Деградации в один enum `escalationSkipped`: `no-binary` · `quota` · `timeout` · `invalid-output` · `no-live-search` · `budget` · `cap` → исключение по одному голосу как в schema v2 + флаг в ledger/телеметрии. Ретраев нет: квота Codex — общий пул с `/jadlis-research:verif`, приоритет у verif.
+- Правила для Codex в промпте: отсутствие подтверждения ≠ опровержение (это UNCHECKED); расхождение чисел только по форме записи/округлению ±2% — не опровержение; исключение подтверждать ТОЛЬКО по источнику, который прямо противоречит или отменяет claim.
+

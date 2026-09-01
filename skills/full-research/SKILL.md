@@ -64,7 +64,10 @@ Phase A (INTAKE: каналы + recon + интервью) → Phase B (Workflow 
       в резюме Phase C это НЕ считается провалом каналов). В recon добавь RU-вводные
       для агентов: якорные домены site:-запросов (vc.ru, habr.com, pikabu.ru, dtf.ru,
       t-j.ru, secrets.tbank.ru, incrussia.ru, rb.ru), site:t.me-дорки для Telegram-слоя;
-      серые форумы ищутся через Яндекс (их треды в его индексе).
+      серые форумы ищутся через Яндекс (их треды в его индексе). Дополняющие
+      локальные скиллы-каналы вне workflow (если установлены у пользователя): индекс
+      форумов СНГ (`/cis-forums`), zelenka/lolz (`/zelenka-research`) — предложи, если
+      тема кастдев/серый рынок.
    2. **Техническая / AI-тема?** → `hackernews` ВКЛ (для RU-тем ветка 1 приоритетнее);
       `youtube` — предложи как opt-in (сильные кластеры: tech/AI-туториалы и обзоры,
       маркетинг/продажи; транскрипты бесплатны с домашнего IP).
@@ -87,7 +90,8 @@ Phase A (INTAKE: каналы + recon + интервью) → Phase B (Workflow 
    **Default-набор** (ни одна ветка не сработала или кластер смешанный/неопределённый):
    `["web","codexweb","grokweb","reddit","twitter","hackernews","substack"]` — codexweb
    входит по умолчанию (после квотного probe из ветки 2; probe провален → выкинуть из
-   набора с сообщением).
+   набора с сообщением). Уточнение матрицы «кластер → каналы» — по телеметрии
+   (локальный `full-research-telemetry.py --trends`, `--channels`), не суждением.
 
    **Гейт `yandex`.** Канал требует ключа `YC_SEARCH_API_KEY` в `env` файла settings.json
    (ставит скилл `/jadlis-research:keys`; userConfig плагина сюда не годится —
@@ -142,7 +146,7 @@ Workflow({
     decisionContext: DECISION_CONTEXT,  // из интервью: какое решение принимает пользователь
     channels: SELECTED_CHANNELS,        // ключи: web/codexweb/grokweb/reddit/twitter/hackernews/substack (+opt-in: yandex, youtube, telegram)
     substackHandles: SUBSTACK_HANDLES,  // может быть пуст
-    aiModel: "claude-fable-5",          // модель analyst (синтез идёт через Fable-мост)
+    aiModel: "claude-fable-5-1",        // модель analyst (синтез идёт через Fable-мост)
     date: DATE,
     workDir: WORK_DIR,
     pluginRoot: PLUGIN_ROOT,            // ${CLAUDE_PLUGIN_ROOT} в JS НЕ подставляется — передаём значением
@@ -153,15 +157,23 @@ Workflow({
 
 Модели внутри workflow: каналы, верификаторы и curator — Opus 5
 (`jadlis-research:researcher-opus-xhigh` / `jadlis-research:orchestrator-fable-xhigh`);
-analyst — **Fable 5 через мост** (headless `claude -p`, биллинг — та же подписка).
+analyst — **Fable 5.1 через мост** (headless `claude -p`, биллинг — та же подписка).
 Отключение моста: `fableBridge: false` → analyst тоже на Opus 5 — тогда передай
 `aiModel: "claude-opus-5"`, frontmatter отчёта не должен врать.
 
-Workflow читает протоколы каналов сам, делает per-claim верификацию (CONFIRMED/CHALLENGED/
-OUTDATED) и **фильтрует** непрошедшие claims (не просто дописывает критику), затем analyst
-пишет draft-отчёт в `{WORK_DIR}/report.md`. Дождись `<task-notification>`, затем используй
-объект: `{workDir, status, channelsAnswered, channelStatus, failedChannels, aiModelActual, reportPath, queryRu, relatedCandidates, claimLedger, synthMeta}`.
-Прогресс — в `/workflows`.
+Workflow (ledger schema v3) читает протоколы каналов сам: curator выделяет до 16 claims
+с evidence-префиксами (спаны подставляет код), `urlhealth` проверяет evidence-URL и цитаты
+по снапшотам, два верификатора голосуют (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), при
+расхождении голосов третий голос даёт Codex (GPT-5.6 Sol, живой поиск; кап 8 эскалаций);
+не подтверждённое исключение → `DISPUTED` (спорные, в выводы не входят). Отсеянные claims
+**фильтруются** (не просто дописывается критика), затем analyst пишет draft-отчёт в
+`{WORK_DIR}/report.md`. Дождись `<task-notification>`, затем используй объект:
+`{workDir, status, ledgerSchemaVersion, channelsAnswered, channelStatus, failedChannels,
+aiModelActual, evidenceHealth, urlhealthSummary, escalationStats, reportPath, queryRu,
+relatedCandidates, claimLedger, synthMeta}`; `synthMeta.ledgerSummary` = `{total, confirmed,
+confirmedSplit, challenged, outdated, unchecked, disputed, escalated, escalationSkipped,
+weakEvidence, evidenceless, credibilityMedian, claimsDroppedByCap}`. Прогресс — в `/workflows`.
+`escalationCap: N` в args меняет кап эскалаций (дефолт 8; квота Codex — общий пул с verif).
 
 ## Phase C — WRITE (vault-контракт, главная сессия)
 
@@ -176,15 +188,26 @@ OUTDATED) и **фильтрует** непрошедшие claims (не прос
    - **Честный `ai_model`.** Сверь frontmatter `ai_model` с `aiModelActual` из объекта workflow
      (мост мог упасть в fallback на Opus — тогда frontmatter врёт). При расхождении поправь
      строку frontmatter на `ai_model: "{aiModelActual}"` перед записью в vault.
-   - **Каноническая секция.** Если `synthMeta.ledgerSummary.confirmed > 0`, проверь
+   - **Канонические секции.** Если `synthMeta.ledgerSummary.confirmed > 0`, проверь
      `grep -c '^### Проверенные факты$' draft`. Нет секции → дорендери программно из
-     `claimLedger` (claims с verdict=CONFIRMED: statement + бейдж credibility + первый URL
-     evidence) и вставь подсекцией в конец «## 📚 Контекст и находки».
+     `claimLedger` (claims с verdict=CONFIRMED: statement + «(N голосов)» + бейдж credibility
+     + первый URL evidence) и вставь подсекцией в конец «## 📚 Контекст и находки».
+     То же для `disputed > 0` и `### Спорные факты` (claims с verdict=DISPUTED: statement +
+     голоса + `escalation.reasoning`).
+   - **Ledger-метрики во frontmatter (H8).** Сверь с `synthMeta.ledgerSummary` и поправь
+     детерминированно (значения — числа, не строки): `ledger_schema: 3`,
+     `claims_confirmed`, `claims_disputed`, `claims_dropped` (= challenged + outdated),
+     `claims_unchecked`, `votes_confirmed_2` (= confirmed − confirmedSplit),
+     `votes_confirmed_1` (= confirmedSplit), `escalations` (= escalated),
+     `credibility_median`. Отсутствующее поле — добавить перед `gaps:`. Так отчёт можно
+     переоценить без wf-лога.
 
-3. **Pre-write dedup (obsidian).** Через Bash (если Obsidian открыт; иначе шаги CLI пропусти):
+3. **Pre-write dedup.** Порядок из shared-контракта: (1) MCP `qmd` `query` payload'ом
+   (lex+vec по `relatedCandidates`, если сервер подключён) → (2) детерминированный
+   `command grep -rIl "{ключ}" "{VAULT_RESEARCH_DIR}"` → (3) `obsidian search` только как
+   fallback (флаки, гонять 2–3×), если Obsidian открыт:
    ```bash
    obsidian search query="{ключевые слова из QUERY_RU}" path="Знания/Ресерчи" limit=5 format=json 2>/dev/null || echo "CLI_UNAVAILABLE"
-   obsidian search query="{ключевое слово}" limit=10 format=json 2>/dev/null || echo "CLI_UNAVAILABLE"
    ```
    Запомни найденные имена заметок. Если есть очень близкий дубликат — реши: supersede / связать.
 
@@ -201,9 +224,16 @@ OUTDATED) и **фильтрует** непрошедшие claims (не прос
 6. **Post-write (daily note).** Если Obsidian открыт:
    ```bash
    NOTE_NAME=$(basename "{REPORT_PATH}" .md)
-   obsidian append path="Периоды/День/$(date +%F).md" content="- [[${NOTE_NAME}]] — полное исследование, ожидает ревью" 2>/dev/null || true
+   DAILY=$(obsidian daily:path 2>/dev/null) || DAILY="Периоды/День/$(date +%F).md"
+   obsidian append path="$DAILY" content="- [[${NOTE_NAME}]] — полное исследование, ожидает ревью" 2>/dev/null || true
    obsidian backlinks file="${NOTE_NAME}" counts 2>/dev/null || true
+   # ретенция workDir (30 дней с ссылкой из vault, 7 — без; только dry-run без --yes) и
+   # машинно-локальная read-side телеметрия — отсутствие скриптов не ломает контракт
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/workdir-gc.py" --root "{VAULT_PATH}" --keep-days 30 --dry-run 2>/dev/null | tail -2 || true
+   python3 ~/.claude/scripts/full-research-telemetry.py --sync >/dev/null 2>&1 || true
    ```
+   (gc печатает кандидатов на удаление; само удаление — только по явной просьбе
+   пользователя: `--yes`.)
 
 7. **Резюме пользователю:**
    - Вердикт под решение из интервью (`DECISION_CONTEXT`): что делать / чего не делать —
@@ -214,6 +244,10 @@ OUTDATED) и **фильтрует** непрошедшие claims (не прос
      Все каналы ok → одна строка «все N каналов отработали».
    - Что отсеяла верификация: из `claimLedger`/`synthMeta.droppedClaims` — какие claims
      CHALLENGED/OUTDATED и почему. Они **не вошли** в отчёт (фильтрация, не дописанная критика).
+   - **Верификация одной строкой** из `ledgerSummary`/`escalationStats`: «проверено N claims:
+     X подтверждено (Y одним голосом), Z спорных (эскалаций в Codex: E, пропущено: S — причины),
+     W отсеяно, U не проверено; evidence: weak K, без evidence L; urlhealth: dead/fabrication».
+     `evidenceHealth: "skipped"` → сказать, что здоровье URL не проверялось.
    - Gaps (`synthMeta.gaps`): что исследование не покрыло.
    - Модель синтеза: `aiModelActual` — та, что сработала (мост мог упасть на Opus).
    - Путь к отчёту: `REPORT_PATH` (vault, `Знания/Ресерчи`).
