@@ -1,99 +1,102 @@
-# Web (Яндекс, Рунет) — протокол поиска для агента
+# Web (Yandex, Runet) — search protocol for the agent
 
-## Инструмент: yandex-search.sh (через Bash, НЕ MCP)
+## Tool: yandex-search.sh (via Bash, NOT MCP)
 
-Поиск по индексу Яндекса через Yandex Search API v2. Канал **платный** (async ≈0,025 ₽/запрос,
-грант YC) и **opt-in**: включается оркестратором только для RU-рыночных тем. Смысл канала —
-слой Рунета, который Brave не индексирует глубоко (замер 01.2026: у Яндекса наивысшее
-доменное разнообразие выдачи — 164 домена из 1630 SERP не встретились ни у одного другого
-движка; типичные: dzen.ru, secrets.tbank.ru, sberbusiness.live, incrussia.ru). Прежняя
-цифра «64,7% уникальных доменов против Brave» публичного источника не имеет и снята.
+Search over the Yandex index via Yandex Search API v2. The channel is **paid** (async ≈0,025 ₽/request,
+YC grant) and **opt-in**: the orchestrator turns it on only for RU-market topics. The point of the channel is
+the Runet layer that Brave does not index deeply (measurement 01.2026: Yandex has the highest
+domain diversity of results — 164 domains out of 1630 SERP were not met by any other
+engine; typical ones: dzen.ru, secrets.tbank.ru, sberbusiness.live, incrussia.ru). The earlier
+figure "64,7% unique domains versus Brave" has no public source and has been withdrawn.
 
-Базовая команда:
+Base command:
 
 ```bash
 Y={PLUGIN_ROOT}/scripts/yandex-search.sh
-bash "$Y" "<запрос с операторами>" --out json     # async (дефолт): обычно ~3-6 с; изредка поллинг тянется до ~90 с (17 поллов, 2026-08-26) — это не сбой, ждать
-bash "$Y" "<запрос>" --out urls                    # только URL (дёшево по токенам)
+bash "$Y" "<query with operators>" --out json     # async (default): usually ~3-6 s; occasionally polling drags on to ~90 s (17 polls, 2026-08-26) — this is not a failure, wait
+bash "$Y" "<query>" --out urls                    # URLs only (cheap in tokens)
 ```
 
-Вывод: `--out text|json|urls`; stdout чист для пайпов, диагностика (`[cost]`/`[poll]`) — в stderr.
-Exit: 0 ок (включая found=0) · 2 нет ключа (ENV `YC_SEARCH_API_KEY`) · 3 ошибка API · 4 таймаут поллинга.
+Output: `--out text|json|urls`; stdout is clean for pipes, diagnostics (`[cost]`/`[poll]`) go to stderr.
+Exit: 0 ok (including found=0) · 2 no key (ENV `YC_SEARCH_API_KEY`) · 3 API error · 4 polling timeout.
 
-**ЗАПРЕЩЕНО в этом канале:** `--sync` (×16 цена), gen-search (`/v2/gen/search`, 5 ₽/зап),
-`--sort time` (сортирует весь индекс по времени, релевантность рушится до шума — проверено
-2026-08-06), региональный параметр `-r` для не-гео тем (0 новых доменов, только перестановка).
+**FORBIDDEN in this channel:** `--sync` (×16 the price), gen-search (`/v2/gen/search`, 5 ₽/req),
+`--sort time` (sorts the whole index by time, relevance collapses into noise — verified
+2026-08-06), the regional parameter `-r` for non-geo topics (0 new domains, only a reshuffle).
 
-## Протокол (4-6 async-вызовов ≈ 0,10-0,15 ₽)
+## Protocol (4-6 async calls ≈ 0,10-0,15 ₽)
 
-### Layer 1 — Широкий RU-запрос (1-2 вызова)
+### Layer 1 — Broad RU query (1-2 calls)
 
 ```bash
-bash "$Y" "<тема на русском, ключевые слова>" --out json
+bash "$Y" "<topic in Russian, keywords>" --out json
 ```
 
-Запрос на русском, ≤400 симв. и ≤40 слов. Второй вызов — только если первый дал слабую
-релевантность (одна переформулировка, не больше).
+The query is in Russian, ≤400 chars and ≤40 words. A second call only if the first gave weak
+relevance (one rephrasing, no more).
+Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt;
+when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md`
+first (native-term dictionary).
 
-### Layer 2 — Якорные площадки (2-3 вызова)
+### Layer 2 — Anchor platforms (2-3 calls)
 
-Самый сильный сценарий канала (18-19 из 20 URL отсутствуют в Brave):
+The channel's strongest scenario (18-19 out of 20 URLs are absent from Brave):
 
 ```bash
-bash "$Y" "site:vc.ru <тема>" --out json
-bash "$Y" "host:habr.com <тема>" --out json
+bash "$Y" "site:vc.ru <topic>" --out json
+bash "$Y" "host:habr.com <topic>" --out json
 ```
 
-Третий вызов — по теме: `site:dzen.ru` (блоги), `site:secrets.tbank.ru` / `site:sberbusiness.live`
-(бизнес-медиа банков), `site:incrussia.ru`. `site:` = хост+поддомены, `host:` = точный хост,
-**`domain:` — это TLD-зона, НЕ хост** (не использовать для площадок).
+The third call depends on the topic: `site:dzen.ru` (blogs), `site:secrets.tbank.ru` / `site:sberbusiness.live`
+(business media of banks), `site:incrussia.ru`. `site:` = host + subdomains, `host:` = exact host,
+**`domain:` is a TLD zone, NOT a host** (do not use it for platforms).
 
-### Layer 3 — Свежесть (0-1 вызов)
+### Layer 3 — Freshness (0-1 call)
 
-Только оператором даты (жёсткий фильтр, ранжирование остаётся релевантностным):
+Only via the date operator (a hard filter, ranking stays relevance-based):
 
 ```bash
-bash "$Y" "<тема> date:>20260601" --out json
+bash "$Y" "<topic> date:>20260601" --out json
 ```
 
-### Layer 4 — Контраргументы (1 вызов)
+### Layer 4 — Counter-arguments (1 call)
 
 ```bash
-bash "$Y" "<тема> (проблемы | критика | не работает | провал)" --out json
+bash "$Y" "<topic> (проблемы | критика | не работает | провал)" --out json
 ```
 
-На якорных площадках контраргументный слой силён (вида «71% внедрили — работают 11%») —
-если Layer 2 уже дал контраргументы, этот вызов можно пропустить.
+On the anchor platforms the counter-argument layer is strong (of the kind "71% adopted it — 11% actually work") —
+if Layer 2 already gave counter-arguments, this call can be skipped.
 
-## Ловушки (сверено 2026-08-06)
+## Pitfalls (verified 2026-08-06)
 
-1. **Главный режим отказа — ТИХОЕ РАСШИРЕНИЕ запроса, а не пустая выдача.** Яндекс молча
-   снимает кавычки с длинных точных фраз (`<reask rule=Unquote>`) и выбрасывает редкие
-   токены, всегда возвращая 20 «правдоподобных» URL — даже на бессмысленный запрос.
-   Защита: (а) точные фразы держать короткими (1-3 слова); (б) при квотированном термине
-   проверять, что он реально встречается в title/passages выдачи — иначе выдачу отбросить;
-   (в) при подозрении перегнать запрос с `--raw` и проверить блок `<reask>`;
-   (г) `found` НЕ индикатор существования темы — растёт даже на мусоре.
-2. `<error code="15">` / found=0 — штатный «ничего не найдено», НЕ сбой: не ретраить.
-3. Выдача нестабильна между вызовами (~15-18% дрейфа URL) — не сравнивать повторные прогоны.
-4. Минус-слово не режет другой токен («-бу» не уберёт «б/у»).
+1. **The main failure mode is SILENT QUERY EXPANSION, not an empty result set.** Yandex silently
+   strips the quotes from long exact phrases (`<reask rule=Unquote>`) and throws out rare
+   tokens, always returning 20 "plausible" URLs — even for a meaningless query.
+   Defence: (a) keep exact phrases short (1-3 words); (b) with a quoted term,
+   check that it actually occurs in the title/passages of the results — otherwise discard the results;
+   (c) when in doubt, re-run the query with `--raw` and check the `<reask>` block;
+   (d) `found` is NOT an indicator that the topic exists — it grows even on garbage.
+2. `<error code="15">` / found=0 is the regular "nothing found", NOT a failure: do not retry.
+3. Results are unstable between calls (~15-18% URL drift) — do not compare repeated runs.
+4. A negative keyword does not cut a different token ("-бу" will not remove "б/у").
 
-## Правила цитирования
+## Citation rules
 
-- **Возврат по схеме — только однострочные значения.** Сырые пассажи Яндекса содержат
-  литеральные переносы строк и управляющие символы; вставленные как есть в поля схемы
-  (context, findings), они ломают JSON-вывод StructuredOutput — канал падает ПОСЛЕ
-  успешного ресерча (случай 2026-08-06). Склеивай пассажи в одну строку через пробел,
-  context ≤300 символов, без табов и переносов.
-- Префиксы цитат: [y1], [y2], ... Admiralty — по типу источника за URL (страницы, не Яндекса).
-- Учитывай природу уникального слоя: dzen.ru и корпоративные блоги — чаще C-E (контент-маркетинг),
-  деловые медиа (incrussia.ru, secrets.tbank.ru) — B-C. Не выдавать SEO-подборки за экспертизу.
-- Пассажи из `--out json` достаточны для большинства цитат; полный текст страницы — только
-  при необходимости, через `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape` (1 req/s), НЕ через Яндекс.
+- **Return only single-line values in the schema.** Raw Yandex passages contain
+  literal line breaks and control characters; inserted as-is into schema fields
+  (context, findings) they break the StructuredOutput JSON output — the channel fails AFTER
+  successful research (case 2026-08-06). Glue passages into one line with spaces,
+  context ≤300 characters, no tabs and no line breaks.
+- Citation prefixes: [y1], [y2], ... Admiralty — by the type of source behind the URL (of the pages, not of Yandex).
+- Take the nature of the unique layer into account: dzen.ru and corporate blogs are more often C-E (content marketing),
+  business media (incrussia.ru, secrets.tbank.ru) — B-C. Do not pass SEO listicles off as expertise.
+- Passages from `--out json` are enough for most citations; the full page text — only
+  when necessary, via `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape` (1 req/s), NOT via Yandex.
 
-## Деградация (БЕЗ фоллбэка на Brave)
+## Degradation (NO fallback to Brave)
 
-Exit 2 (нет ключа) / 3 (ошибка API) / 4 (таймаут) или систематические ошибки → **без ретраев**:
-верни sourceQuality="LOW", пустые citations, пометь в findings «Яндекс-канал недоступен (exit N)».
-**НЕ фоллбэчить на Brave** — открытый веб уже покрывает канал web; дублировать его выдачу
-под префиксом [y] вредно (ломает семейную логику верификации). НЕ роняй workflow.
+Exit 2 (no key) / 3 (API error) / 4 (timeout) or systematic errors → **no retries**:
+return sourceQuality="LOW", empty citations, mark in findings "Yandex channel unavailable (exit N)".
+**Do NOT fall back to Brave** — the open web already covers the web channel; duplicating its results
+under the [y] prefix is harmful (it breaks the family logic of verification). Do NOT crash the workflow.

@@ -1,11 +1,11 @@
 ---
 name: full-research
 description: >
-  Полное исследование темы: веб-поиск тремя движками (Brave + Codex web search +
+  Full research of a topic: web search with three engines (Brave + Codex web search +
   Grok web search) + community research (Reddit, Twitter/X, HackerNews, Substack,
-  YouTube, Telegram) параллельно через workflow. Разведка + интервью → N параллельных
-  исследователей → per-claim кросс-канальная верификация → синтез → Obsidian vault
-  (Знания/Ресерчи/).
+  YouTube, Telegram; opt-in language layers ja/zh/ko/eu) in parallel through a workflow.
+  Recon + interview → N parallel researchers → per-claim cross-channel verification →
+  synthesis → Obsidian vault (Знания/Ресерчи/).
   TRIGGER when: user says "полный ресерч", "full research", "исследуй тему полностью",
   "deep research", "глубокий ресерч", "все источники", "research everywhere",
   "исследование по всем источникам", "в соцсетях", "что говорят люди",
@@ -21,98 +21,121 @@ allowed-tools:
   - Glob
   - Bash
   - AskUserQuestion
+  - EnterPlanMode
+  - ExitPlanMode
   - Workflow
   - mcp__plugin_jadlis-research_brave-search__brave_web_search
-argument-hint: "<query — тема исследования>"
+argument-hint: "<query — research topic>"
 model: claude-opus-5
 effort: xhigh
 ---
 
-# /jadlis-research:full-research — полное исследование темы (гибрид Skill + Workflow)
+# /jadlis-research:full-research — full research of a topic (hybrid Skill + Workflow)
 
-Тяжёлая часть (N канальных исследователей → per-claim верификация с live brave
-counter-search → analyst-синтез) исполняется детерминированным workflow
-**`full-research-core`**. Скилл делает интерактивный intake (Phase 1: каналы + разведка
-+ интервью) и запись в vault (vault-контракт: dedup, wikilinks, запись в дневную заметку).
+The heavy part (N channel researchers → per-claim verification with live Brave counter-search →
+analyst synthesis) runs in the deterministic workflow **`full-research-core`**. The skill does the
+interactive intake (Phase A: channels + recon + interview, in plan mode) and the vault write
+(vault contract: dedup, wikilinks, daily-note entry).
 
-**Запрос пользователя:** `$ARGUMENTS`
+**User query:** `$ARGUMENTS`
 
-## Архитектура
+Language convention (Plan 2, 2026-09): everything the agents read and write inside the workDir
+(channel files, snapshot headers, curator/verifier/escalation output, the claim ledger) is in
+English — the curator, 2×16 verifiers and the analyst read those files and Cyrillic tokenises
+~1.5-2× dearer. Russian stays where a human reads it: the questions to the user, the report
+`report.md` (it becomes the vault note as is), `queryRu`, the summary of Phase C, Russian example
+queries in the Yandex/Telegram protocols, and `quotes[]` in the language of the original.
+
+## Architecture
 
 ```
-Phase A (INTAKE: каналы + recon + интервью) → Phase B (Workflow full-research-core)
-  → Phase C (WRITE: vault-контракт)
+Phase A (INTAKE in plan mode: channels + recon + interview → brief in the plan file; ExitPlanMode = launch gate)
+  → Phase B (Workflow full-research-core, exec) → Phase C (WRITE: vault contract)
 ```
 
-## Phase A — INTAKE (главная сессия)
+Under `opusplan` the main session is Fable 5.1 while in plan mode and Opus 5 in exec: the intake
+(judgement: channel choice, refined query, decision context) runs on Fable, the mechanical part
+(launching the workflow, writing the vault) on Opus. The frontmatter `model:` above holds for one
+turn only — do not rely on it beyond the first turn.
 
-1. **Тема.** Если `$ARGUMENTS` пуст — попроси тему через AskUserQuestion и остановись.
+## Phase A — INTAKE (main session, plan mode)
 
-2. **Выбор каналов — роутинг-дерево.** Явно названные пользователем источники
-   ("в Reddit и HN", "only twitter") всегда перекрывают дерево;
-   "соцсети"/"сообщества" → `["reddit","twitter","hackernews","substack"]`; "web" →
-   `web,codexweb,grokweb` (codexweb — после квотного probe, grokweb — после probe живости Grok, см. гейты ниже). Иначе — три
-   бинарных вопроса по теме, сверху вниз, срабатывают КУМУЛЯТИВНО:
+0. **Enter plan mode.** Call `EnterPlanMode` before anything else: recon is read-only, the
+   interview goes through AskUserQuestion, the brief is written into the plan file. No file in the
+   vault or the workDir is written in Phase A. If plan mode is unavailable (headless, `-p`), run the
+   same steps without it and write the brief to `{WORK_DIR}/_brief.md` instead.
 
-   1. **RU/СНГ-тема?** (кириллическая формулировка про российский рынок/сервисы/цены,
-      «в России / Рунете / СНГ», vc.ru/Habr/Дзен/Telegram-контекст) →
-      `yandex` ВКЛ **при наличии ключа `YC_SEARCH_API_KEY`** (см. гейт ниже; ключа нет —
-      канал не включать, сказать пользователю, что RU-слой идёт только через Brave и
-      Telegram); `telegram` ВКЛ (публичные t.me-превью + дорки, бесплатный контур;
-      для кастдев-тем — обязателен); `twitter`, `substack`, `hackernews` — ВЫКЛ
-      (EN-тишина RU-тем структурна — это смещение площадок, не отсутствие спроса;
-      в резюме Phase C это НЕ считается провалом каналов). В recon добавь RU-вводные
-      для агентов: якорные домены site:-запросов (vc.ru, habr.com, pikabu.ru, dtf.ru,
-      t-j.ru, secrets.tbank.ru, incrussia.ru, rb.ru), site:t.me-дорки для Telegram-слоя;
-      серые форумы ищутся через Яндекс (их треды в его индексе). Дополняющие
-      локальные скиллы-каналы вне workflow (если установлены у пользователя): индекс
-      форумов СНГ (`/cis-forums`), zelenka/lolz (`/zelenka-research`) — предложи, если
-      тема кастдев/серый рынок.
-   2. **Техническая / AI-тема?** → `hackernews` ВКЛ (для RU-тем ветка 1 приоритетнее);
-      `youtube` — предложи как opt-in (сильные кластеры: tech/AI-туториалы и обзоры,
-      маркетинг/продажи; транскрипты бесплатны с домашнего IP).
-      `codexweb` — во ВСЕХ темах (default-набор). **Квотный probe codexweb (всегда перед
-      включением):** квота Codex-подписки — общий пул с верификатором
-      `/jadlis-research:verif` (приоритет у verif). Probe: `codex exec -m gpt-6-astra
-      -s read-only --skip-git-repo-check -c service_tier="default" 'ok' < /dev/null` (≈6 с); usage-limit ошибка → канал
-      ВЫКЛ, сообщи пользователю («codexweb пропущен: квота Codex зарезервирована/исчерпана»).
-      Бинарника `codex` нет → канал ВЫКЛ без сообщения об ошибке.
-   3. **Академическая тема?** → предложи `/jadlis-research:search-paper` (вместо или
-      рядом с full-research).
-   4. **Локальная/бытовая тема (места)?** («найди/выбери заведение, клинику, сервис,
-      секцию в Варшаве/городе») → канал `web` получает place-слой (секция «Place-слой»
-      в web-protocol.md: places-fetch.sh → Brave Place); каналы `youtube`
-      (обзоры мест) и `telegram` (локальные чаты) — предложи как opt-in. Гейт
-      places-fetch: ключ `GOOGLE_PLACES_API_KEY` (нет ключа → скрипт сам деградирует
-      в Brave Place, это штатно). Регион по умолчанию — PL, переопределяется
-      переменной `PLACES_REGION`.
+1. **Topic.** If `$ARGUMENTS` is empty — ask for the topic via AskUserQuestion (in Russian) and stop.
 
-   **Default-набор** (ни одна ветка не сработала или кластер смешанный/неопределённый):
-   `["web","codexweb","grokweb","reddit","twitter","hackernews","substack"]` — codexweb
-   входит по умолчанию (после квотного probe из ветки 2; probe провален → выкинуть из
-   набора с сообщением); `grokweb` и `twitter` — после probe живости Grok (гейт ниже;
-   `GROK_DOWN` → выкинуть оба из набора этого прогона, сам набор не менять). Уточнение матрицы «кластер → каналы» — по телеметрии
-   (локальный `full-research-telemetry.py --trends`, `--channels`), не суждением.
+2. **Channel choice — routing tree.** Sources named explicitly by the user ("в Reddit и HN",
+   "only twitter") always override the tree; "соцсети"/"сообщества" →
+   `["reddit","twitter","hackernews","substack"]`; "web" → `web,codexweb,grokweb` (codexweb — after
+   the quota probe, grokweb — after the Grok liveness probe, see the gates below). Otherwise —
+   binary questions about the topic, top-down, applied CUMULATIVELY:
 
-   **Гейт `yandex`.** Канал требует ключа `YC_SEARCH_API_KEY` в `env` файла settings.json
-   (ставит скилл `/jadlis-research:keys`; userConfig плагина сюда не годится —
-   sensitive-значения не доезжают до Bash). Ключ не настроен → `yandex` не предлагать
-   вообще. Если ключа нет, а канал всё-таки выбран: `yandex-search.sh` вернёт `exit 2`,
-   канал деградирует (`sourceQuality=LOW`, пустые citations) и workflow это НЕ роняет.
-   Платный: ≈0,1-0,15 ₽/тема. Вне RU-ветки — только по явной просьбе («с Яндексом»).
-   Слой Рунета у Brave слаб (замер 01.2026: у Яндекса наивысшее доменное разнообразие
-   выдачи, 164 домена из 1630 SERP не встретились ни у одного другого движка).
+   1. **RU/CIS topic?** (Cyrillic phrasing about the Russian market/services/prices,
+      «в России / Рунете / СНГ», vc.ru/Habr/Дзен/Telegram context) →
+      `yandex` ON **only with the key `YC_SEARCH_API_KEY`** (gate below; no key — do not enable the
+      channel, tell the user the RU layer goes through Brave and Telegram only); `telegram` ON
+      (public t.me previews + dorks, free contour; mandatory for custdev topics); `twitter`,
+      `substack`, `hackernews` — OFF (English silence on RU topics is structural — a platform
+      bias, not absence of demand; in the Phase C summary this is NOT counted as a channel
+      failure). Add RU inputs for the agents to the brief: anchor domains for `site:` queries
+      (vc.ru, habr.com, pikabu.ru, dtf.ru, t-j.ru, secrets.tbank.ru, incrussia.ru, rb.ru),
+      `site:t.me` dorks for the Telegram layer; grey forums are reached through Yandex (their
+      threads are in its index). Complementary local channel skills outside the workflow (if the
+      user has them installed): the CIS forum index (`/cis-forums`), zelenka/lolz
+      (`/zelenka-research`) — suggest them for custdev / grey-market topics.
+   2. **Technical / AI topic?** → `hackernews` ON (for RU topics branch 1 has priority);
+      `youtube` — offer as opt-in (strong clusters: tech/AI tutorials and reviews, marketing/sales;
+      transcripts are free from the home IP).
+      `codexweb` — in ALL topics (default set). **Codex quota probe (always before enabling):** the
+      Codex subscription quota is a shared pool with the verifier `/jadlis-research:verif` (verif has
+      priority). Probe: `codex exec -m gpt-6-astra
+      -s read-only --skip-git-repo-check -c service_tier="default" 'ok' < /dev/null` (≈6 s); a
+      usage-limit error → channel OFF, tell the user («codexweb пропущен: квота Codex
+      зарезервирована/исчерпана»). No `codex` binary → channel OFF without an error message.
+   3. **Academic topic?** → suggest `/jadlis-research:search-paper` (instead of or next to
+      full-research).
+   4. **Local / everyday topic (places)?** («найди/выбери заведение, клинику, сервис, секцию в
+      Варшаве/городе») → the `web` channel gets the place layer (section "Place layer" in
+      web-protocol.md: places-fetch.sh → Brave Place); the channels `youtube` (place reviews) and
+      `telegram` (local chats) — offer as opt-in. places-fetch gate: the key
+      `GOOGLE_PLACES_API_KEY` (no key → the script degrades to Brave Place by itself, that is
+      normal). Default region PL, overridden by the variable `PLACES_REGION`.
+   5. **Asian / EU market topic, or query language ∉ {ru, en}?** (Plan 2, tranche 3 — language
+      layers, trigger-scoped) → add the matching language channels `ja` / `zh` / `ko` / `eu` (own
+      protocols, own families; NEVER in the default set) and set `languages` accordingly (below).
+      Only the layers the topic really needs — a Japanese indie-dev topic gets `ja`, not all four.
+      A language layer moves into the default set only after a leave-one-out check by the 2026-08
+      criterion (≥1 CONFIRMED claim per run attributable to it).
 
-   **Гейт `youtube`.** С ключом `YOUTUBE_API_KEY` (userConfig плагина) канал использует
-   MCP `mcp__plugin_jadlis-research_youtube__*` для поиска и метаданных. Без ключа —
-   MCP-вызовы **пропускать**, канал работает через Brave `site:youtube.com` +
-   транскрипты (`scripts/yt-transcript.py`), это штатная деградация.
+   **Default set** (no branch fired, or the cluster is mixed/undetermined):
+   `["web","codexweb","grokweb","reddit","twitter","hackernews","substack"]` — codexweb is in by
+   default (after the quota probe of branch 2; probe failed → drop it from the set with a message);
+   `grokweb` and `twitter` — after the Grok liveness probe (gate below; `GROK_DOWN` → drop both
+   from this run's set, do not change the set itself). Refinement of the "cluster → channels"
+   matrix — by telemetry (local `full-research-telemetry.py --trends`, `--channels`), not by judgement.
 
-   **Гейт `grokweb` / `twitter` (probe живости Grok).** Оба канала идут через Grok CLI,
-   у которого баланс подписки Grok Build кончается независимо от Claude (03-04.09.2026 —
-   468 отказов `API error (status 402 Payment Required): Grok Build usage balance exhausted`,
-   05.09 баланс пополнен). Probe перед включением (стоимость $0; 402 приходит за ~0,6 с,
-   живой ответ 5-10 с):
+   **Gate `yandex`.** The channel needs the key `YC_SEARCH_API_KEY` in the `env` of settings.json
+   (set by the skill `/jadlis-research:keys`; the plugin userConfig is no good here — sensitive
+   values do not reach Bash). Key not configured → do not offer `yandex` at all. If there is no key
+   but the channel was still chosen: `yandex-search.sh` returns `exit 2`, the channel degrades
+   (`sourceQuality=LOW`, empty citations) and the workflow does NOT fail. Paid: ≈0.1-0.15 ₽/topic.
+   Outside the RU branch — only on explicit request («с Яндексом»). Brave's Runet layer is weak
+   (measured 01.2026: Yandex has the highest domain diversity of results, 164 domains out of 1630
+   SERP entries appeared in no other engine).
+
+   **Gate `youtube`.** With the key `YOUTUBE_API_KEY` (plugin userConfig) the channel uses the
+   MCP `mcp__plugin_jadlis-research_youtube__*` for search and metadata. Without the key — **skip**
+   the MCP calls, the channel works through Brave `site:youtube.com` + transcripts
+   (`scripts/yt-transcript.py`), a normal degradation.
+
+   **Gate `grokweb` / `twitter` (Grok liveness probe).** Both channels go through the Grok CLI,
+   whose Grok Build subscription balance runs out independently of Claude (03-04.09.2026 —
+   468 refusals `API error (status 402 Payment Required): Grok Build usage balance exhausted`,
+   05.09 balance topped up). Probe before enabling (cost $0; a 402 arrives in ~0.6 s, a live
+   answer in 5-10 s):
 
    ```bash
    GROK_ISO_HOME="$HOME/.cache/grok-iso-home"; mkdir -p "$GROK_ISO_HOME"
@@ -122,52 +145,85 @@ Phase A (INTAKE: каналы + recon + интервью) → Phase B (Workflow 
      && echo GROK_DOWN || echo GROK_OK
    ```
 
-   `HOME="$GROK_ISO_HOME"` обязателен — иначе Grok читает `permissions.deny` основного
-   профиля и глушит собственный `web_fetch` (см. `protocols/grok-web-protocol.md`).
-   Ненулевой exit и `Error: max turns reached` — НЕ признак смерти: probe судит ТОЛЬКО
-   по grep, `--max-turns 1` штатно обрывает живой ответ на первом же tool-call.
+   `HOME="$GROK_ISO_HOME"` is mandatory — otherwise Grok reads the `permissions.deny` of the main
+   profile and mutes its own `web_fetch` (see `protocols/grok-web-protocol.md`). A non-zero exit
+   and `Error: max turns reached` are NOT signs of death: the probe judges ONLY by the grep,
+   `--max-turns 1` legitimately cuts a live answer at the first tool call.
 
-   `GROK_DOWN` → выкинь `grokweb` и `twitter` из `SELECTED_CHANNELS` этого прогона и
-   сообщи: «Grok недоступен (402 usage balance exhausted) — каналы grokweb/twitter
-   пропущены; вернутся сами после пополнения баланса». Дефолтный набор каналов при этом
-   НЕ меняется — probe гейтит прогон, а не конфиг, и после пополнения баланса каналы
-   возвращаются сами, без правок и рендера. `GROK_OK` → оба канала работают как обычно.
+   `GROK_DOWN` → drop `grokweb` and `twitter` from this run's `SELECTED_CHANNELS` and tell the
+   user: «Grok недоступен (402 usage balance exhausted) — каналы grokweb/twitter пропущены;
+   вернутся сами после пополнения баланса». The default channel set is NOT changed — the probe
+   gates the run, not the config, and after a top-up the channels return by themselves, without
+   edits or a render. `GROK_OK` → both channels work as usual.
+   Twitter degradation slot (off by default): with `GROK_DOWN` AND the env var `TWITTERAPI_IO_KEY`
+   set, the `twitter` channel may stay in the set in keyword-only mode through the TwitterAPI.io
+   MCP (protocol section "Degradation slot"); no key → skip as above. Enabled in tranche 4 after
+   the owner's trial.
 
-   **Краевой случай.** Явный режим «web» = `web,codexweb,grokweb`: если Grok мёртв И
-   квотный probe codexweb провален, остаётся один канал → workflow вернёт
-   `insufficient-sources`. Тогда предложи добавить `reddit`/`hackernews` или уйти в
-   `/jadlis-research:search`. В default-наборе такой дыры нет: без Grok остаются
-   `web, codexweb, reddit, hackernews, substack` = 4 семейства из 5, гейт достаточности
-   проходит (реальный прогон 03.09: каналов 5/7, семей 4/5, статус ok).
+   **Edge case.** The explicit "web" mode = `web,codexweb,grokweb`: if Grok is dead AND the
+   codexweb quota probe failed, one channel remains → the workflow returns
+   `insufficient-sources`. Then offer to add `reddit`/`hackernews` or to fall back to
+   `/jadlis-research:search`. The default set has no such hole: without Grok
+   `web, codexweb, reddit, hackernews, substack` = 4 families out of 5 remain, the sufficiency
+   gate passes (real run 03.09: channels 5/7, families 4/5, status ok).
 
-3. **Разведка (recon).** Сделай 1-2 вызова `mcp__plugin_jadlis-research_brave-search__brave_web_search`
-   (тариф Search: 50 req/s, параллель OK; `count: 5`): широкий обзор темы + опц. уточняющий аспект. Цель —
-   сориентироваться (аспекты, под-темы, контроверсии), не собирать данные.
-   **Substack handle extraction:** если "substack" в каналах — из результатов Brave спарси URL
-   вида `<handle>.substack.com` → массив `SUBSTACK_HANDLES`.
+3. **Recon.** Make 1-2 calls of `mcp__plugin_jadlis-research_brave-search__brave_web_search`
+   (Search tier: 50 req/s, parallel OK; `count: 5`): a broad overview of the topic + optionally one
+   clarifying aspect. The goal is orientation (aspects, sub-topics, controversies), not data
+   collection. Read-only — plan mode allows it.
+   **Substack handle extraction:** if "substack" is among the channels — parse URLs of the form
+   `<handle>.substack.com` from the Brave results → the array `SUBSTACK_HANDLES`.
 
-4. **Интервью (ВСЕГДА, skip нет).** Через AskUserQuestion:
-   - Обязательный первый вопрос: «Какое решение ты будешь принимать на основе этого
-     ресёрча?» — варианты-гипотезы сформируй из разведки. Ответ → `DECISION_CONTEXT`
-     (1-2 предложения: что человек будет делать/выбирать по итогам).
-   - Ещё 1-3 вопроса по результатам разведки: какой аспект интересует; контекст/use case;
-     временной горизонт/recency. Если запрос уже узкий — эти вопросы можно опустить,
-     но вопрос о решении задаётся всегда.
-   Сформируй `REFINED_QUERY` (1-3 предложения).
+4. **Interview (ALWAYS, no skip).** Through AskUserQuestion, in Russian:
+   - Mandatory first question: «Какое решение ты будешь принимать на основе этого ресёрча?» —
+     form the hypothesis options from the recon. The answer → `DECISION_CONTEXT` (1-2 sentences:
+     what the person will do/choose based on the result).
+   - 1-3 more questions based on the recon: which aspect matters; context/use case; time
+     horizon/recency. If the query is already narrow these may be skipped, but the decision
+     question is always asked.
+   Form `REFINED_QUERY` (1-3 sentences). Language of REFINED_QUERY: the language of the user's
+   query (usually Russian) — the channel agents receive it as is and search in `LANGUAGES`.
 
-5. **Подготовка.** Вычисли: `SESSION_ID = ${CLAUDE_SESSION_ID}`; `QUERY_SLUG` (транслит латиницей,
-   ≤40, lowercase, дефисы); `QUERY_RU` (краткая русская формулировка ≤25 симв);
-   `DATE` = !`date +%Y-%m-%d` (значение уже подставлено при загрузке скилла, Bash не нужен);
-   `VAULT_PATH = ${user_config.VAULT_PATH}` — **если значение пусто или осталось литералом
-   `${user_config.VAULT_PATH}` (например, при локальной обкатке через `--plugin-dir`), возьми
-   `~/Jadlis`**;
-   `WORK_DIR = {VAULT_PATH}/.full-research/{SESSION_ID}_{QUERY_SLUG}` — **всегда АБСОЛЮТНЫЙ путь**
-   (относительный резолвится от cwd на момент спавна агентов: `cd` главной сессии перед
-   resume «терял» файлы при status ok; это касается и `resumeFromRunId`-вызовов —
-   args передавать целиком с тем же абсолютным workDir);
+5. **Language slot.** `LANGUAGES` = the languages the channels must search in. Default = the
+   language of the query (the core detects ru/en/ja/zh/ko itself). Set it explicitly when the
+   topic lives on platforms in another language (branch 5 above, or the user says «на японском /
+   по китайским источникам»): e.g. `["ja","en"]`. For every non-default language also prepare
+   `QUERIES` — one native phrasing per language using the platform's own terms
+   (`{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` is the dictionary:
+   個人開発, 独立开发者, 1인 개발자 …) — e.g. `{"ja": "個人開発 収益 報告 2026", "en": "indie developer revenue reports 2026"}`.
+   Rule: a platform is searched in its own language; an English query on a Japanese platform
+   returns translators and schools, not practitioners.
+
+6. **Preparation.** Compute: `SESSION_ID = ${CLAUDE_SESSION_ID}` (empty in Bash — use
+   `uuidgen | cut -c1-8` instead); `QUERY_SLUG` (Latin transliteration, ≤40, lowercase, hyphens);
+   `QUERY_RU` (short Russian phrasing ≤25 chars); `DATE` = !`date +%Y-%m-%d` (already substituted
+   when the skill loads, no Bash needed); `VAULT_PATH = ${user_config.VAULT_PATH}` — **if the value
+   is empty or is left as the literal `${user_config.VAULT_PATH}` (e.g. during a local trial with
+   `--plugin-dir`), use `~/Jadlis`**;
+   `WORK_DIR = {VAULT_PATH}/.full-research/{SESSION_ID}_{QUERY_SLUG}` — **always an ABSOLUTE path**
+   (a relative one resolves from the cwd at the moment the agents are spawned: a `cd` of the main
+   session before a resume "lost" files at status ok; this also concerns `resumeFromRunId` calls —
+   pass the args in full with the same absolute workDir);
    `VAULT_RESEARCH_DIR = {VAULT_PATH}/Знания/Ресерчи`; `PLUGIN_ROOT = ${CLAUDE_PLUGIN_ROOT}`.
-   `mkdir -p "{WORK_DIR}" "{VAULT_RESEARCH_DIR}"`.
-   Сообщи: «Запущен полный ресерч по {N} каналам: {SELECTED_CHANNELS}. Ожидаю результаты...»
+
+7. **Brief → plan file → launch gate.** Write the brief into the plan file (plan mode) in this
+   shape — the exec turn reads it and launches Phase B without re-asking:
+
+   ```
+   ## full-research brief
+   REFINED_QUERY: …
+   DECISION_CONTEXT: …
+   SELECTED_CHANNELS: [web, codexweb, …]      # after the probes; dropped: … (reason)
+   LANGUAGES: [ru]                             # + QUERIES per language if not ru/en
+   QUERIES: {}
+   SUBSTACK_HANDLES: []
+   WORK_DIR: /abs/path/.full-research/<id>_<slug>
+   QUERY_RU: …
+   DATE: YYYY-MM-DD
+   ```
+   Then `ExitPlanMode`. Approval of the plan = the launch gate. After approval (exec):
+   `mkdir -p "{WORK_DIR}" "{VAULT_RESEARCH_DIR}"` and say: «Запущен полный ресерч по {N} каналам:
+   {SELECTED_CHANNELS}; языки: {LANGUAGES}. Ожидаю результаты...»
 
 ## Phase B — INVOKE
 
@@ -176,134 +232,139 @@ Workflow({
   scriptPath: "${CLAUDE_PLUGIN_ROOT}/workflows/full-research-core.js",
   args: {
     refinedQuery: REFINED_QUERY,
-    decisionContext: DECISION_CONTEXT,  // из интервью: какое решение принимает пользователь
-    channels: SELECTED_CHANNELS,        // ключи: web/codexweb/grokweb/reddit/twitter/hackernews/substack (+opt-in: yandex, youtube, telegram)
-    substackHandles: SUBSTACK_HANDLES,  // может быть пуст
-    aiModel: "claude-fable-5-1",        // модель analyst (синтез идёт через Fable-мост)
+    decisionContext: DECISION_CONTEXT,  // from the interview: which decision the user makes
+    channels: SELECTED_CHANNELS,        // keys: web/codexweb/grokweb/reddit/twitter/hackernews/substack (+opt-in: yandex, youtube, telegram, ja, zh, ko, eu)
+    languages: LANGUAGES,               // e.g. ["ru"] or ["ja","en"]; omitted → detected from the query
+    queries: QUERIES,                   // {lang: native phrasing}; may be {}
+    substackHandles: SUBSTACK_HANDLES,  // may be empty
+    aiModel: "claude-fable-5-1",        // analyst model (synthesis goes through the Fable bridge)
     date: DATE,
     workDir: WORK_DIR,
-    pluginRoot: PLUGIN_ROOT,            // ${CLAUDE_PLUGIN_ROOT} в JS НЕ подставляется — передаём значением
+    pluginRoot: PLUGIN_ROOT,            // ${CLAUDE_PLUGIN_ROOT} is NOT interpolated in JS — passed as a value
     vaultPath: VAULT_PATH
   }
 })
 ```
 
-Модели внутри workflow: каналы, верификаторы и curator — Opus 5
+Models inside the workflow: channels, verifiers and curator — Opus 5
 (`jadlis-research:researcher-opus-xhigh` / `jadlis-research:orchestrator-fable-xhigh`);
-analyst — **Fable 5.1 через мост** (headless `claude -p`, биллинг — та же подписка).
-Отключение моста: `fableBridge: false` → analyst тоже на Opus 5 — тогда передай
-`aiModel: "claude-opus-5"`, frontmatter отчёта не должен врать.
+analyst — **Fable 5.1 through the bridge** (headless `claude -p`, billed to the same subscription).
+Disable the bridge: `fableBridge: false` → analyst also on Opus 5 — then pass
+`aiModel: "claude-opus-5"`, the report frontmatter must not lie.
 
-Workflow (ledger schema v4) читает протоколы каналов сам: curator выделяет до 16 claims
-с evidence-префиксами (спаны подставляет код); снапшот-гейт пер-цитатно опускает HIGH до
-MEDIUM (`no-snapshot` · `llm-mediated` — codexweb/grokweb/yandex и x.com по константе ·
-`short-snapshot` < 1 000 симв. · `quote-not-found`), `urlhealth` проверяет evidence-URL и цитаты
-по снапшотам (`snapshotChars` в evidence), два верификатора голосуют (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), при
-расхождении голосов третий голос даёт Codex (GPT-6 Astra, живой поиск; кап 8 эскалаций;
-`codexModel: "gpt-5.6-sol"` в args — откат);
-не подтверждённое исключение → `DISPUTED` (спорные, в выводы не входят). Отсеянные claims
-**фильтруются** (не просто дописывается критика), затем analyst пишет draft-отчёт в
-`{WORK_DIR}/report.md`. Дождись `<task-notification>`, затем используй объект:
-`{workDir, status, ledgerSchemaVersion, channelsAnswered, channelStatus, failedChannels,
+The workflow (ledger schema v4) reads the channel protocols itself: the curator selects up to 16
+claims with evidence prefixes (the code substitutes the spans); the snapshot gate lowers HIGH to
+MEDIUM per citation (`no-snapshot` · `llm-mediated` — codexweb/grokweb/yandex and x.com by
+constant · `short-snapshot` < 1 000 chars · `quote-not-found`); `urlhealth` checks the evidence
+URLs and the quotes against the snapshots (`snapshotChars` in evidence); two verifiers vote
+(CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED); on a vote split the third vote comes from Codex
+(GPT-6 Astra, live search; cap 8 escalations; `codexModel: "gpt-5.6-sol"` in args — rollback);
+an unconfirmed exclusion → `DISPUTED` (disputed, not part of the conclusions). Dropped claims are
+**filtered** (not merely annotated with criticism), then the analyst writes the draft report to
+`{WORK_DIR}/report.md` (in Russian). Wait for the `<task-notification>`, then use the object:
+`{workDir, status, ledgerSchemaVersion, languages, channelsAnswered, channelStatus, failedChannels,
 aiModelActual, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, reportPath, queryRu,
 relatedCandidates, claimLedger, synthMeta}`; `synthMeta.ledgerSummary` = `{total, confirmed,
 confirmedSplit, challenged, outdated, unchecked, disputed, escalated, escalationSkipped,
-weakEvidence, evidenceless, credibilityMedian, claimsDroppedByCap}`; `snapshotGate` =
+weakEvidence, evidenceless, ceilingCapped, credibilityMedian, claimsDroppedByCap}`; `snapshotGate` =
 `{minChars, llmMediatedChannels, demotedTotal, byReason: {noSnapshot, shortSnapshot, llmMediated,
-quoteNotFound}, byChannel, ceilingCapped}` — сколько HIGH-цитат опущено до MEDIUM и почему
-(`args.channelCeiling: {codexweb: "HIGH"}` — явный escape потолка канала, автоматики нет).
-Прогресс — в `/workflows`.
-`escalationCap: N` в args меняет кап эскалаций (дефолт 8; квота Codex — общий пул с verif).
+quoteNotFound}, byChannel, ceilingCapped}` — how many HIGH citations were lowered to MEDIUM and why
+(`args.channelCeiling: {codexweb: "HIGH"}` — the explicit escape of a channel ceiling, no automation).
+Progress — in `/workflows`. `escalationCap: N` in args changes the escalation cap (default 8; the
+Codex quota is a shared pool with verif).
 
-## Phase C — WRITE (vault-контракт, главная сессия)
+## Phase C — WRITE (vault contract, main session)
 
-Контракт записи в vault — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contract.md`.
+The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contract.md`.
 
-1. **Частичный результат.** Если `status: "insufficient-sources"` (<2 каналов) — сообщи об
-   ошибке, покажи что собралось в `{WORK_DIR}`. Иначе продолжай.
+1. **Partial result.** If `status: "insufficient-sources"` (<2 channels) — report the error, show
+   what was collected in `{WORK_DIR}`. Otherwise continue.
 
-2. **Прочитай draft:** `{WORK_DIR}/report.md`.
+2. **Read the draft:** `{WORK_DIR}/report.md`.
 
-2a. **Постпроверка draft (детерминированная).**
-   - **Честный `ai_model`.** Сверь frontmatter `ai_model` с `aiModelActual` из объекта workflow
-     (мост мог упасть в fallback на Opus — тогда frontmatter врёт). При расхождении поправь
-     строку frontmatter на `ai_model: "{aiModelActual}"` перед записью в vault.
-   - **Канонические секции.** Если `synthMeta.ledgerSummary.confirmed > 0`, проверь
-     `grep -c '^### Проверенные факты$' draft`. Нет секции → дорендери программно из
-     `claimLedger` (claims с verdict=CONFIRMED: statement + «(N голосов)» + бейдж credibility
-     + первый URL evidence) и вставь подсекцией в конец «## 📚 Контекст и находки».
-     То же для `disputed > 0` и `### Спорные факты` (claims с verdict=DISPUTED: statement +
-     голоса + `escalation.reasoning`).
-   - **Ledger-метрики во frontmatter (H8).** Сверь с `synthMeta.ledgerSummary` и поправь
-     детерминированно (значения — числа, не строки): `ledger_schema: 4`,
+2a. **Draft post-check (deterministic).**
+   - **Honest `ai_model`.** Compare the frontmatter `ai_model` with `aiModelActual` from the
+     workflow object (the bridge may have fallen back to Opus — then the frontmatter lies). On a
+     mismatch fix the frontmatter line to `ai_model: "{aiModelActual}"` before writing to the vault.
+   - **Canonical sections.** If `synthMeta.ledgerSummary.confirmed > 0`, check
+     `grep -c '^### Проверенные факты$' draft`. No section → render it programmatically from
+     `claimLedger` (claims with verdict=CONFIRMED: statement translated into Russian + «(N голосов)»
+     + credibility badge + the first evidence URL) and insert it as a subsection at the end of
+     «## 📚 Контекст и находки». The same for `disputed > 0` and `### Спорные факты` (claims with
+     verdict=DISPUTED: statement + votes + `escalation.reasoning`).
+   - **Ledger metrics in the frontmatter (H8).** Compare with `synthMeta.ledgerSummary` and fix
+     deterministically (numbers, not strings): `ledger_schema: 4`,
      `claims_confirmed`, `claims_disputed`, `claims_dropped` (= challenged + outdated),
      `claims_unchecked`, `votes_confirmed_2` (= confirmed − confirmedSplit),
      `votes_confirmed_1` (= confirmedSplit), `escalations` (= escalated),
-     `credibility_median`. Отсутствующее поле — добавить перед `gaps:`. Так отчёт можно
-     переоценить без wf-лога.
+     `credibility_median`; `languages` (= `languages` from the object). A missing field — add it
+     before `gaps:`. This way the report can be re-evaluated without the wf log.
 
-3. **Pre-write dedup.** Порядок из shared-контракта: (1) MCP `qmd` `query` payload'ом
-   (lex+vec по `relatedCandidates`, если сервер подключён) → (2) детерминированный
-   `command grep -rIl "{ключ}" "{VAULT_RESEARCH_DIR}"` → (3) `obsidian search` только как
-   fallback (флаки, гонять 2–3×), если Obsidian открыт:
+3. **Pre-write dedup.** Order from the shared contract: (1) MCP `qmd` `query` by payload
+   (lex+vec over `relatedCandidates`, if the server is connected) → (2) deterministic
+   `command grep -rIl "{key}" "{VAULT_RESEARCH_DIR}"` → (3) `obsidian search` only as a fallback
+   (flaky, run 2-3×), if Obsidian is open:
    ```bash
-   obsidian search query="{ключевые слова из QUERY_RU}" path="Знания/Ресерчи" limit=5 format=json 2>/dev/null || echo "CLI_UNAVAILABLE"
+   obsidian search query="{keywords from QUERY_RU}" path="Знания/Ресерчи" limit=5 format=json 2>/dev/null || echo "CLI_UNAVAILABLE"
    ```
-   Запомни найденные имена заметок. Если есть очень близкий дубликат — реши: supersede / связать.
+   Remember the note names found. If there is a very close duplicate — decide: supersede / link.
 
-4. **Коллизия имён.** `REPORT_PATH = {VAULT_RESEARCH_DIR}/{queryRu}.md`. Через Bash
-   `test -e "{REPORT_PATH}" && echo EXISTS || echo FREE`. EXISTS → `{queryRu} ({DATE}).md`, снова
-   test; EXISTS → суффикс ` v2`, ` v3`… до свободного.
+4. **Name collision.** `REPORT_PATH = {VAULT_RESEARCH_DIR}/{queryRu}.md`. Bash
+   `test -e "{REPORT_PATH}" && echo EXISTS || echo FREE`. EXISTS → `{queryRu} ({DATE}).md`, test
+   again; EXISTS → suffix ` v2`, ` v3`… until free.
 
-5. **Wikilinks + запись.** В разделе `## Связанные заметки` draft-отчёта (он пуст — заглушка)
-   проставь wikilinks `[[Название]]` **ТОЛЬКО** на заметки, реально найденные на шаге 3
-   (НЕ создавай unresolved links; `relatedCandidates` из объекта — лишь подсказки для поиска).
-   Если obsidian CLI недоступен — оставь раздел пустым/убери. Запиши финальный файл в `REPORT_PATH`
-   (Write — скопируй draft с заполненным разделом).
+5. **Wikilinks + write.** In the section `## Связанные заметки` of the draft (it is empty — a
+   placeholder) put wikilinks `[[Название]]` **ONLY** to notes really found in step 3 (do NOT create
+   unresolved links; `relatedCandidates` from the object are only search hints). If the obsidian
+   CLI is unavailable — leave the section empty/remove it. Write the final file to `REPORT_PATH`
+   (Write — copy the draft with the section filled in).
 
-6. **Post-write (daily note).** Если Obsidian открыт:
+6. **Post-write (daily note).** If Obsidian is open:
    ```bash
    NOTE_NAME=$(basename "{REPORT_PATH}" .md)
    DAILY=$(obsidian daily:path 2>/dev/null) || DAILY="Периоды/День/$(date +%F).md"
    obsidian append path="$DAILY" content="- [[${NOTE_NAME}]] — полное исследование, ожидает ревью" 2>/dev/null || true
    obsidian backlinks file="${NOTE_NAME}" counts 2>/dev/null || true
-   # ретенция workDir (30 дней с ссылкой из vault, 7 — без; только dry-run без --yes) и
-   # машинно-локальная read-side телеметрия — отсутствие скриптов не ломает контракт
+   # workDir retention (30 days with a link from the vault, 7 without; dry-run only without --yes) and
+   # machine-local read-side telemetry — missing scripts do not break the contract
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/workdir-gc.py" --root "{VAULT_PATH}" --keep-days 30 --dry-run 2>/dev/null | tail -2 || true
    python3 ~/.claude/scripts/full-research-telemetry.py --sync >/dev/null 2>&1 || true
    ```
-   (gc печатает кандидатов на удаление; само удаление — только по явной просьбе
-   пользователя: `--yes`.)
+   (gc prints deletion candidates; the deletion itself — only on the user's explicit request: `--yes`.)
 
-7. **Резюме пользователю:**
-   - Вердикт под решение из интервью (`DECISION_CONTEXT`): что делать / чего не делать —
-     2-4 предложения из главного вывода draft-отчёта.
-   - **Статус каналов (обязательно).** Из `channelStatus`: если `failedChannels` непуст —
-     явно перечисли, какие ВЫБРАННЫЕ каналы упали/деградировали (LOW или без citations)
-     и что это значит для полноты (прогон без части выбранных каналов — не полноценный).
-     Все каналы ok → одна строка «все N каналов отработали».
-   - Что отсеяла верификация: из `claimLedger`/`synthMeta.droppedClaims` — какие claims
-     CHALLENGED/OUTDATED и почему. Они **не вошли** в отчёт (фильтрация, не дописанная критика).
-   - **Верификация одной строкой** из `ledgerSummary`/`escalationStats`: «проверено N claims:
-     X подтверждено (Y одним голосом), Z спорных (эскалаций в Codex: E, пропущено: S — причины),
-     W отсеяно, U не проверено; evidence: weak K, без evidence L; urlhealth: dead/fabrication».
-     `evidenceHealth: "skipped"` → сказать, что здоровье URL не проверялось.
-   - Gaps (`synthMeta.gaps`): что исследование не покрыло.
-   - Модель синтеза: `aiModelActual` — та, что сработала (мост мог упасть на Opus).
-   - Путь к отчёту: `REPORT_PATH` (vault, `Знания/Ресерчи`).
-   - Путь к рабочей директории: `{WORK_DIR}/` (per-source файлы + draft — полный процесс).
-   - Напоминание: во frontmatter отчёта стоит `verified: false` — это черновик AI. После
-     ревью пользователь вручную ставит `verified: true`.
+7. **Summary to the user (in Russian; ledger statements are English — translate them, numbers verbatim):**
+   - The verdict for the decision from the interview (`DECISION_CONTEXT`): what to do / not to do —
+     2-4 sentences from the main conclusion of the draft.
+   - **Channel status (mandatory).** From `channelStatus`: if `failedChannels` is non-empty —
+     list explicitly which SELECTED channels failed/degraded (LOW or no citations) and what that
+     means for completeness (a run without part of the selected channels is not a full one).
+     All channels ok → one line «все N каналов отработали».
+   - What verification dropped: from `claimLedger`/`synthMeta.droppedClaims` — which claims are
+     CHALLENGED/OUTDATED and why. They **did not enter** the report (filtering, not appended criticism).
+   - **Verification in one line** from `ledgerSummary`/`escalationStats`/`snapshotGate`: «проверено
+     N claims: X подтверждено (Y одним голосом), Z спорных (эскалаций в Codex: E, пропущено: S —
+     причины), W отсеяно, U не проверено; evidence: weak K, без evidence L, потолок MEDIUM по
+     снапшот-гейту M (причины из byReason); urlhealth: dead/fabrication».
+     `evidenceHealth: "skipped"` → say the URL health was not checked.
+   - Gaps (`synthMeta.gaps`): what the research did not cover.
+   - Synthesis model: `aiModelActual` — the one that actually ran (the bridge may have fallen back to Opus).
+   - Report path: `REPORT_PATH` (vault, `Знания/Ресерчи`).
+   - Working directory: `{WORK_DIR}/` (per-source files + draft — the full process).
+   - Reminder: the report frontmatter has `verified: false` — an AI draft. After review the user
+     sets `verified: true` by hand.
 
-## Обработка ошибок
+## Error handling
 
-- Workflow вернул `insufficient-sources` — покажи что собралось, не пиши в vault.
-- Channel-агенты имеют встроенные фоллбэки (Brave `site:` вместо MCP) внутри протоколов.
-- Канал `yandex`: `exit 2` — нет `YC_SEARCH_API_KEY`; `exit 3` — ошибка API; `exit 4` — таймаут
-  поллинга. Во всех трёх случаях канал возвращает `sourceQuality=LOW` без ретраев и без
-  фоллбэка на Brave; workflow продолжается на остальных каналах.
-- Каналы `hackernews` и `substack` работают через свои фетчеры (`scripts/hn-fetch.sh`,
-  `scripts/substack-fetch.py`). MCP-фоллбэка в плагине нет: фетчер сломался → канал
-  деградирует (`sourceQuality=LOW`), workflow продолжается.
-- obsidian CLI недоступен (Obsidian закрыт) — vault-контракт деградирует: пиши файл в
-  `REPORT_PATH` без dedup/wikilinks/записи в дневную заметку, предупреди пользователя.
+- The workflow returned `insufficient-sources` — show what was collected, do not write to the vault.
+- Channel agents have built-in fallbacks (Brave `site:` instead of MCP) inside the protocols.
+- Channel `yandex`: `exit 2` — no `YC_SEARCH_API_KEY`; `exit 3` — API error; `exit 4` — polling
+  timeout. In all three cases the channel returns `sourceQuality=LOW` without retries and without a
+  Brave fallback; the workflow continues on the other channels.
+- Channels `hackernews` and `substack` work through their own fetchers (`scripts/hn-fetch.sh`,
+  `scripts/substack-fetch.py`). There is no MCP fallback in the plugin: fetcher broken → the channel
+  degrades (`sourceQuality=LOW`), the workflow continues.
+- Language channels `ja`/`zh`/`ko`/`eu` work through `scripts/feed-fetch.py` (RSS/Atom/JSON → md
+  snapshot with `Extractor: feed-fetch`) + Brave in the platform language; a dead feed → the
+  channel degrades, the workflow continues.
+- obsidian CLI unavailable (Obsidian closed) — the vault contract degrades: write the file to
+  `REPORT_PATH` without dedup/wikilinks/daily-note entry, warn the user.

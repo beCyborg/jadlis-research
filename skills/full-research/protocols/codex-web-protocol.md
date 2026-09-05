@@ -1,106 +1,107 @@
-# Web (Codex/GPT-6 Astra) — протокол поиска для агента
+# Web (Codex/GPT-6 Astra) — search protocol for the agent
 
-## Инструмент: Codex CLI (через Bash)
+## Tool: Codex CLI (via Bash)
 
-Web-поиск через **Codex CLI** (`codex exec`) с включённым web search. Биллинг — подписка ChatGPT → marginal cost ≈ $0. Модель, reasoning effort и тир запинены прямо в командах: `gpt-6-astra`, effort `high`, `service_tier="default"` — канал не зависит от глобального дефолта `~/.codex/config.toml`. При смене поколения модели обновить пин здесь (все команды ниже, включая эскалацию), константу `CODEX_MODEL` и подпись источника в `{PLUGIN_ROOT}/workflows/full-research-core.js`, probe в `SKILL.md` и строку канала в `README.md`.
+Web search via **Codex CLI** (`codex exec`) with web search enabled. Billing — ChatGPT subscription → marginal cost ≈ $0. The model, the reasoning effort and the tier are pinned directly in the commands: `gpt-6-astra`, effort `high`, `service_tier="default"` — the channel does not depend on the global default in `~/.codex/config.toml`. When the model generation changes, update the pin here (all commands below, escalation included), the `CODEX_MODEL` constant and the source signature in `{PLUGIN_ROOT}/workflows/full-research-core.js`, the probe in `SKILL.md` and the channel line in `README.md`.
 
-> [!note] `service_tier="priority"` («Fast» в UI Codex) — НЕ использовать
-> Имени `gpt-5.6-sol-fast` у API не существует (HTTP 400 «not supported when using Codex with a ChatGPT account» — проверено 2026-08-15). Настройка «Fast» в UI Codex = `service_tier="priority"`: официально «1.5x speed, increased usage», по оценке пользователя ≈2,5× расхода квоты при −15 % времени (A/B 2026-08-15: sol-high 177 с → 151 с, живых поисков одинаково — 11). Решение 2026-09-05: приоритет — квота под доказательность, не скорость → во всех командах явный `service_tier="default"` (глобальный `~/.codex/config.toml` тоже на `default`, чтобы вызов без флага не унаследовал priority).
-> **Модель канала — `gpt-6-astra` с 2026-09-05** (решение пользователя; часть B Плана 1 «astra vs sol» как гейт снята — сравнение живых поисков идёт постфактум по первой эскалации транша 1 Плана 2). Effort `high` явно: дефолт Astra — `medium`, а глубина поиска и есть смысл канала. Luna/Terra не использовать: замер luna-high дал −43% времени, но вдвое меньше живых поисков (5 vs 11). **Откат** — `gpt-5.6-sol` (в каталоге CLI жив, priority 6): если первая эскалация даёт < 5 живых `web_search` при ориентире Sol 11 (замер 2026-08-15) — вернуть литералы здесь и `CODEX_MODEL` в ядре одним коммитом.
+> [!note] `service_tier="priority"` ("Fast" in the Codex UI) — do NOT use
+> The name `gpt-5.6-sol-fast` does not exist in the API (HTTP 400 "not supported when using Codex with a ChatGPT account" — verified 2026-08-15). The "Fast" setting in the Codex UI = `service_tier="priority"`: officially "1.5x speed, increased usage", by the user's estimate ≈2.5× the quota burn for −15% of the time (A/B 2026-08-15: sol-high 177 s → 151 s, live searches the same — 11). Decision 2026-09-05: the priority is quota spent on evidence, not speed → an explicit `service_tier="default"` in every command (the global `~/.codex/config.toml` is on `default` too, so that a call without the flag does not inherit priority).
+> **The channel model is `gpt-6-astra` as of 2026-09-05** (the user's decision; part B of Plan 1, "astra vs sol", has been dropped as a gate — the comparison of live searches happens after the fact, on the first escalation of tranche 1 of Plan 2). Effort `high` explicitly: Astra's default is `medium`, and search depth is the whole point of the channel. Do not use Luna/Terra: the luna-high measurement gave −43% of the time, but half as many live searches (5 vs 11). **Rollback** — `gpt-5.6-sol` (alive in the CLI catalog, priority 6): if the first escalation yields < 5 live `web_search` calls against the Sol benchmark of 11 (measurement 2026-08-15) — restore the literals here and `CODEX_MODEL` in the core in a single commit.
 
-Базовая команда (Bash, `timeout: 300000` мс на вызов):
+Base command (Bash, `timeout: 300000` ms per call):
 
 ```bash
-codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json '<ПРОМПТ>' < /dev/null
+codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json '<PROMPT>' < /dev/null
 ```
 
-> [!warning] `< /dev/null` ОБЯЗАТЕЛЕН во всех вызовах — без него канал висит до таймаута
-> `codex exec` читает stdin (при переданном промпте пайп добавляется как `<stdin>`-блок), а
-> Bash-тул stdin не закрывает → Codex ждёт EOF бесконечно. Симптом: **0 байт stdout, exit 143
-> (SIGTERM по таймауту), в stderr `Reading additional input from stdin...`**. Это НЕ проблема
-> авторизации и НЕ транзиент. A/B сверено 2026-08-06 на codex-cli 0.146.0: без редиректа —
-> убит по таймауту, 0 байт; с `< /dev/null` — exit 0 за 6 с на тривиальном промпте, 156 с на
-> боевом. Вероятная причина того, что codexweb — самый медленный канал телеметрии
-> (медиана 1078 с ≈ зависания + ретраи).
+> [!warning] `< /dev/null` is MANDATORY in every call — without it the channel hangs until timeout
+> `codex exec` reads stdin (when a prompt is passed, the pipe is appended as a `<stdin>` block), and
+> the Bash tool does not close stdin → Codex waits for EOF forever. Symptom: **0 bytes of stdout, exit 143
+> (SIGTERM on timeout), `Reading additional input from stdin...` in stderr**. This is NOT an
+> authorization problem and NOT a transient. A/B verified 2026-08-06 on codex-cli 0.146.0: without the redirect —
+> killed by timeout, 0 bytes; with `< /dev/null` — exit 0 in 6 s on a trivial prompt, 156 s on
+> a real one. The likely reason codexweb is the slowest channel in the telemetry
+> (median 1078 s ≈ hangs + retries).
 
-- Флага `--search` НЕ существует (проверено на codex-cli 0.146.0, сверено 2026-08-06) — web search включается только через `-c`.
-- **`tools.web_search={mode="live"}` — ОБЯЗАТЕЛЬНЫЙ пин (проверено на 0.147.0, 2026-08-15).** Голый `true` может отдавать КЭШ индекса OpenAI (режим cached: сниппеты из кэша, при недоступности сети — фабрикация без ошибки). `{mode="live"}` валиден и даёт живые web_search-события (проба: 2 живых поиска, актуальный топ HN). Значение `"live"` строкой — invalid config, только объект `{mode="live"}`.
-- `-s read-only` обязателен: глобальный конфиг пользователя — `danger-full-access`, для поиска он не нужен.
-- `--json` — JSONL-события в stdout (проверено на 0.146.0, сверено 2026-08-06). Финальный текст агента:
+- The `--search` flag does NOT exist (checked on codex-cli 0.146.0, verified 2026-08-06) — web search is enabled only via `-c`.
+- **`tools.web_search={mode="live"}` — a MANDATORY pin (checked on 0.147.0, 2026-08-15).** A bare `true` may return the OpenAI index CACHE (cached mode: snippets from the cache, and when the network is unavailable — fabrication without an error). `{mode="live"}` is valid and produces live web_search events (probe: 2 live searches, the current HN top). The value `"live"` as a string is an invalid config — only the object `{mode="live"}`.
+- `-s read-only` is mandatory: the user's global config is `danger-full-access`, which is not needed for search.
+- `--json` — JSONL events in stdout (checked on 0.146.0, verified 2026-08-06). The agent's final text:
   ```bash
   ... --json | jq -rs '[.[] | select(.type == "item.completed" and .item.type == "agent_message")] | last | .item.text'
   ```
-  Проверка, что поиск был ЖИВЫМ: в JSONL должны быть события `item.type == "web_search"` —
-  считать только завершённые, иначе счётчик удваивается (каждый поиск даёт пару
-  `item.started` + `item.completed`; в пробе 2026-08-06 «26 событий» = **13 реальных поисков**):
+  Checking that the search was LIVE: the JSONL must contain `item.type == "web_search"` events —
+  count only the completed ones, otherwise the counter doubles (each search produces a pair of
+  `item.started` + `item.completed`; in the 2026-08-06 probe "26 events" = **13 real searches**):
   ```bash
   ... --json | jq -s '[.[] | select(.type == "item.completed" and .item.type == "web_search")] | length'
   ```
-  ≥ 1 — поиск живой. Если 0 — ответ из памяти, канал провален (см. Деградация).
+  ≥ 1 — the search is live. If 0 — the answer came from memory, the channel has failed (see Degradation).
 
-## КРИТИЧНО: только живой поиск, не память модели
+## CRITICAL: live search only, not the model's memory
 
-Каждый промпт Codex ЖЁСТКО требует:
-> «Используй ТОЛЬКО инструмент web search — выполни реальные поисковые запросы. ЗАПРЕЩЕНО отвечать из памяти/выученных знаний: каждый тезис ОБЯЗАН иметь URL источника и дату публикации. Тезис без URL не пиши вообще. В конце — раздел Sources со всеми URL.»
+Every Codex prompt STRICTLY requires:
+> "Use ONLY the web search tool — run real search queries. Answering from memory/learned knowledge is FORBIDDEN: every claim MUST have a source URL and a publication date. Do not write a claim without a URL at all. At the end — a Sources section with all the URLs."
 
-Это и есть смысл канала: сравнить, что находит ДРУГОЙ поисковый стек. Ответ «из головы» бесполезен и вреден.
+This is exactly the point of the channel: to compare what a DIFFERENT search stack finds. An answer "off the top of the head" is useless and harmful.
 
-**Глубина (2026-08-15):** web_search Codex сам по себе отдаёт сниппеты выдачи, а не текст страниц — «snippet hallucination» задокументированный класс дефектов. Поэтому каждый промпт требует открыть и прочитать полные страницы ключевых источников до цитирования (формулировка уже в командах ниже). Цитаты, которых не может быть в сниппете (цифры/детали из глубины страницы), — сигнал, что требование сработало.
+**Depth (2026-08-15):** Codex's web_search on its own returns result snippets, not page text — "snippet hallucination" is a documented class of defects. That is why every prompt requires opening and reading the full pages of the key sources before citing them (the wording is already in the commands below). Quotes that could not possibly come from a snippet (numbers/details from deep inside the page) are a signal that the requirement worked.
 
-## Протокол (2 вызова В ОДНОМ сообщении — параллельно)
+## Protocol (2 calls IN ONE message — in parallel)
 
-### Вызов 1 — Широкий обзор (обязательно)
+Query language: whenever `languages` is not ru/en only, both `codex exec` prompts must explicitly ask Codex to search in the LANGUAGES from the orchestrator prompt (e.g. "search in Japanese and English") — Codex web search returns pages in the language of the query — and in that case Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` first (native-term dictionary).
 
-```bash
-codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json 'Research the web for: <развёрнутый запрос — тема, аспекты, что за решение принимается>. Use ONLY the web search tool - run real searches, do NOT answer from memory. Every claim MUST have a source URL and publication date; omit claims without URLs. Prefer 2024-2026 sources. Open and READ THE FULL PAGE of every key source before citing it - do NOT cite from search-result snippets alone; quote specifics that only appear in the page body. Return: key findings (bulleted, each with URL), notable numbers/quotes with URLs, and a final Sources section listing all URLs.' < /dev/null
-```
-
-### Вызов 2 — Контраргументы (обязательно)
+### Call 1 — Broad overview (mandatory)
 
 ```bash
-codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json 'Search the web for criticism, problems, failures and counter-arguments about: <тема>. Use ONLY the web search tool - real searches, NOT memory; every claim needs a source URL. Who disagrees and why? Known issues, regressions, negative experience reports. Open and READ THE FULL PAGE of key sources before citing - do NOT cite from snippets alone. Return bulleted findings with URLs + Sources section.' < /dev/null
+codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json 'Research the web for: <expanded query — topic, aspects, what decision is being made>. Use ONLY the web search tool - run real searches, do NOT answer from memory. Every claim MUST have a source URL and publication date; omit claims without URLs. Prefer 2024-2026 sources. Open and READ THE FULL PAGE of every key source before citing it - do NOT cite from search-result snippets alone; quote specifics that only appear in the page body. Return: key findings (bulleted, each with URL), notable numbers/quotes with URLs, and a final Sources section listing all URLs.' < /dev/null
 ```
 
-Оба вызова запускай ОДНИМ сообщением (двумя Bash-вызовами параллельно), каждый с `timeout` ~300000 мс.
-`< /dev/null` в конце каждой команды — обязателен (см. предупреждение выше), иначе оба вызова
-выгорят по таймауту вхолостую. Запас по времени узкий: с фиксом один high-effort вызов = 156 с.
+### Call 2 — Counter-arguments (mandatory)
 
-## Бюджет: 2 вызова
+```bash
+codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json 'Search the web for criticism, problems, failures and counter-arguments about: <topic>. Use ONLY the web search tool - real searches, NOT memory; every claim needs a source URL. Who disagrees and why? Known issues, regressions, negative experience reports. Open and READ THE FULL PAGE of key sources before citing - do NOT cite from snippets alone. Return bulleted findings with URLs + Sources section.' < /dev/null
+```
 
-## Обработка результата
+Launch both calls in ONE message (two Bash calls in parallel), each with a `timeout` of ~300000 ms.
+`< /dev/null` at the end of every command is mandatory (see the warning above), otherwise both calls
+will burn out on timeout for nothing. The time margin is narrow: with the fix, one high-effort call = 156 s.
 
-1. Из ответов собери цитаты: URL + краткий контекст. Префиксы: [cx1], [cx2], ...
-2. Каждой цитате — Admiralty reliability (A-F) по типу ИСТОЧНИКА (не Codex, а страницы, на которую ведёт URL).
-3. URL без контекста или тезисы без URL — отбрасывай (нарушение контракта «не из памяти»).
+## Budget: 2 calls
 
-## Деградация
+## Processing the result
 
-При сбое — non-zero exit, таймаут, пустой stdout или ответ без единого URL:
-- один retry упавшего вызова (возможно, транзиент);
-- если оба вызова провалились — верни **пустые** citations, sourceQuality = LOW, пометка в findings: «Codex web-канал недоступен»;
-- **НЕ роняй** workflow — остальные каналы должны завершиться.
-- Если ответ пришёл, но моделью проигнорирован запрет «из памяти» (тезисы без URL) — используй только тезисы с URL; если таких нет, канал считается недоступным.
+1. From the answers, collect citations: URL + brief context. Prefixes: [cx1], [cx2], ...
+2. Give every citation an Admiralty reliability (A-F) based on the type of the SOURCE (not Codex, but the page the URL points to).
+3. Discard URLs without context and claims without URLs (a violation of the "not from memory" contract).
 
-Диагностика:
-- **Пустой stdout (0 байт) + `Reading additional input from stdin...` в stderr + exit 143/142** —
-  это НЕ авторизация и НЕ rate-limit, а незакрытый stdin под Bash-тулом. Лечится `< /dev/null`
-  в конце команды; retry без редиректа повиснет ровно так же и сожжёт второй таймаут.
-- `codex login status` — истёкшая авторизация ChatGPT.
-- Сообщения об отключённом web search в stderr — конфиг-ключ `tools.web_search` переименован
-  (проверь `codex exec --help` и `~/.codex/config.toml`).
+## Degradation
 
-## Эскалация верификации (третий голос, schema v3)
+On a failure — non-zero exit, timeout, empty stdout or an answer without a single URL:
+- one retry of the failed call (it may be a transient);
+- if both calls failed — return **empty** citations, sourceQuality = LOW, and a note in findings: "The Codex web channel is unavailable";
+- **Do NOT crash** the workflow — the remaining channels must finish.
+- If an answer did arrive but the model ignored the "not from memory" ban (claims without URLs) — use only the claims that have URLs; if there are none, the channel counts as unavailable.
 
-Помимо канала, Codex используется workflow `full-research-core` как **третий, разнородный голос** при расхождении двух верификаторов (`CONFIRMED` vs `CHALLENGED/OUTDATED`, либо `CHALLENGED/OUTDATED` vs `UNCHECKED`). Согласные голоса в Codex не ходят: `CONFIRMED×2` → подтверждено, согласное исключение → отсеяно, `UNCHECKED×2` → не проверено. Кап — 8 эскалаций на прогон (`args.escalationCap`), сверх капа — исключение по одному голосу + флаг `escalationSkipped: 'cap'`.
+Diagnostics:
+- **Empty stdout (0 bytes) + `Reading additional input from stdin...` in stderr + exit 143/142** —
+  this is NOT authorization and NOT a rate limit, but an unclosed stdin under the Bash tool. Cured by `< /dev/null`
+  at the end of the command; a retry without the redirect will hang in exactly the same way and burn a second timeout.
+- `codex login status` — an expired ChatGPT authorization.
+- Messages in stderr about web search being disabled — the `tools.web_search` config key has been renamed
+  (check `codex exec --help` and `~/.codex/config.toml`).
 
-Вызов (делает лёгкий субагент-мост, промпт `escalationPrompt` в core.js):
+## Verification escalation (third voice, schema v3)
+
+Besides serving as a channel, Codex is used by the `full-research-core` workflow as a **third, heterogeneous voice** when the two verifiers disagree (`CONFIRMED` vs `CHALLENGED/OUTDATED`, or `CHALLENGED/OUTDATED` vs `UNCHECKED`). Agreeing voices do not go to Codex: `CONFIRMED×2` → confirmed, an agreeing exclusion → dropped, `UNCHECKED×2` → unchecked. The cap is 8 escalations per run (`args.escalationCap`); beyond the cap — exclusion on a single voice + the `escalationSkipped: 'cap'` flag.
+
+The call (made by a lightweight subagent bridge, the `escalationPrompt` prompt in core.js):
 
 ```bash
 codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json -o "<workDir>/_codex-esc-<claimId>-last.md" "$(cat "<workDir>/_codex-esc-<claimId>-prompt.md")" < /dev/null > "<workDir>/_codex-esc-<claimId>.jsonl"
 ```
 
-- **Гейт живого поиска:** в JSONL должно быть ≥1 события `web_search` (`grep -c '"web_search'`); 0 → голос не считается (`escalationSkipped: 'no-live-search'`) — Codex отвечал по памяти.
-- Codex подтверждает исключение → claim `CHALLENGED`/`OUTDATED` (отсеян). Не подтверждает → `DISPUTED` (агрегат JS, не enum верификатора): credibility ≥4, в отчёте секция `### Спорные факты`, в выводы не входит.
-- Деградации в один enum `escalationSkipped`: `no-binary` · `quota` · `timeout` · `invalid-output` · `no-live-search` · `budget` · `cap` → исключение по одному голосу как в schema v2 + флаг в ledger/телеметрии. Ретраев нет: квота Codex — общий пул с `/jadlis-research:verif`, приоритет у verif.
-- Правила для Codex в промпте: отсутствие подтверждения ≠ опровержение (это UNCHECKED); расхождение чисел только по форме записи/округлению ±2% — не опровержение; исключение подтверждать ТОЛЬКО по источнику, который прямо противоречит или отменяет claim.
-
+- **Live-search gate:** the JSONL must contain ≥1 `web_search` event (`grep -c '"web_search'`); 0 → the voice does not count (`escalationSkipped: 'no-live-search'`) — Codex was answering from memory.
+- Codex confirms the exclusion → the claim is `CHALLENGED`/`OUTDATED` (dropped). Does not confirm → `DISPUTED` (a JS aggregate, not a verifier enum): credibility ≥4, a `### Спорные факты` section in the report, not included in the conclusions.
+- Degradations collapse into a single `escalationSkipped` enum: `no-binary` · `quota` · `timeout` · `invalid-output` · `no-live-search` · `budget` · `cap` → exclusion on a single voice as in schema v2 + a flag in the ledger/telemetry. There are no retries: the Codex quota is a shared pool with `/jadlis-research:verif`, and verif has priority.
+- Rules for Codex in the prompt: the absence of confirmation ≠ a refutation (that is UNCHECKED); a discrepancy in numbers that is purely a matter of notation/rounding ±2% is not a refutation; confirm an exclusion ONLY on the basis of a source that directly contradicts or supersedes the claim.

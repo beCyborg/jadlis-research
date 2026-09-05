@@ -1,180 +1,186 @@
-# Web — протокол поиска для агента (Brave Search)
+# Web — search protocol for the agent (Brave Search)
 
-## MCP-инструменты
+## MCP tools
 
-### Brave Search (контент + поиск) + Firecrawl (точечный скрапинг)
+### Brave Search (content + search) + Firecrawl (targeted scraping)
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |---|---|
-| `mcp__plugin_jadlis-research_brave-search__brave_llm_context` | **Дефолт для research**: возвращает ИЗВЛЕЧЁННЫЙ КОНТЕНТ страниц по запросу (не только ссылки) — закрывает большинство потребностей без скрапинга |
-| `mcp__plugin_jadlis-research_brave-search__brave_web_search` | Keyword-based discovery источников — когда нужны САМИ ссылки/охват (+`extra_snippets`) |
-| `defuddle parse <url> --md` (Bash, CLI 0.19.3) | **Дефолтный писатель снапшотов**: полный текст ОДНОЙ страницы дословно, 0 кредитов (лестница извлечения — Layer 3) |
-| `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape` | Анти-бот/JS-страницы — ПОСЛЕДНЯЯ ступень лестницы; никогда для PDF и x.com (хук плагина deny-ит) |
+| `mcp__plugin_jadlis-research_brave-search__brave_llm_context` | **Default for research**: returns the EXTRACTED CONTENT of pages for a query (not just links) — covers most needs without scraping |
+| `mcp__plugin_jadlis-research_brave-search__brave_web_search` | Keyword-based discovery of sources — when you need the LINKS THEMSELVES / coverage (+`extra_snippets`) |
+| `defuddle parse <url> --md` (Bash, CLI 0.19.3) | **Default snapshot writer**: the full text of ONE page verbatim, 0 credits (extraction ladder — Layer 3) |
+| `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape` | Anti-bot / JS pages — the LAST rung of the ladder; never for PDFs and x.com (the plugin hook denies it) |
 
-**КРИТИЧНО:** Перед использованием любого инструмента — загрузи его через ToolSearch если недоступен.
-**RATE LIMIT:** Brave (тариф Search): 50 req/s — **параллельные вызовы OK** (несколько tool calls в одном сообщении). Firecrawl scrape: 1 req/s. При 429 — подождать 1 сек, retry (max 2x).
+**CRITICAL:** Before using any tool — load it via ToolSearch if it is unavailable.
+**RATE LIMIT:** Brave (Search plan): 50 req/s — **parallel calls are OK** (several tool calls in one message). Firecrawl scrape: 1 req/s. On 429 — wait 1 s, retry (max 2x).
 
 ## CONTENT-FIRST Protocol
 
-### Layer 1 — Контент + discovery (2-4 вызова, ПАРАЛЛЕЛЬНО в одном сообщении)
+### Layer 1 — Content + discovery (2-4 calls, IN PARALLEL in one message)
 
-**Обязательная пара (одним сообщением):**
+**Mandatory pair (in one message):**
 ```
-brave_llm_context(query="<развёрнутый запрос по теме>", count=30, maximum_number_of_urls=12)
-brave_web_search(query="<ключевые слова по теме>", count=10, extra_snippets=true)
+brave_llm_context(query="<expanded query on the topic>", count=30, maximum_number_of_urls=12)
+brave_web_search(query="<topic keywords>", count=10, extra_snippets=true)
 ```
 
-> **Ручки `brave_llm_context` — сверено 2026-08-06.** Из всех тюнинг-параметров реально работают
-> только два:
-> - `count` — ширина воронки (число РАССМАТРИВАЕМЫХ результатов, не выдача). 20→30 даёт
->   принципиально новые источники, включая первоисточники, на которые ссылаются остальные.
-> - `maximum_number_of_urls` — **единственный жёсткий хард-кап**: просишь 8 — получаешь ровно 8.
+> **Knobs of `brave_llm_context` — verified 2026-08-06.** Of all the tuning parameters, only two
+> actually work:
+> - `count` — the width of the funnel (the number of results CONSIDERED, not returned). 20→30 yields
+>   fundamentally new sources, including the primary sources the rest cite.
+> - `maximum_number_of_urls` — **the only hard cap**: ask for 8 — get exactly 8.
 >
-> **ИГНОРИРУЮТСЯ (не передавать, это шум в вызове):** `maximum_number_of_snippets`,
+> **IGNORED (do not pass, this is noise in the call):** `maximum_number_of_snippets`,
 > `maximum_number_of_snippets_per_url`, `maximum_number_of_tokens_per_url`,
-> `context_threshold_mode` (режим `strict` не дал никакого эффекта — ни по объёму, ни по мусору).
-> `enable_source_metadata` добавляет полезный `site_name`, но тянет длинный favicon-URL на каждый
-> источник — чистая трата токенов. `maximum_number_of_tokens` работает лишь как ориентир
-> (8192→2048 ≈ −4× объёма).
+> `context_threshold_mode` (the `strict` mode had no effect whatsoever — neither on volume nor on junk).
+> `enable_source_metadata` adds a useful `site_name`, but drags along a long favicon URL for every
+> source — a pure waste of tokens. `maximum_number_of_tokens` works only as a rough guide
+> (8192→2048 ≈ −4× the volume).
 >
-> **Дубли жрут бюджет:** один и тот же документ регулярно приходит под 2 URL (зеркала PDF —
-> `media.defense.gov` и `nsa.gov` на один отчёт). В пробе это 21–29 % всех снипетов, до трети
-> бюджета. Ни один параметр этого не лечит — дедуп по заголовку/содержимому на стороне агента
-> (см. Layer 2).
+> **Duplicates eat the budget:** the same document regularly arrives under 2 URLs (PDF mirrors —
+> `media.defense.gov` and `nsa.gov` for one report). In the probe this was 21–29 % of all snippets, up to a third
+> of the budget. No parameter cures this — deduplicate by title/content on the agent side
+> (see Layer 2).
 
-> **`extra_snippets` у `brave_web_search` включены ПО УМОЛЧАНИЮ** — приходят до 4 фрагментов на
-> результат, даже если их не просили. Явный `extra_snippets=false` режет payload ≈вчетверо —
-> использовать для уточняющих/добирающих вызовов, где нужны только URL.
+> **`extra_snippets` on `brave_web_search` is enabled BY DEFAULT** — up to 4 fragments per
+> result arrive even if you did not ask for them. An explicit `extra_snippets=false` cuts the payload ≈fourfold —
+> use it for refining/top-up calls where only the URLs are needed.
 
-**Вторая пара — контраргументы/альтернативный ракурс (одним сообщением):**
+**Second pair — counterarguments / an alternative angle (in one message):**
 ```
-brave_llm_context(query="<критика, проблемы, сравнения по теме>", count=30, maximum_number_of_urls=12)
-brave_web_search(query="<запрос с альтернативного угла>", count=8)   # опционально
+brave_llm_context(query="<criticism, problems, comparisons on the topic>", count=30, maximum_number_of_urls=12)
+brave_web_search(query="<query from an alternative angle>", count=8)   # optional
 ```
 
-ПРАВИЛА ФОРМУЛИРОВКИ ЗАПРОСОВ:
-- Для `brave_web_search`: запрос = ключевые слова, НЕ описание страницы
-  - ПЛОХО: "comprehensive analysis of AI agent frameworks and their adoption in enterprise"
-  - ХОРОШО: "AI agent frameworks enterprise adoption comparison 2026"
-- Для `brave_llm_context`: развёрнутый запрос допустим (инструмент сам извлекает релевантный контент)
-- Для свежей информации: `freshness="pm"` (месяц) или `freshness="pw"` (неделя)
-- Для русскоязычных тем: запрос на русском языке (детали — блок «RU-темы» ниже)
+QUERY PHRASING RULES:
+- For `brave_web_search`: the query = keywords, NOT a description of the page
+  - BAD: "comprehensive analysis of AI agent frameworks and their adoption in enterprise"
+  - GOOD: "AI agent frameworks enterprise adoption comparison 2026"
+- For `brave_llm_context`: an expanded query is acceptable (the tool extracts the relevant content itself)
+- For fresh information: `freshness="pm"` (month) or `freshness="pw"` (week)
+- Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt; when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` first (native-term dictionary).
+- For Russian-language topics: the query in Russian (details — the "RU topics" block below)
 
-**RU-темы (сверено 2026-08-06).** Драйвер «рунетности» выдачи — **язык запроса, а не гео**:
-- `country="RU"` (+`search_lang="ru"`, `ui_lang="ru-RU"`) дал всего **2 новых домена из 16** при
-  85 % пересечении URL — косметика, отдельного вызова не стоит. **Не рекомендуется.**
-- Рабочий приём: запрос на русском + `freshness="pm"` — **3 новых домена из 10** в пробе,
-  включая свежие отраслевые рейтинги с ценами. Свежесть — более сильный рычаг разнообразия RU-выдачи, чем гео.
-- **Пробел канала:** деловые RU-медиа (`rb.ru`, `cnews.ru`, `tadviser.ru`, `forbes.ru`, `rbc.ru`)
-  Brave не отдаёт **ни при каких параметрах** — RU-выдача это SEO-слой (блоги вендоров и
-  интеграторов + рейтинги). Этот пробел закрывает опциональный канал yandex
-  (`yandex-protocol.md`), а не подкрутка параметров Brave.
+**RU topics (verified 2026-08-06).** The driver of how "Runet-heavy" the results are is **the language of the query, not geo**:
+- `country="RU"` (+`search_lang="ru"`, `ui_lang="ru-RU"`) yielded only **2 new domains out of 16** with
+  85 % URL overlap — cosmetics, not worth a separate call. **Not recommended.**
+- What works: a query in Russian + `freshness="pm"` — **3 new domains out of 10** in the probe,
+  including fresh industry rankings with prices. Freshness is a stronger lever for RU result diversity than geo.
+- **Channel gap:** Russian business media (`rb.ru`, `cnews.ru`, `tadviser.ru`, `forbes.ru`, `rbc.ru`)
+  are **never** returned by Brave **under any parameters** — the RU results are an SEO layer (vendor and
+  integrator blogs + rankings). This gap is closed by the optional yandex channel
+  (`yandex-protocol.md`), not by tweaking Brave's parameters.
 
-### Layer 1b — Семантический проход (Exa, 1 вызов, после Brave-слоя)
+### Layer 1b — Semantic pass (Exa, 1 call, after the Brave layer)
 
-Exa — эмбеддинговый индекс: ловит страницы, которые keyword-Brave не находит (A/B 08–09.2026: overlap top-5 доменов между движками ≈0,23; ничья по качеству, но разные множества источников). Запрос — **описание целевой страницы** натуральной фразой, без операторов и кавычек:
+Exa is an embedding index: it catches pages that keyword-Brave does not find (A/B 08–09.2026: overlap of the top-5 domains between the engines ≈0.23; a tie on quality, but different sets of sources). The query = **a description of the target page** as a natural phrase, without operators or quotes:
 
 ```bash
-python3 {PLUGIN_ROOT}/scripts/websearch.py exa "<описание страницы: e.g. practitioner blog post explaining how X works in production>" --tag research -n 8 --out json
+python3 {PLUGIN_ROOT}/scripts/websearch.py exa "<description of the target page: e.g. practitioner blog post explaining how X works in production>" --tag research -n 8 --out json
 ```
 
-- **Гейт ключа:** `exit 2` = нет `EXA_API_KEY` → слой ПРОПУСТИТЬ молча (не фоллбэк, не ошибка канала).
-- RU-тема → добавь `--type keyword` (auto/fast уводят в англоязычные источники).
-- Результаты — в тот же пул кандидатов Layer 2 с пометкой источника `exa`; дубли по URL с Brave-выдачей схлопнуть. Кандидаты только-от-Exa проходят тот же отбор и полнотекстовый догруз (Layer 3), бейдж достоверности не выше остальных.
-- Бюджет: 1 вызов (2 при узкой теме с разными углами); $0,007/вызов.
+- **Key gate:** `exit 2` = no `EXA_API_KEY` → SKIP the layer silently (not a fallback, not a channel error).
+- RU topic → add `--type keyword` (auto/fast drift toward English-language sources).
+- The results go into the same Layer 2 candidate pool marked with the source `exa`; URL duplicates against the Brave results are collapsed. Exa-only candidates go through the same selection and full-text fetch (Layer 3), and their reliability badge is no higher than the rest.
+- Budget: 1 call (2 for a narrow topic with different angles); $0.007/call.
 
-### Layer 2 — Оценка и отбор (0 вызовов)
+### Layer 2 — Evaluation and selection (0 calls)
 
-Проанализируй результаты Layer 1:
-1. **Дедуп ДО отбора цитат**: один документ приходит под разными URL (зеркала PDF, ведомственный
-   сайт + агрегатор) — сверяй по заголовку/содержимому, не по URL. В пробе такие дубли заняли
-   до трети снипетов; процитировать их дважды = ложное «подтверждение двумя источниками».
-2. Ранжируй по релевантности + авторитетности домена
-3. Контент из llm_context допустим для MEDIUM/LOW-цитат — используй его напрямую
-4. **HIGH-relevance — ТОЛЬКО по полному тексту (правило глубины, 2026-08-15).** Сниппет
-   web_search и фрагмент llm_context — это 150–800 символов из страницы; цитата «HIGH»
-   по ним — это цитата по обложке. Для каждого источника, который пойдёт в отчёт с
-   relevance HIGH: догрузи ПОЛНУЮ страницу по лестнице извлечения Layer 3 и цитируй из
-   полного текста. Полный текст обязан лечь снапшотом в `{WORK_DIR}/snapshots/<префикс>.md`
-   (schema v4, шапка `URL:` / `Date:` / `Prefix:` / `Extractor:` + `---`) — **HIGH-цитата без
-   снапшота недопустима**: не смог достать полный текст (пейволл/челлендж) → максимум MEDIUM
-   + пометка «[no-snapshot: blocked]»; файл короче ~1 000 символов гейт не закрывает.
-5. Выбери URL для полнотекстового догруза (все будущие HIGH) — обычно 3-5
+Analyze the Layer 1 results:
+1. **Deduplicate BEFORE selecting citations**: one document arrives under different URLs (PDF mirrors, an agency
+   site + an aggregator) — compare by title/content, not by URL. In the probe such duplicates took up
+   as much as a third of the snippets; citing them twice = a false "confirmed by two sources".
+2. Rank by relevance + domain authority
+3. Content from llm_context is acceptable for MEDIUM/LOW citations — use it directly
+4. **HIGH relevance — ONLY from the full text (the depth rule, 2026-08-15).** A web_search
+   snippet and an llm_context fragment are 150–800 characters out of a page; a "HIGH" citation
+   based on them is a citation based on the cover. For every source that will go into the report with
+   relevance HIGH: fetch the FULL page via the Layer 3 extraction ladder and cite from
+   the full text. The full text must be written as a snapshot to `{WORK_DIR}/snapshots/<prefix>N.md`
+   (schema v4, header `URL:` / `Date:` / `Prefix: [<prefix>N]` / `Extractor: <what really extracted the text>` + `---`, then the full text) — **a HIGH citation without
+   a snapshot is not allowed**: could not obtain the full text (paywall/challenge) → MEDIUM at most
+   + the mark "[no-snapshot: blocked]"; a file shorter than ~1 000 characters does not close the gate.
+5. Choose the URLs for the full-text fetch (all future HIGHs) — usually 3-5
 
-### Layer 3 — Полнотекстовый догруз: лестница извлечения (2-5 URL: все HIGH-кандидаты + пробелы)
+### Layer 3 — Full-text fetch: the extraction ladder (2-5 URLs: all HIGH candidates + gaps)
 
-Порядок ступеней фиксирован (аудит стека 2026-09: дословность и цена). Ступень закрыла
-страницу (тело ≥ ~1 000 символов, не challenge-разметка) → дальше не идти. В шапку снапшота
-пиши реальную ступень: `Extractor: <pdf-fetch|defuddle|jina|exa-full|tavily|firecrawl>`.
-`timeout`-утилиты на macOS нет — лимит времени задавай параметром `timeout` Bash-тула.
+The order of the rungs is fixed (stack audit 2026-09: verbatimness and price). A rung has closed
+the page (body ≥ ~1 000 characters, not challenge markup) → do not go further. Write the real rung
+into the snapshot header: `Extractor: <pdf-fetch|defuddle|jina|exa-full|tavily|firecrawl>`.
+There is no `timeout` utility on macOS — set the time limit with the Bash tool's `timeout` parameter.
 
-1. **PDF-URL** (`.pdf`/`/TXT/PDF/`/`?format=pdf`) → ТОЛЬКО `out=$(bash {PLUGIN_ROOT}/scripts/pdf-fetch.sh "<url>")` → `Read "$out"` (0 кр). `exit 2` (PDF_UNREACHABLE/PDF_EMPTY — JS-gate, скан, paywall) → научная статья по DOI → OA-ссылка Unpaywall → снова `pdf-fetch.sh`; крайнее — `firecrawl_scrape` с `parsers:["pdf"]` И `pdfOptions.maxPages ≤ 20` (хук плагина пропускает только так). Без эскалации — цитируй по сниппетам с пометкой «(реконструировано)».
-2. **HTML — дефолт:** `defuddle parse "<url>" --md` (Bash, `timeout: 60000`; при 403 — `-u "<браузерный User-Agent>"`) → stdout = чистый markdown основного контента (навигацию режет сам; проба 2026-09-06: дока Cloudflare → 1,1 КБ чистого текста против 18 КБ у Reader с меню). Пусто / < 1 000 символов / challenge-текст → ступень 3.
-3. **CSR / JS-рендер:** `curl -s --max-time 45 "https://r.jina.ai/<url>"` (Reader, без ключа; проба 2026-09-06 — 200, 18 КБ; таймаут обязателен — виснет на тяжёлых страницах). Пусто → ступень 4.
-4. **URL-точный индекс:** `python3 {PLUGIN_ROOT}/scripts/websearch.py contents "<url>" --full` (Exa contents, ~$0.001/стр.; **всегда `--full`** — дефолт режет до 8 000 символов, обрезок не закрывает гейт).
-5. **Tavily extract — только при ключе `TAVILY_API_KEY`** в `env` settings.json (keyless-режима НЕТ: без ключа `POST /extract` → 401 «missing or invalid API key», проверено 2026-09-06): `curl -s --max-time 30 -X POST https://api.tavily.com/extract -H "Authorization: Bearer $TAVILY_API_KEY" -H 'Content-Type: application/json' -d '{"urls":["<url>"]}'` → `.results[0].raw_content`. Ключа нет → ступень пропускается молча.
-6. **Анти-бот — последняя ступень:** `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape(url, formats=["markdown"], onlyMainContent=true)`; провал → retry с `waitFor: 5000`. **Никогда** для PDF (ступень 1) и x.com/twitter.com (AI-пересказ за 30 кредитов, хук deny-ит; твиты — канал twitter). За логином — только Playwright MCP.
+1. **PDF URL** (`.pdf`/`/TXT/PDF/`/`?format=pdf`) → ONLY `out=$(bash {PLUGIN_ROOT}/scripts/pdf-fetch.sh "<url>")` → `Read "$out"` (0 cr). `exit 2` (PDF_UNREACHABLE/PDF_EMPTY — JS gate, scan, paywall) → a scientific article by DOI → an Unpaywall OA link → `pdf-fetch.sh` again; as a last resort — `firecrawl_scrape` with `parsers:["pdf"]` AND `pdfOptions.maxPages ≤ 20` (the plugin hook lets nothing else through). Without escalation — cite from the snippets with the mark "(reconstructed)".
+2. **HTML — the default:** `defuddle parse "<url>" --md` (Bash, `timeout: 60000`; on 403 — `-u "<browser User-Agent>"`) → stdout = clean markdown of the main content (it strips navigation itself; probe 2026-09-06: a Cloudflare doc → 1.1 KB of clean text versus 18 KB from Reader with menus). Empty / < 1 000 characters / challenge text → rung 3.
+3. **CSR / JS render:** `curl -s --max-time 45 "https://r.jina.ai/<url>"` (Reader, keyless; probe 2026-09-06 — 200, 18 KB; the timeout is mandatory — it hangs on heavy pages). Empty → rung 4.
+4. **URL-exact index:** `python3 {PLUGIN_ROOT}/scripts/websearch.py contents "<url>" --full` (Exa contents, ~$0.001/page; **always `--full`** — the default truncates to 8 000 characters, and a truncated piece does not close the gate).
+5. **Tavily extract — only with the key `TAVILY_API_KEY`** in `env` of settings.json (there is NO keyless mode: without a key `POST /extract` → 401 "missing or invalid API key", checked 2026-09-06): `curl -s --max-time 30 -X POST https://api.tavily.com/extract -H "Authorization: Bearer $TAVILY_API_KEY" -H 'Content-Type: application/json' -d '{"urls":["<url>"]}'` → `.results[0].raw_content`. No key → the rung is skipped silently.
+6. **Anti-bot — the last rung:** `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape(url, formats=["markdown"], onlyMainContent=true)`; on failure → retry with `waitFor: 5000`. **Never** for PDFs (rung 1) and x.com/twitter.com (an AI retelling for 30 credits, the hook denies it; tweets — the twitter channel). Behind a login — Playwright MCP only.
 
-Ни одна ступень не дала тела → пометь URL `[ИСТОЧНИК НЕДОСТУПЕН]`, цитату — максимум MEDIUM «[no-snapshot: blocked]».
+No rung produced a body → mark the URL `[SOURCE UNAVAILABLE]`, the citation — MEDIUM at most, "[no-snapshot: blocked]".
 
-### Layer 4 — Дополнение (опционально, 0-2 вызова)
+### Layer 4 — Supplementation (optional, 0-2 calls)
 
-Если остались пробелы:
-- **Вторая страница (исчерпана первая выдача):** `brave_web_search(query="<тот же запрос>", count=10, offset=1)`
-  — в пробе 2026-08-06 дал **10/10 новых URL, ноль пересечений**; дешевле и надёжнее, чем
-  перефразировка запроса. Потолок `offset=9` (~100 результатов на запрос).
-- Domain-filtered поиск: `brave_web_search(query="...", goggles="$discard\n$site=specific-site.com")`
-- Поиск свежих данных: `brave_web_search(query="...", freshness="pw")`
-- **Готовые Q&A — только продуктовые/потребительские/сравнительные темы:**
-  `brave_web_search(query="...", result_filter=["web","faq"])` — отдаёт пары вопрос/ответ по
-  150–650 символов с URL источника. На технических темах даёт ровно **0** — не тратить вызов.
-  Риск при цитировании: FAQ-блоки выдёргиваются из разметки 2-3 доменов, это не агрегат по
-  выдаче — не выдавать их за консенсус.
-- `result_filter=["infobox"]` для research **бесполезен**: приходит пустым (это карточки
-  сущностей — компания/персона/место, а не ответ на многословный вопрос).
+If gaps remain:
+- **The second page (the first set of results is exhausted):** `brave_web_search(query="<the same query>", count=10, offset=1)`
+  — in the probe on 2026-08-06 it gave **10/10 new URLs, zero overlap**; cheaper and more reliable than
+  rephrasing the query. The ceiling is `offset=9` (~100 results per query).
+- Domain-filtered search: `brave_web_search(query="...", goggles="$discard\n$site=specific-site.com")`
+- Search for fresh data: `brave_web_search(query="...", freshness="pw")`
+- **Ready-made Q&A — only for product / consumer / comparison topics:**
+  `brave_web_search(query="...", result_filter=["web","faq"])` — returns question/answer pairs of
+  150–650 characters with the source URL. On technical topics it gives exactly **0** — do not spend the call.
+  Risk when citing: FAQ blocks are pulled out of the markup of 2-3 domains, this is not an aggregate over the
+  results — do not present them as consensus.
+- `result_filter=["infobox"]` is **useless** for research: it comes back empty (these are entity
+  cards — a company/person/place, not an answer to a wordy question).
 
-> **БАГ `result_filter` (воспроизведён 2026-08-06).** ЛЮБОЙ одиночный не-`web` тип
-> (`faq`, `infobox`, `discussions`, …) → ошибка `No web results found`, 0 результатов.
-> Область бага шире, чем известное «discussions». Правило: **всегда комбинировать с `"web"`** —
+> **BUG in `result_filter` (reproduced 2026-08-06).** ANY single non-`web` type
+> (`faq`, `infobox`, `discussions`, …) → the error `No web results found`, 0 results.
+> The scope of the bug is wider than the known "discussions". The rule: **always combine with `"web"`** —
 > `result_filter=["web","faq"]`, `["web","discussions"]`.
 
-## Place-слой — локальные/бытовые темы («найди место») (0-3 вызова)
+## Place layer — local/everyday topics ("find a place") (0-3 calls)
 
-Срабатывает, когда тема про физические места (заведение, клиника, сервис,
-магазин, спорт — «где в Варшаве/городе X…»). Вердикт ресёрча «Поисковый стек
-Claude Code — 2026-08»:
+Triggers when the topic is about physical places (a venue, a clinic, a service,
+a shop, sport — "where in Warsaw / city X…"). The verdict of the research "The search stack of
+Claude Code — 2026-08":
 
-1. **Основной — Google Places API (New) Text Search** через свой скрипт:
+1. **Primary — Google Places API (New) Text Search** via our own script:
    ```bash
-   {PLUGIN_ROOT}/scripts/places-fetch.sh "<запрос места по-русски или по-польски>" --lang ru --limit 8
+   {PLUGIN_ROOT}/scripts/places-fetch.sh "<place query in Russian or Polish>" --lang ru --limit 8
    ```
-   `regionCode=PL` зашит; маска полей фиксирована (SKU Enterprise, free tier
-   1000/мес — research-объёмы бесплатны). exit 3 = `PLACES_KEY_MISSING` —
-   ключ ещё не выдан (гейт пользователя) → шаг 2.
-2. **Черновик/фоллбэк — Brave Place:** `mcp__plugin_jadlis-research_brave-search__brave_place_search`
-   с **`country="PL"` ОБЯЗАТЕЛЬНО** (без него выдача дрейфует в US; замер
-   precision: Brave 6.2 vs Google 8.2). Годится для черновой карты вариантов.
-3. **Fallback — Serper** ($1/1000) — только если 1-2 недоступны и место
-   критично для ответа.
+   `regionCode=PL` is hardcoded; the field mask is fixed (Enterprise SKU, free tier
+   1000/month — research volumes are free). exit 3 = `PLACES_KEY_MISSING` —
+   the key has not been issued yet (a user gate) → step 2.
+2. **Draft / fallback — Brave Place:** `mcp__plugin_jadlis-research_brave-search__brave_place_search`
+   with **`country="PL"` MANDATORY** (without it the results drift to the US; measured
+   precision: Brave 6.2 vs Google 8.2). Good for a rough map of options.
+3. **Fallback — Serper** ($1/1000) — only if 1-2 are unavailable and the place
+   is critical for the answer.
 
-Результаты place-слоя — обычные цитаты с reliability (Google Maps-карточка =
-агрегатор отзывов, обычно C; сайт заведения = A/E по контексту). Часы работы
-и цены СВЕРЯЙ с сайтом заведения — карточки устаревают.
+The results of the place layer are ordinary citations with reliability (a Google Maps card =
+a review aggregator, usually C; the venue's own site = A/E depending on context). Opening hours
+and prices must be CROSS-CHECKED against the venue's site — cards go stale.
 
-## Бюджет: 5-10 вызовов (+1 Exa, +0-3 place-слой для локальных тем)
+## Budget: 5-10 calls (+1 Exa, +0-3 place layer for local topics)
 
-| Layer | Вызовов | Обязательно |
+| Layer | Calls | Mandatory |
 |-------|---------|-------------|
-| 1. Контент+discovery | 2-4 | Да (параллельно) |
-| 2. Оценка | 0 | Да (анализ) |
-| 3. Полнотекстовый догруз | 2-5 | Да для всех HIGH-цитат |
-| 4. Дополнение | 0-2 | Нет |
+| 1. Content+discovery | 2-4 | Yes (in parallel) |
+| 2. Evaluation | 0 | Yes (analysis) |
+| 3. Full-text fetch | 2-5 | Yes for all HIGH citations |
+| 4. Supplementation | 0-2 | No |
 
-## Фоллбэк
+## Fallback
 
-1. При сбое `brave_llm_context` → продолжай на `brave_web_search` (+`extra_snippets`) и Layer 3. При сбое `brave_web_search` → retry с перефразированным keyword query + `count=5`. Max 2 retry.
-2. Полный текст страницы — только по лестнице Layer 3 (defuddle → jina → Exa `--full` → Tavily
-   при ключе → Firecrawl последним); Playwright MCP — **только для залогиненных сессий**.
-3. Если все каналы дают провал → зафиксировать `[WEB ИСТОЧНИК НЕДОСТУПЕН]` и завершить с тем, что есть.
+1. On a failure of `brave_llm_context` → continue on `brave_web_search` (+`extra_snippets`) and Layer 3. On a failure of `brave_web_search` → retry with a rephrased keyword query + `count=5`. Max 2 retries.
+2. The full text of a page — only via the Layer 3 ladder (defuddle → jina → Exa `--full` → Tavily
+   when a key is present → Firecrawl last); Playwright MCP — **only for logged-in sessions**.
+3. If all channels fail → record `[WEB SOURCE UNAVAILABLE]` and finish with what you have.
 
-Перед использованием любого инструмента — загрузи его через ToolSearch если недоступен.
+### Google-layer slots (off by default)
+
+1. **Serper fallback — ONLY if the env var `SERPER_API_KEY` is set** (check with Bash `test -n "$SERPER_API_KEY"`), and ONLY when a query needs Google operators that Brave handles poorly — `site:` on a non-English platform, `filetype:`, an exact phrase in quotes. Then call `curl -s -X POST https://google.serper.dev/search -H "X-API-KEY: $SERPER_API_KEY" -H 'Content-Type: application/json' -d '{"q":"<query>","num":10,"gl":"<country>","hl":"<lang>"}'` and read `.organic[]` (title/link/snippet). No key → skip silently, Brave stays the engine.
+2. **DataForSEO slot** — reserved for non-Google engines (Bing/Naver/Baidu SERP API). Not enabled, no deposit; do not call anything, this is a placeholder note: enabled in tranche 4 after the owner's trial.
+
+Before using any tool — load it via ToolSearch if it is unavailable.

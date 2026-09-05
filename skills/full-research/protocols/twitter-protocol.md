@@ -1,178 +1,198 @@
-# Twitter/X — протокол поиска для агента
+# Twitter/X — search protocol for the agent
 
-## Инструмент: headless Grok CLI (через Bash)
+## Tool: headless Grok CLI (via Bash)
 
-Поиск по X/Twitter идёт через **headless Grok CLI**, запускаемый из **Bash** (НЕ MCP, НЕ ToolSearch). CLI биллится по подписке (OIDC) → marginal cost ≈ $0.
+Search on X/Twitter runs through the **headless Grok CLI**, launched from **Bash** (NOT MCP, NOT ToolSearch). The CLI is billed against the subscription (OIDC) → marginal cost ≈ $0.
 
-Базовая команда:
+Base command:
 
 ```bash
-~/.grok/bin/grok -p '<ПРОМПТ>' \
+~/.grok/bin/grok -p '<PROMPT>' \
   -m grok-4.6 --effort xhigh \
   --output-format json --yolo --no-auto-update \
   --disallowed-tools "run_terminal_cmd" --max-turns 8
 ```
 
-JSON-обёртка CLI: `{text, stopReason, sessionId, requestId, thought}`. Твой результат — внутри `.text`.
+The CLI's JSON wrapper: `{text, stopReason, sessionId, requestId, thought}`. Your result is inside `.text`.
 
-> [!note] Проверено на grok 0.2.93 (2026-07-10, grok-4.5); пере-сверено на grok 1.0.3 (2026-08-13, grok-4.6)
-> - **`env -u XAI_API_KEY` НЕ нужен.** Session-токен OIDC по precedence выше `XAI_API_KEY` (тот — лишь fallback) → биллинг по подписке автоматически. Источник: `~/.grok/docs/user-guide/02-authentication.md` (Auth Precedence).
-> - **`--disallowed-tools "run_terminal_cmd"` — это security-хайген, а НЕ обход бага.** Баг сборки агента из 0.2.22 исправлен; голый `grok -p` работает. Флаг оставлен, потому что поиску по X терминал не нужен. НЕ считать его обязательным «костылём».
-> - **Модель пиним явно: `-m grok-4.6 --effort xhigh`.** grok-4.6 (500K ctx) — серверный дефолт с 2026-08, сменила grok-4.5 (та пока доступна); effort'ы: `low|medium|high|xhigh`, high — дефолт. Пин защищает от смены серверного дефолта. effort=xhigh закреплён (директива 2026-08-15, откат снят). Проверка списка: `grok models`.
+> [!note] Verified on grok 0.2.93 (2026-07-10, grok-4.5); re-verified on grok 1.0.3 (2026-08-13, grok-4.6)
+> - **`env -u XAI_API_KEY` is NOT needed.** The OIDC session token wins over `XAI_API_KEY` by precedence (that one is only a fallback) → billing goes to the subscription automatically. Source: `~/.grok/docs/user-guide/02-authentication.md` (Auth Precedence).
+> - **`--disallowed-tools "run_terminal_cmd"` is security hygiene, NOT a bug workaround.** The agent-assembly bug from 0.2.22 is fixed; a bare `grok -p` works. The flag is kept because X search does not need a terminal. Do NOT treat it as a mandatory "crutch".
+> - **Pin the model explicitly: `-m grok-4.6 --effort xhigh`.** grok-4.6 (500K ctx) is the server-side default since 2026-08, it replaced grok-4.5 (which is still available); efforts: `low|medium|high|xhigh`, high is the default. The pin protects against a change of the server-side default. effort=xhigh is fixed (directive 2026-08-15, the rollback is withdrawn). Check the list: `grok models`.
 
-## Парсинг результата — толерантная схема (НЕ `jq -r '.text'` в лоб)
+## Parsing the result — a tolerant scheme (NOT a blunt `jq -r '.text'`)
 
-`.text` **никогда не бывает чистым JSON**: проба 2026-08-06 — 0/9 вызовов дали валидный JSON
-напрямую (проза-префикс в 8/9, 122–362 символа; markdown-фенс ```` ```json ```` в 5/9; в одном
-вызове — обрыв структуры, не хватало закрывающей `}`). Требование промпта «без текста до/после»
-модель не соблюдает — это устойчивое поведение канала, а не разовая аномалия.
+`.text` is **never clean JSON**: probe 2026-08-06 — 0/9 calls returned valid JSON
+directly (a prose prefix in 8/9, 122–362 characters; a markdown fence ```` ```json ```` in 5/9; in one
+call the structure was truncated, a closing `}` was missing). The prompt's demand "no text before/after"
+is not honoured by the model — this is stable channel behaviour, not a one-off anomaly.
 
-Порядок разбора:
-1. Вынуть JSON-блок: содержимое ```` ```json…``` ````-фенса, иначе — от **первой `{` до последней `}`**.
-2. Валидировать `jq -e .`.
-3. Не распарсилось → доклеить недостающие `}`/`]` и повторить (в аудите из-за одной пропущенной
-   скобки целый блок данных «уехал» внутрь соседнего — наивный `json.loads` падает молча).
-4. Всё ещё невалидно → **извлечь посты глазами** из текста `.text` и продолжить.
-   Кривой JSON — НЕ повод считать канал упавшим и НЕ повод на третий вызов.
+Parsing order:
+1. Extract the JSON block: the contents of a ```` ```json…``` ```` fence, otherwise — from the **first `{` to the last `}`**.
+2. Validate with `jq -e .`.
+3. Did not parse → append the missing `}`/`]` and retry (in the audit a single missing
+   bracket made a whole data block "slide" inside its neighbour — a naive `json.loads` fails silently).
+4. Still invalid → **extract the posts by eye** from the `.text` text and continue.
+   Malformed JSON is NOT a reason to declare the channel down and NOT a reason for a third call.
 
-Готовый однострочник (stdout CLI в `out.json` → `payload.json`):
+A ready one-liner (CLI stdout into `out.json` → `payload.json`):
 
 ```bash
 jq -r '.text' out.json | python3 -c 'import sys,re; s=sys.stdin.read(); m=re.search(r"```(?:json)?\s*(.*?)```", s, re.S); s=m.group(1) if m else s; i,j=s.find("{"), s.rfind("}"); sys.stdout.write(s[i:j+1] if i>=0 and j>i else s)' > payload.json
-jq -e . payload.json >/dev/null || echo "JSON невалиден → доклеить скобки, иначе читать глазами"
+jq -e . payload.json >/dev/null || echo "JSON invalid → append the missing brackets, otherwise read it by eye"
 ```
 
-## Нативные x_* инструменты (модель вызывает их сама)
+## Native x_* tools (the model calls them itself)
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |---|---|
-| `x_keyword_search` | Поиск постов с операторами Twitter (основной). `query` (req), `limit` (деф. 3, **max 10**), `mode`=`Top`\|`Latest` |
-| `x_semantic_search` | Смысловой поиск. `query` (req), `limit` (деф. 3, **max 10**), `from_date`, `to_date`, `usernames[]`, `exclude_usernames[]` (деф. null), `min_score_threshold` (деф. **0.18**) |
-| `x_user_search` | Поиск аккаунтов/людей (найти точный handle). `query`, `count` |
-| `x_thread_fetch` | Пост + полный тред. `post_id` (req). Контент богатый (в пробе — 146 содержательных реплаев), но **~95 с** при пороге 60 с → **ВТОРОЙ REJECT (2026-08-06)** как отдельный вызов. Разрешён только строкой внутри промпта Вызова 2 |
+| `x_keyword_search` | Post search with Twitter operators (primary). `query` (req), `limit` (default 3, **max 10**), `mode`=`Top`\|`Latest` |
+| `x_semantic_search` | Semantic search. `query` (req), `limit` (default 3, **max 10**), `from_date`, `to_date`, `usernames[]`, `exclude_usernames[]` (default null), `min_score_threshold` (default **0.18**) |
+| `x_user_search` | Account/people search (find the exact handle). `query`, `count` |
+| `x_thread_fetch` | A post + the full thread. `post_id` (req). Rich content (146 substantive replies in the probe), but **~95 s** against a 60 s threshold → **SECOND REJECT (2026-08-06)** as a separate call. Allowed only as a line inside the Call 2 prompt |
 
-Схема сверена интроспекцией 2026-08-06 (grok 0.2.118).
+Schema verified by introspection 2026-08-06 (grok 0.2.118).
 
-> [!warning] Самоотчёту модели «параметр принят» не верить
-> Неизвестные параметры Grok **молча отбрасывает перед выполнением** — ошибки не будет,
-> а модель отрапортует «accepted». Единственная проверка поддержки — результат, не ответ модели.
-> `limit` жёстко режется по 10 (в пробе `limit=15` не прошёл схему): просить ровно `limit=10`.
-> `min_score_threshold` поднимать осторожно — см. оговорку в Вызове 1.
+> [!warning] Do not believe the model's self-report "parameter accepted"
+> Grok **silently drops unknown parameters before execution** — there will be no error,
+> and the model will report "accepted". The only check of support is the result, not the model's answer.
+> `limit` is hard-capped at 10 (in the probe `limit=15` did not pass the schema): ask for exactly `limit=10`.
+> Raise `min_score_threshold` cautiously — see the caveat in Call 1.
 
-Каждый промпт ЖЁСТКО требует: «используй ТОЛЬКО нативные x_* инструменты; верни ТОЛЬКО валидный JSON по схеме, без текста до/после» — но на выход это не влияет, парсер обязан быть толерантным (см. выше).
+Every prompt STRICTLY demands: "use ONLY the native x_* tools; return ONLY valid JSON per the schema, with no text before/after" — but that does not affect the output, the parser must be tolerant (see above).
 
-## Язык запроса — операторы Twitter внутри `query`
+## Query language — Twitter operators inside `query`
 
-Вся мощь — в строке `query` (у `x_keyword_search` нет отдельных параметров фильтров):
+All the power is in the `query` string (`x_keyword_search` has no separate filter parameters):
 
 ```
-from:handle   to:user   @handle              ← по аккаунтам
-filter:images   filter:videos               ← медиа (filter:links НЕ работает, см. ниже)
+from:handle   to:user   @handle              ← by account
+filter:images   filter:videos               ← media (filter:links does NOT work, see below)
 min_faves:50    min_retweets:10  min_replies:5 ← engagement
-since:2026-06-01  until:2026-06-07  lang:ru    ← период / язык
-"точная фраза"   OR   -минус                   ← логика
-url:example.com                                ← по ссылке
+since:2026-06-01  until:2026-06-07  lang:ru    ← period / language
+"exact phrase"   OR   -minus                   ← logic
+url:example.com                                ← by link
 ```
 
-`mode=Latest` — хронология (research/динамика); `mode=Top` — популярное.
+`mode=Latest` — chronology (research/dynamics); `mode=Top` — popular.
 
-> Сверено 2026-08-06:
-> - **`url:<домен>` работает чисто** — `query="<тема> url:github.com"` дал 10/10 постов с
->   реальными ссылками на домен. Рабочий приём для «постов со ссылками на материалы»
->   (репозитории, отчёты, PDF).
-> - **`filter:links` практически не фильтрует** — выдача с ним и без него отличалась ровно на
->   одного автора (10 постов против 10), причём 3 поста в «отфильтрованной» выдаче были вообще
->   без извлекаемых ссылок. Не использовать; для материалов брать `url:<домен>`.
+Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt; when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` first (native-term dictionary).
 
-## Протокол поиска (2 вызова В ОДНОМ сообщении — параллельно)
+> Verified 2026-08-06:
+> - **`url:<domain>` works cleanly** — `query="<topic> url:github.com"` returned 10/10 posts with
+>   real links to the domain. A working technique for "posts with links to materials"
+>   (repositories, reports, PDFs).
+> - **`filter:links` barely filters at all** — the output with and without it differed by exactly
+>   one author (10 posts against 10), and 3 posts in the "filtered" output had no
+>   extractable links whatsoever. Do not use it; for materials take `url:<domain>`.
 
-> **Латентность.** Один CLI-вызов «Вызова 1» = **≈101 с медиана** (100/129/100 с, сверено
-> 2026-08-06 на grok 0.2.118); два вызова параллельно ≈ 130 с. Медиана всего канала по
-> телеметрии — 486 с, то есть **~350 с уходят НЕ на CLI, а на аннотацию и сборку `twitter.md`
-> на стороне агента**. Главный источник латентности канала — аннотация цитат, а не Grok:
-> оптимизировать надо её (см. «Аннотация — компактно»), а не количество вызовов.
-> Формат неизменен: РОВНО 2 вызова, ОБА в одном ассистентском сообщении (два Bash-вызова
-> параллельно), у каждого Bash-параметр `timeout: 300000` (мс).
+## Search protocol (2 calls IN ONE message — in parallel)
 
-### Вызов 1 — Обзор + углубление (объединённый, `--max-turns 6`)
+> **Latency.** One CLI call of "Call 1" = **≈101 s median** (100/129/100 s, verified
+> 2026-08-06 on grok 0.2.118); two calls in parallel ≈ 130 s. The channel's median by
+> telemetry is 486 s, i.e. **~350 s go NOT to the CLI but to annotation and assembling `twitter.md`
+> on the agent's side**. The main source of the channel's latency is citation annotation, not Grok:
+> that is what must be optimised (see "Annotation — keep it compact"), not the number of calls.
+> The format is unchanged: EXACTLY 2 calls, BOTH in one assistant message (two Bash calls
+> in parallel), each with the Bash parameter `timeout: 300000` (ms).
 
-Один богатый промпт: broad-поиск И углубление (эксперты/период/альтернативный ракурс)
-внутри ОДНОГО агентного запуска — Grok сам сделает несколько x_*-поисков за свои turns:
+### Call 1 — Overview + deep dive (combined, `--max-turns 6`)
+
+One rich prompt: broad search AND deep dive (experts/period/alternative angle)
+inside ONE agent run — Grok will run several x_* searches itself across its turns:
 
 ```bash
-~/.grok/bin/grok -p 'Исследуй тему на X: <развёрнутый запрос с контекстом: что ищем, какие мнения/аспекты, какое решение принимается>. Сделай НЕСКОЛЬКО поисков: (1) x_keyword_search query="<ключевые слова + операторы, напр. min_faves:5 since:ГГГГ-ММ-ДД>" mode=Latest limit=10; (2) x_semantic_search по смысловому ракурсу limit=10 exclude_usernames=["<корпоративные/маркетинговые аккаунты по теме>"] min_score_threshold=0.5 — это ДОПОЛНЕНИЕ к шагу (1), НЕ замена; (3) x_keyword_search query="<тема> url:<профильный домен, напр. github.com>" limit=10 — посты со ссылками на материалы; (4) углубление по ключевым хэндлам из шага (1): x_user_search → x_keyword_search query="from:handle1 OR from:handle2 <тема>"; при необходимости период since:/until:. Верни ТОЛЬКО валидный JSON: {"posts":[{"url","author","date","text","likes"}]} — все найденные посты одним массивом, без дублей.' \
+~/.grok/bin/grok -p 'Research the topic on X: <expanded query with context: what we are looking for, which opinions/aspects, what decision is being made>. Run SEVERAL searches: (1) x_keyword_search query="<keywords + operators, e.g. min_faves:5 since:YYYY-MM-DD>" mode=Latest limit=10; (2) x_semantic_search on the semantic angle limit=10 exclude_usernames=["<corporate/marketing accounts on the topic>"] min_score_threshold=0.5 — this is an ADDITION to step (1), NOT a replacement; (3) x_keyword_search query="<topic> url:<domain-specific site, e.g. github.com>" limit=10 — posts with links to materials; (4) deep dive on the key handles from step (1): x_user_search → x_keyword_search query="from:handle1 OR from:handle2 <topic>"; add a period since:/until: if needed. Return ONLY valid JSON: {"posts":[{"url","author","date","text","likes"}]} — all posts found in a single array, without duplicates.' \
   -m grok-4.6 --effort xhigh \
   --output-format json --yolo --no-auto-update --disallowed-tools "run_terminal_cmd" --max-turns 6
 ```
 
-**ВАЖНО:** промпт развёрнутый, НЕ голые ключевые слова.
-- ПЛОХО: `"AI agents"`
-- ХОРОШО: `"Что разработчики и tech-инфлюенсеры говорят про AI-агентов в 2026: мнения, критика, запуски продуктов, заметные треды"`
+**IMPORTANT:** the prompt is expanded, NOT bare keywords.
+- BAD: `"AI agents"`
+- GOOD: `"What developers and tech influencers say about AI agents in 2026: opinions, criticism, product launches, notable threads"`
 
-**Обогащение шагов (2)–(3) сверено 2026-08-06:** +21 % постов (медиана 54.5 против 45) при
-медиане **118.5 с** против baseline 101 с — порог baseline+20 % (121.2 с) пройден с запасом
-2.7 с, бюджет вызовов не меняется. Границы, которые нельзя нарушать:
-- keyword-шаг (1) **не заменять** semantic-шагом: порог 0.5 срезает не только маркетинг, но и
-  часть топ-сигнала (в пробе ушли авторы самых залайканных постов). Выше 0.5 не поднимать
-  (дефолт схемы — 0.18); ниже — теряется смысл фильтра.
-- `exclude_usernames` — только корпоративные/маркетинговые аккаунты по теме. Поле `score` в
-  ответе приходит `null` → отфильтровать пост-фактум по нему нельзя.
-- `limit` просить ровно 10 — потолок схемы, больше не дадут.
-- `filter:links` в шаг (3) НЕ добавлять (не фильтрует) — работает только `url:<домен>`.
+**Enrichment of steps (2)–(3) verified 2026-08-06:** +21 % posts (median 54.5 against 45) at a
+median of **118.5 s** against the 101 s baseline — the baseline+20 % threshold (121.2 s) is passed with
+2.7 s to spare, the call budget does not change. Boundaries that must not be violated:
+- do **not replace** the keyword step (1) with the semantic step: the 0.5 threshold cuts off not only marketing but also
+  part of the top signal (in the probe the authors of the most-liked posts dropped out). Do not raise above 0.5
+  (the schema default is 0.18); below that the filter loses its point.
+- `exclude_usernames` — only corporate/marketing accounts on the topic. The `score` field in
+  the response comes back `null` → you cannot filter posts by it after the fact.
+- ask for exactly `limit` 10 — the schema ceiling, more will not be given.
+- do NOT add `filter:links` to step (3) (it does not filter) — only `url:<domain>` works.
 
-### Вызов 2 — Контраргументы (`--max-turns 4`)
+### Call 2 — Counterarguments (`--max-turns 4`)
 
 ```bash
-~/.grok/bin/grok -p 'Найди критику, проблемы и негативный опыт с {TOPIC} через x_keyword_search и x_semantic_search. Кто не согласен и почему. Если среди найденного есть высоко-вовлечённый тред (много реплаев/лайков) — вызови по нему x_thread_fetch и включи 2-3 контрастных реплая, пометив их как зависимые источники (реплаи одного треда). Верни ТОЛЬКО JSON {"posts":[{"url","author","date","text","likes"}]}' \
+~/.grok/bin/grok -p 'Find criticism, problems and negative experience with {TOPIC} via x_keyword_search and x_semantic_search. Who disagrees and why. If among the findings there is a high-engagement thread (many replies/likes) — call x_thread_fetch on it and include 2-3 contrasting replies, marking them as dependent sources (replies of one thread). Return ONLY JSON {"posts":[{"url","author","date","text","likes"}]}' \
   -m grok-4.6 --effort xhigh \
   --output-format json --yolo --no-auto-update --disallowed-tools "run_terminal_cmd" --max-turns 4
 ```
 
-> **`x_thread_fetch` — только строкой внутри этого промпта, НЕ отдельным CLI-вызовом.**
-> Проба 2026-08-06: контент отличный (146 содержательных реплаев, полярные мнения — ровно тот
-> sentiment, который канал иначе не добывает), но 95 с при пороге 60 с ≈ стоимость целого
-> Вызова 1 → отдельным вызовом не бюджетируется (второй REJECT подряд, теперь только по
-> латентности). Реплаи одного треда — **зависимые источники**, не считать их независимым
-> подтверждением.
+> **`x_thread_fetch` — only as a line inside this prompt, NOT as a separate CLI call.**
+> Probe 2026-08-06: the content is excellent (146 substantive replies, polar opinions — exactly the
+> sentiment the channel does not otherwise obtain), but 95 s against a 60 s threshold ≈ the cost of a whole
+> Call 1 → it is not budgeted as a separate call (the second REJECT in a row, now on
+> latency alone). Replies of one thread are **dependent sources**, do not count them as independent
+> confirmation.
 
-В выходном файле — отдельная секция:
+In the output file — a separate section:
 ```
-## Контраргументы (найдены на Twitter/X)
-- [{prefix}N] {контраргумент} — {URL}
+## Counterarguments (found on Twitter/X)
+- [{prefix}N] {counterargument} — {URL}
 ```
 
-## Бюджет: 2 вызова (жёстко)
+## Budget: 2 calls (hard)
 
-Дополнительные CLI-вызовы НЕ делать — даже если результат кажется неполным: цена
-третьего вызова — ещё ~40-60s хвоста на весь /full-research. Лучше меньше, но вовремя.
+Do NOT make additional CLI calls — even if the result seems incomplete: the price of the
+third call is another ~40-60s of tail on the whole /full-research. Better less, but on time.
 
-**Аннотация — компактно.** Каждой цитате: Admiralty A-F + ОДНА строка reliabilityWhy.
-Развёрнутые досье на авторов, многострочные bias-разборы, мета-теги сверх формата —
-НЕ писать: глубина аннотации twitter.md — **ГЛАВНЫЙ** источник латентности канала, а не CLI.
-Числа: CLI даёт ~101 с (медиана вызова), медиана канала — 486 с, разница ~350 с целиком
-приходится на аннотацию и сборку файла. Экономить секунды надо здесь.
+**Annotation — keep it compact.** For every citation: Admiralty A-F + ONE reliabilityWhy line.
+Expanded dossiers on authors, multi-line bias analyses, meta tags beyond the format —
+do NOT write them: the annotation depth of twitter.md is the **MAIN** source of the channel's latency, not the CLI.
+The numbers: the CLI gives ~101 s (median call), the channel median is 486 s, the ~350 s difference falls
+entirely on annotation and file assembly. Seconds must be saved here.
 
-## Потеряно при миграции с MCP (2026-06)
+## Lost in the migration off MCP (2026-06)
 
-CLI-канал не умеет **image/video understanding постов** — того, что давал MCP. Картинки,
-мемы, скриншоты продуктов и видео приходят только как ссылки/подписи, их содержимое каналом
-не читается.
+The CLI channel cannot do **image/video understanding of posts** — what MCP used to give. Pictures,
+memes, product screenshots and videos arrive only as links/captions, their content is not read
+by the channel.
 
-Следствие: если тема **визуальная** (мемы, скриншоты интерфейсов, демо-видео, инфографика),
-канал слепнет на этом измерении — прямо отметить это ограничение в findings, чтобы синтез не
-принял отсутствие визуального сигнала за его отсутствие в реальности.
+Consequence: if the topic is **visual** (memes, interface screenshots, demo videos, infographics),
+the channel goes blind on that dimension — state this limitation explicitly in findings, so that the synthesis does not
+mistake the absence of a visual signal for its absence in reality.
 
-## Деградация (CLI-only, БЕЗ фоллбэка)
+## Degradation (CLI-only, NO fallback)
 
-Один вызов упал (non-zero exit / таймаут / пустой `.text`), второй ок → работай с тем,
-что вернулось, пометь недостающий ракурс в findings.
+One call failed (non-zero exit / timeout / empty `.text`), the other is fine → work with what
+came back, mark the missing angle in findings.
 
-Оба вызова упали → ОДИН последовательный повтор объединённого вызова (параллельный
-запуск мог упереться в rate-limit). Если и он упал:
-- верни **пустые** findings + пометку «X-канал недоступен (CLI)»;
-- citations/counterarguments пустые; sourceQuality = LOW;
-- **НЕ переключайся** на MCP `x_search` или brave — канал работает ТОЛЬКО через CLI
-  (MCP grok-mcp = xAI API, платные кредиты — запрещён by design);
-- **НЕ роняй** workflow — остальные каналы /full-research должны завершиться.
+Both calls failed → ONE sequential retry of the combined call (the parallel
+launch may have hit a rate limit). If that one failed too:
+- return **empty** findings + the note "X channel unavailable (CLI)";
+- citations/counterarguments empty; sourceQuality = LOW;
+- **do NOT switch** to MCP `x_search` or brave — the channel works ONLY through the CLI
+  (MCP grok-mcp = xAI API, paid credits — forbidden by design);
+- **do NOT crash** the workflow — the other /full-research channels must finish.
 
-Причины сбоя для диагностики: истёкший OIDC-токен (нужен `grok login`, виден как exit≠0) или rate-limit подписки. stderr-варнинги `Transport channel closed / AuthorizationRequired` при exit 0 — безвредны (внутренние MCP grok'а), результат валиден.
+Failure causes for diagnostics: an expired OIDC token (needs `grok login`, visible as exit≠0) or a subscription rate limit. stderr warnings `Transport channel closed / AuthorizationRequired` at exit 0 are harmless (grok's internal MCP servers), the result is valid.
+
+## Degradation slot: TwitterAPI.io (off by default)
+
+> [!note] Enabled in tranche 4 after the owner's trial; until then this subsection only documents the slot.
+
+- **Trigger.** The Grok liveness probe returned `GROK_DOWN` (in that case the orchestrator/skill already
+  drops the channel from the run — see the `grokweb` / `twitter` gate in `SKILL.md`).
+- **Key gate.** In that case the channel MAY degrade to keyword-only search through the TwitterAPI.io MCP
+  ONLY if the env var `TWITTERAPI_IO_KEY` is set. Check from Bash: `test -n "$TWITTERAPI_IO_KEY"`.
+  No key → the channel is skipped exactly as today (the section above), with no fallback.
+- **With the key, exactly three call types are allowed**, and only for the gaps Grok cannot fill:
+  1. `get_tweet_replies` — thread replies of one high-engagement post;
+  2. `get_user_info` + `get_user_about` — author profiling for the Admiralty reliability rating;
+  3. `get_trends` — a topic trend check.
+- **No general keyword sweeps through TwitterAPI.io.** Grok `x_keyword_search` / `x_semantic_search`
+  remain the primary path.
+- **Budget: ≤3 calls per run** — every TwitterAPI.io call costs credits (a paid vendor, not the subscription).
+- While the slot is off, the "do NOT switch" rule of the section above stays in force in full.

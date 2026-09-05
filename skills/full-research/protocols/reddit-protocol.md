@@ -1,68 +1,72 @@
-# Reddit — протокол поиска для агента
+# Reddit — search protocol for the agent
 
-## MCP-инструменты
+## MCP tools
 
 Namespace: `mcp__plugin_jadlis-research_reddit__*`
 
-Все операции выполняются через 3 инструмента:
-- `mcp__plugin_jadlis-research_reddit__discover_operations` — список операций
-- `mcp__plugin_jadlis-research_reddit__get_operation_schema` — схема параметров
-- `mcp__plugin_jadlis-research_reddit__execute_operation` — выполнение
+All operations go through 3 tools:
+- `mcp__plugin_jadlis-research_reddit__discover_operations` — list of operations
+- `mcp__plugin_jadlis-research_reddit__get_operation_schema` — parameter schema
+- `mcp__plugin_jadlis-research_reddit__execute_operation` — execution
 
-**КРИТИЧНО:** `parameters` в `execute_operation` — ВСЕГДА native JSON object, НЕ строка.
+**CRITICAL:** `parameters` in `execute_operation` is ALWAYS a native JSON object, NOT a string.
 
 ## THREE-LAYER Protocol
 
-### Layer 1 — Discover (2 вызова: лексический + семантический)
+### Layer 1 — Discover (2 calls: lexical + semantic)
 
-**Шаг 1 (первым, всегда): `mcp__plugin_jadlis-research_reddit-alt__reddit_search_communities`** (`q`, `limit: 10`) —
-лексический поиск официального листинга. Находит точные имена, к которым слеп семантический
-индекс primary (r/mcp первым результатом — замер 3×3 2026-08-15; вердикт совета 2026-08-15:
-reddit-alt = первая линия discovery, свой OAuth-клиент/заявка НЕ нужны, пока reddit-alt жив).
-~$0.002/вызов (прикреплённый ключ), без 402-слоя primary.
+Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt;
+when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md`
+first (native-term dictionary).
 
-**Шаг 2 (опционально): primary `discover_subreddits`** — только если тема перифрастическая
-(смысловой запрос без точных имён) И шаг 1 дал мало релевантного. Один вызов с массивом
-`queries` — 2-3 переформулировки. Батч эквивалентен по покрытию N одиночным вызовам
-(проба 2026-08-06), но стоит 1 вызов вместо N. `limit` действует **per query**.
-При 402 от primary — НЕ ретраить, работать только через reddit-alt (402 = платный слой
-вендора MCP, не Reddit).
+**Step 1 (first, always): `mcp__plugin_jadlis-research_reddit-alt__reddit_search_communities`** (`q`, `limit: 10`) —
+a lexical search of the official listing. Finds the exact names that the primary's semantic
+index is blind to (r/mcp as the first result — 3×3 measurement 2026-08-15; council verdict 2026-08-15:
+reddit-alt = the first line of discovery, our own OAuth client/application is NOT needed while reddit-alt is alive).
+~$0.002/call (attached key), without the primary's 402 layer.
+
+**Step 2 (optional): primary `discover_subreddits`** — only if the topic is periphrastic
+(a meaning-based query without exact names) AND step 1 returned little that is relevant. One call with a
+`queries` array — 2-3 reformulations. The batch is equivalent in coverage to N single calls
+(probe 2026-08-06), but costs 1 call instead of N. `limit` applies **per query**.
+On a 402 from the primary — do NOT retry, work only through reddit-alt (402 = the paid tier of the
+MCP vendor, not Reddit).
 
 ```json
 execute_operation({
   "operation_id": "discover_subreddits",
   "parameters": {
-    "queries": ["<ЗАПРОС>", "<синоним-1>", "<синоним-2>"],
+    "queries": ["<QUERY>", "<synonym-1>", "<synonym-2>"],
     "limit": 15,
     "min_confidence": 0.4
   }
 })
 ```
 
-Запомни все сабреддиты с confidence >= 0.4.
+Remember every subreddit with confidence >= 0.4.
 
-Не повторяй `discover_subreddits` «для надёжности» — ответ детерминирован (векторный индекс,
-не живая выдача), повтор тратит вызов и ничего не меняет.
+Do not repeat `discover_subreddits` "just to be safe" — the response is deterministic (a vector index,
+not live results), a repeat spends a call and changes nothing.
 
-Слабый сигнал качества — `summary.confidence_stats` (`mean`/`max`). При низком `max` (< ~0.6) —
-максимум ОДНА переформулировка запроса, не больше. Полями `quality_indicators` (в payload его нет)
-и `tier_distribution` (вырожден: всё `peripheral`) не пользоваться.
+A weak quality signal is `summary.confidence_stats` (`mean`/`max`). With a low `max` (< ~0.6) —
+at most ONE reformulation of the query, no more. Do not use the fields `quality_indicators` (it is not in the payload)
+and `tier_distribution` (degenerate: everything is `peripheral`).
 
-### Layer 1b — Прямая проверка очевидных имён (+0-2 вызова)
+### Layer 1b — Direct check of obvious names (+0-2 calls)
 
-Если тема содержит короткое имя или термин (аббревиатура, имя продукта, `r/<term>`) — проверь
-такой сабреддит **напрямую** через `search_subreddit`, не полагаясь на discovery: семантический
-индекс слеп к точным именам сабреддитов.
+If the topic contains a short name or term (an abbreviation, a product name, `r/<term>`) — check
+such a subreddit **directly** via `search_subreddit`, without relying on discovery: the semantic
+index is blind to exact subreddit names.
 
-Кейс: `r/mcp` (73K подписчиков) по запросу «MCP model context protocol» не выдаётся вообще —
-discovery возвращает Minecraft и McKinney (подстрочный матч «Mc»); снятие `min_confidence` не лечит.
-Прямой `search_subreddit` в `r/mcp` при этом отрабатывает идеально (проба 2026-08-06).
+Case: `r/mcp` (73K subscribers) is not returned at all for the query "MCP model context protocol" —
+discovery returns Minecraft and McKinney (a substring match on "Mc"); removing `min_confidence` does not fix it.
+A direct `search_subreddit` in `r/mcp` meanwhile works perfectly (probe 2026-08-06).
 
-Признак, что нужен этот шаг: все `match_tier == "peripheral"` и имена явно из другого домена.
+The sign that this step is needed: all `match_tier == "peripheral"` and the names are clearly from another domain.
 
-### Layer 2 — Batch Fetch (5 вызовов)
+### Layer 2 — Batch Fetch (5 calls)
 
-1. `fetch_multiple` со всеми сабреддитами (confidence >= 0.4, до 7 штук):
+1. `fetch_multiple` with all the subreddits (confidence >= 0.4, up to 7 of them):
 ```json
 execute_operation({
   "operation_id": "fetch_multiple",
@@ -72,13 +76,13 @@ execute_operation({
 })
 ```
 
-2. `search_subreddit` в **топ-4 сабреддитах** (по одному вызову на каждый):
+2. `search_subreddit` in the **top 4 subreddits** (one call for each):
 ```json
 execute_operation({
   "operation_id": "search_subreddit",
   "parameters": {
     "subreddit_name": "<top_sub>",
-    "query": "<ЗАПРОС>",
+    "query": "<QUERY>",
     "sort": "relevance",
     "time_filter": "all",
     "limit": 25
@@ -86,25 +90,25 @@ execute_operation({
 })
 ```
 
-`time_filter: "all"` + sort relevance ловит одновременно канонические старые треды и свежие
-обсуждения (проверено A/B-бенчмарком 2026-06: 3:0 против `year`/топ-2).
-`"limit": 25` обязателен: дефолт — 10, а позиции 11-25 содержат прямые попадания
-(проба 2026-08-06). Стоит 0 дополнительных вызовов, даёт ×2,5 к охвату.
-Имена параметров сверены со schema 2026-08-06: `subreddit_names` (НЕ subreddits),
-`time_filter` (НЕ time), `subreddit_name` (канон для `search_subreddit`) —
-при ошибке схемы сначала `get_operation_schema`, не гадай.
-`subreddit` — недокументированный рабочий алиас (нормализуется сервером), не полагаться:
-может исчезнуть при апгрейде.
+`time_filter: "all"` + sort relevance catches canonical old threads and fresh
+discussions at the same time (verified by an A/B benchmark 2026-06: 3:0 against `year`/top-2).
+`"limit": 25` is mandatory: the default is 10, while positions 11-25 contain direct hits
+(probe 2026-08-06). It costs 0 extra calls and gives ×2.5 the coverage.
+Parameter names verified against the schema 2026-08-06: `subreddit_names` (NOT subreddits),
+`time_filter` (NOT time), `subreddit_name` (the canonical one for `search_subreddit`) —
+on a schema error, first `get_operation_schema`, do not guess.
+`subreddit` is an undocumented working alias (normalized by the server), do not rely on it:
+it may disappear on an upgrade.
 
-### Layer 2b — Freshness-проход (2 вызова)
+### Layer 2b — Freshness pass (2 calls)
 
-`search_subreddit` в **топ-2 сабреддитах** с сортировкой по свежести:
+`search_subreddit` in the **top 2 subreddits** sorted by freshness:
 ```json
 execute_operation({
   "operation_id": "search_subreddit",
   "parameters": {
     "subreddit_name": "<top_sub>",
-    "query": "<ЗАПРОС>",
+    "query": "<QUERY>",
     "sort": "new",
     "time_filter": "month",
     "limit": 25
@@ -112,13 +116,13 @@ execute_operation({
 })
 ```
 
-Релевантность в этом режиме проседает — `sort: "new"` отдаёт свежайшее из совпавших
-по любому слабому совпадению (проба 2026-08-06). Брать **только прямые попадания**,
-каждую freshness-цитату помечать датой поста.
+Relevance sags in this mode — `sort: "new"` returns the freshest of whatever matched,
+on any weak match (probe 2026-08-06). Take **only direct hits**,
+and mark every freshness quote with the date of the post.
 
-### Layer 3 — Deep Comments (5-7 вызовов)
+### Layer 3 — Deep Comments (5-7 calls)
 
-`fetch_comments` для **топ 5-7 постов** (приоритет постам с `num_comments >= 20`, высокий score):
+`fetch_comments` for the **top 5-7 posts** (priority to posts with `num_comments >= 20`, high score):
 ```json
 execute_operation({
   "operation_id": "fetch_comments",
@@ -129,14 +133,14 @@ execute_operation({
   }
 })
 ```
-Принимает `url` (предпочтительно) либо `submission_id`. Параметров `post_id`/`depth` **нет** —
-вызов падает с `unexpected keyword argument 'post_id'` (сверено с живым MCP 2026-07-27).
+Accepts `url` (preferred) or `submission_id`. The parameters `post_id`/`depth` do **not** exist —
+the call fails with `unexpected keyword argument 'post_id'` (verified against the live MCP 2026-07-27).
 
-### Layer 4 — Контраргументы (2-3 вызова)
+### Layer 4 — Counterarguments (2-3 calls)
 
-После формирования ключевых тезисов — поиск опровержений:
+Once the key claims have been formed — search for refutations:
 
-1. `search_subreddit` в тех же субреддитах с инвертированным запросом:
+1. `search_subreddit` in the same subreddits with an inverted query:
 ```json
 execute_operation({
   "operation_id": "search_subreddit",
@@ -150,79 +154,79 @@ execute_operation({
 })
 ```
 
-2. `fetch_comments` для постов с противоположной точкой зрения (1-2 вызова)
+2. `fetch_comments` for posts with the opposite point of view (1-2 calls)
 
-В выходном файле — отдельная секция:
+In the output file — a separate section:
 ```
-## Контраргументы (найдены на Reddit)
-- [{prefix}N] {контраргумент} — {URL}
+## Counterarguments (found on Reddit)
+- [{prefix}N] {counterargument} — {URL}
 ```
 
-## Правила цитирования
+## Citation rules
 
-- Не более **3 цитат с одного треда** — иначе один тред перевешивает канал.
-- У **каждой** цитаты — дата поста (рекомендация бенчмарка 2026-06).
-  Для цитат из Layer 2b дата обязательна вдвойне: это и есть их ценность.
+- No more than **3 quotes from one thread** — otherwise a single thread outweighs the channel.
+- **Every** quote carries the date of the post (recommendation of the 2026-06 benchmark).
+  For quotes from Layer 2b the date is doubly mandatory: it is exactly what makes them valuable.
 
-## Бюджет: 14-20 вызовов
+## Budget: 14-20 calls
 
-## Резервный Reddit-MCP — `reddit-alt` (redditapis-mcp, ступень 1.5)
+## Backup Reddit MCP — `reddit-alt` (redditapis-mcp, rung 1.5)
 
-Второй MCP, независимый бэкенд (api.redditapis.com, live-данные, полные метрики).
-Namespace: `mcp__plugin_jadlis-research_reddit-alt__*` — 32 плоских тула (без execute_operation-обёртки).
-Платный: ~$0.002/read с прикреплённого ключа (в env конфига), т.е. полный протокол ≈ $0.05.
-`reddit_deep_comment_search` — «premium call» с недокументированной ценой, по умолчанию не звать.
+A second MCP, an independent backend (api.redditapis.com, live data, full metrics).
+Namespace: `mcp__plugin_jadlis-research_reddit-alt__*` — 32 flat tools (no execute_operation wrapper).
+Paid: ~$0.002/read from the attached key (in the config env), i.e. the full protocol ≈ $0.05.
+`reddit_deep_comment_search` is a "premium call" with an undocumented price, do not call it by default.
 
-Маппинг операций планки:
+Mapping of the ladder's operations:
 
-| Операция primary | reddit-alt | Отличия |
+| Primary operation | reddit-alt | Differences |
 |---|---|---|
-| `discover_subreddits` | `reddit_search_communities` (`q`, `limit`) | лексический, НЕ semantic → находит точные имена (r/mcp — проверено 2026-08-12), но хуже по смысловым перифразам |
-| `search_subreddit` | `reddit_search` (`q`, `subreddit`, `sort`, `t`, `limit`, пост-фильтры `min_score`/`min_comments`) | есть и глобальный поиск (без `subreddit`) — primary так не умеет |
+| `discover_subreddits` | `reddit_search_communities` (`q`, `limit`) | lexical, NOT semantic → finds exact names (r/mcp — verified 2026-08-12), but worse on meaning-based periphrases |
+| `search_subreddit` | `reddit_search` (`q`, `subreddit`, `sort`, `t`, `limit`, post-filters `min_score`/`min_comments`) | there is also a global search (without `subreddit`) — the primary cannot do that |
 | `fetch_posts` | `reddit_subreddit_posts` (`sort`: hot/new/top/rising/controversial/best) | — |
-| `fetch_multiple` | нет батча по сабам → по одному `reddit_subreddit_posts`; батч по id — `reddit_by_id` (до 100 fullnames) | |
-| `fetch_comments` | `reddit_post_comments` (`permalink`, `limit`) | threaded-дерево + `after`-курсор |
-| feeds | мониторинг только на платном плане — не используем | |
+| `fetch_multiple` | no batch over subs → one `reddit_subreddit_posts` per sub; batch by id — `reddit_by_id` (up to 100 fullnames) | |
+| `fetch_comments` | `reddit_post_comments` (`permalink`, `limit`) | threaded tree + `after` cursor |
+| feeds | monitoring only on the paid plan — not used | |
 
-**Роли (обновлено вердиктом совета 2026-08-15):** discovery — reddit-alt ПЕРВЫМ (Layer 1
-шаг 1), primary discover — второй линией для смысловых перифраз. Остальные операции —
-primary первым выбором; переключение на alt (любое из): primary 5xx/timeout/402;
-не-английский запрос (кейс польского — проверено 2026-08-12: primary 0, alt находит r/Polska);
-нужны live-метрики свежих постов (у Arctic Shift score заморожен).
+**Roles (updated by the council verdict 2026-08-15):** discovery — reddit-alt FIRST (Layer 1
+step 1), the primary discover — as the second line for meaning-based periphrases. All other operations —
+the primary as the first choice; switch to alt on (any of): primary 5xx/timeout/402;
+a non-English query (the Polish case — verified 2026-08-12: primary 0, alt finds r/Polska);
+live metrics of fresh posts are needed (Arctic Shift's score is frozen).
 
-## Fallback-лестница (no-auth бэкенды)
+## Fallback ladder (no-auth backends)
 
-MCP остаётся **primary** (live-данные, семантика). Лестница — когда MCP молчит,
-recall-гэп (семантика слепа к точным именам, кейс r/mcp; ломается на польском)
-или нужна история. Оба бэкенда — без ключей и регистрации.
-CLI-обёртка с троттлингом: `python3 {PLUGIN_ROOT}/scripts/reddit-archive.py` (sub / search / comments).
+The MCP stays **primary** (live data, semantics). The ladder is for when the MCP is silent,
+for a recall gap (semantics is blind to exact names, the r/mcp case; it breaks on Polish),
+or when history is needed. Both backends need no keys and no registration.
+CLI wrapper with throttling: `python3 {PLUGIN_ROOT}/scripts/reddit-archive.py` (sub / search / comments).
 
-1. **Точное имя сабреддита или blind-spot discovery** → **Arctic Shift** `posts/search` по `subreddit`:
+1. **An exact subreddit name or blind-spot discovery** → **Arctic Shift** `posts/search` by `subreddit`:
    `https://arctic-shift.photon-reddit.com/api/posts/search?subreddit=<sub>&limit=100`
-   (+ `after`/`before` ISO-даты, `author`, `query` — FTS внутри одного сабреддита).
-   Лимит ~2000 rpm, архив 2005→сейчас, **лаг свежести ~месяц** — свежее только через MCP.
-2. **Ключевик по ВСЕМУ Reddit** (не умеют ни MCP, ни Arctic Shift) → **Reddit search RSS**
-   с браузерным User-Agent (2026-09-05 — вместо PullPush: тот отдаёт 429 на первый запрос с любого IP
-   с 2026-08-26 и агентам отказывает явно):
-   `https://www.reddit.com/search.rss?q=<query>&sort=new` (+ `&t=year`, `&restrict_sr=1` в
-   `r/<sub>/search.rss`). Обёртка: `python3 {PLUGIN_ROOT}/scripts/reddit-archive.py search "<query>"`
-   (Atom → JSON: title/url/subreddit/date/summary; только посты, комментариев в RSS нет — дерево
-   через `comments`). Ответ без `<entry>` при 200 = поиск пуст, не блок; 429/403 → сразу Arctic
-   Shift (`sub` с `query`) или MCP.
-   > discover hosted MCP и метаданные Arctic Shift — НЕ источник истины по размерам сабреддитов
-   > (r/mcp: discover отдавал 73 456 при ~119 953 реальных); метрики Arctic Shift моложе ~36 ч не читать.
-3. **Бэкфилл за пределами 1000-item cap / глубокая история** → Arctic Shift, при массовых
-   объёмах — bulk-dumps Watchful1 (github.com/Watchful1/PushshiftDumps, ~4 ТБ).
+   (+ `after`/`before` ISO dates, `author`, `query` — FTS within a single subreddit).
+   Limit ~2000 rpm, archive 2005→now, **freshness lag ~a month** — anything fresher only via the MCP.
+2. **A keyword search across ALL of Reddit** (neither the MCP nor Arctic Shift can do it) → **Reddit search RSS**
+   with a browser User-Agent (2026-09-05 — instead of PullPush: that one returns 429 on the first request from any IP
+   since 2026-08-26 and refuses agents explicitly):
+   `https://www.reddit.com/search.rss?q=<query>&sort=new` (+ `&t=year`, `&restrict_sr=1` in
+   `r/<sub>/search.rss`). Wrapper: `python3 {PLUGIN_ROOT}/scripts/reddit-archive.py search "<query>"`
+   (Atom → JSON: title/url/subreddit/date/summary; posts only, there are no comments in the RSS — the tree
+   comes via `comments`). A response without `<entry>` at 200 = the search is empty, not a block; 429/403 → go straight to Arctic
+   Shift (`sub` with `query`) or the MCP.
+   > discover hosted MCP and Arctic Shift metadata are NOT a source of truth for subreddit sizes
+   > (r/mcp: discover returned 73 456 against ~119 953 real ones); do not read Arctic Shift metrics younger than ~36 h.
+3. **Backfill beyond the 1000-item cap / deep history** → Arctic Shift; at bulk
+   volumes — Watchful1's bulk dumps (github.com/Watchful1/PushshiftDumps, ~4 TB).
 
-Дерево комментов треда → Arctic Shift `comments/tree?link_id=<submission_id>&limit=25000`.
+A thread's comment tree → Arctic Shift `comments/tree?link_id=<submission_id>&limit=25000`.
 
-Лимиты сняты на 2026-08 (волонтёрские, могут меняться) — при первом 429 сверить заново.
+Limits as taken on 2026-08 (volunteer-run, may change) — re-verify on the first 429.
 
-## Фоллбэк (Brave, если и бэкенды недоступны)
+## Fallback (Brave, if the backends are unavailable too)
 
-При сбое Reddit MCP и бэкендов — `mcp__plugin_jadlis-research_brave-search__brave_web_search`:
+If the Reddit MCP and the backends fail — `mcp__plugin_jadlis-research_brave-search__brave_web_search`:
 ```json
-{ "query": "site:reddit.com <ЗАПРОС>", "count": 10, "result_filter": ["web", "discussions"] }
+{ "query": "site:reddit.com <QUERY>", "count": 10, "result_filter": ["web", "discussions"] }
 ```
 
-Вызывай инструмент напрямую. ToolSearch ТОЛЬКО при InputValidationError.
+Call the tool directly. ToolSearch ONLY on an InputValidationError.
