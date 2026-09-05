@@ -1,78 +1,83 @@
-# Telegram — протокол поиска для агента
+# Telegram — search protocol for the agent
 
-Канал добавлен 2026-08-15. Роутинг: RU-темы, кастдев — по дереву SKILL.md, НЕ default.
-Контур ПОЛНОСТЬЮ бесплатный: без MTProto, без TGStat (не продлён — решение
-wiggly-hollerith), без Deaddrop (платный). Только публичные веб-превью и поисковые дорки.
+Channel added 2026-08-15. Routing: RU topics, custdev — per the SKILL.md tree, NOT default.
+The setup is COMPLETELY free: no MTProto, no TGStat (not renewed — wiggly-hollerith
+decision), no Deaddrop (paid). Only public web previews and search dorks.
 
-## Инструменты
+## Tools
 
-| Инструмент | Назначение |
+| Tool | Purpose |
 |---|---|
-| `mcp__plugin_jadlis-research_brave-search__brave_web_search` с `site:t.me` | Discovery каналов и постов — основной |
-| Яндекс (`yandex-search.sh`, если канал yandex выбран в прогоне) | RU-дорки `site:t.me` — индекс Рунета глубже |
-| `{PLUGIN_ROOT}/scripts/tg-preview.sh <handle>` | Чтение публичного канала: последние ~20 постов ПОЛНЫМ текстом, пагинация `--before <msg_id>` |
-| `{PLUGIN_ROOT}/skills/full-research/references/telegram-seed-handles.md` | 44 AI/вайбкодинг-канала (vc.ru/3060557) — вводные для AI-тем |
+| `mcp__plugin_jadlis-research_brave-search__brave_web_search` with `site:t.me` | Discovery of channels and posts — the main one |
+| Yandex (`yandex-search.sh`, if the yandex channel is selected for the run) | RU dorks `site:t.me` — the Runet index goes deeper |
+| `{PLUGIN_ROOT}/scripts/tg-preview.sh <handle>` | Reading a public channel: the last ~20 posts in FULL text, pagination `--before <msg_id>` |
+| `{PLUGIN_ROOT}/skills/full-research/references/telegram-seed-handles.md` | 44 AI / vibe-coding channels (vc.ru/3060557) — seeds for AI topics |
 
-## Протокол
+## Protocol
 
-### Layer 0 — Discovery (2-3 вызова)
+### Layer 0 — Discovery (2-3 calls)
 
-1. Дорки по постам и каналам:
+Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt; when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` first (native-term dictionary).
+
+1. Dorks over posts and channels:
 ```json
 brave_web_search({ "query": "site:t.me <ТЕМА по-русски>", "count": 15, "extra_snippets": true })
 ```
-2. Подборки каналов: `подборка telegram каналов <тема>` (vc.ru/habr — доноры хэндлов).
-3. AI-темы → сразу взять релевантные из `{PLUGIN_ROOT}/skills/full-research/references/telegram-seed-handles.md`.
+2. Channel roundups: `подборка telegram каналов <тема>` (vc.ru / habr — donors of handles).
+3. AI topics → take the relevant ones straight from `{PLUGIN_ROOT}/skills/full-research/references/telegram-seed-handles.md`.
 
-Из URL парси handles: `t.me/<handle>` и `t.me/s/<handle>`; `t.me/+...` —
-приватные invite-ссылки, НЕ читаются, отбрасывай.
+Parse handles out of the URLs: `t.me/<handle>` and `t.me/s/<handle>`; `t.me/+...` are
+private invite links, they are NOT readable, discard them.
 
-### Layer 1 — Проверка живости + чтение (3-6 вызовов Bash)
+### Layer 1 — Liveness check + reading (3-6 Bash calls)
 
 ```bash
 {PLUGIN_ROOT}/scripts/tg-preview.sh <handle>
 ```
-~20 последних постов с полным текстом + даты. exit 3 (`TG_NO_PREVIEW`) —
-канал без веб-превью/приватный: это НЕ «постов нет», отбрось хэндл с пометкой.
-Мёртвый канал (посты старше ~6 мес) — слабый источник, как и в Substack.
+~20 latest posts with full text + dates. exit 3 (`TG_NO_PREVIEW`) —
+a channel without a web preview / private: this does NOT mean "there are no posts", discard the handle with a note.
+A dead channel (posts older than ~6 months) is a weak source, same as in Substack.
 
-### Layer 2 — Глубина по теме (2-4 вызова)
+### Layer 2 — Topic depth (2-4 calls)
 
-Для 2-3 самых релевантных каналов — пагинация в историю:
+For the 2-3 most relevant channels — paginate into the history:
 ```bash
 {PLUGIN_ROOT}/scripts/tg-preview.sh <handle> --before <msg_id>
 ```
-(msg_id печатается в stderr прошлого вызова). Точечный поиск постов по теме —
-опять Brave: `site:t.me/<handle> <ключевое слово>`.
+(msg_id is printed to stderr by the previous call). Pinpoint search for posts on the topic —
+again Brave: `site:t.me/<handle> <ключевое слово>`.
 
-### Layer 3 — Контраргументы (1-2 вызова)
+### Layer 3 — Counterarguments (1-2 calls)
 
-Brave: `site:t.me <ТЕМА> проблемы/не работает/развод/отзывы` — телеграм богат
-негативным опытом, но и заказными постами (см. reliability ниже).
+Brave: `site:t.me <ТЕМА> проблемы/не работает/развод/отзывы` — Telegram is rich in
+negative experience, but also in paid-placement posts (see reliability below).
 
-## Правила цитирования
+## Citation rules
 
-- Префиксы: [tg1], [tg2], ... URL цитаты — прямой пермалинк `https://t.me/<handle>/<msg_id>`.
-- reliability: TG-каналы структурно склонны к E (реклама/интеграции не маркируются;
-  админ канала = заинтересованный источник). B — только для устоявшихся экспертных
-  каналов с трек-рекордом; посты-«подборки сервисов» почти всегда E.
-- Форварды: цитируй ОРИГИНАЛЬНЫЙ канал (в превью форвард помечен), не репостера —
-  иначе circular reporting.
-- Комментариев в превью НЕТ (t.me/s не отдаёт обсуждения) — «мнение сообщества»
-  из одного канала не строить.
-- СНАПШОТЫ (schema v2): выдача tg-preview — уже полный текст; для HIGH-цитат
-  сохрани её в `{WORK_DIR}/snapshots/tg<N>.md`.
+- Prefixes: [tg1], [tg2], ... The citation URL is the direct permalink `https://t.me/<handle>/<msg_id>`.
+- reliability: TG channels are structurally prone to E (ads / paid integrations are not labeled;
+  the channel admin = an interested source). B — only for established expert
+  channels with a track record; "roundup of services" posts are almost always E.
+- Forwards: cite the ORIGINAL channel (in the preview a forward is marked), not the reposter —
+  otherwise circular reporting.
+- There are NO comments in the preview (t.me/s does not serve discussions) — do not build
+  a "community opinion" out of a single channel.
+- SNAPSHOTS (schema v4): the tg-preview output is already full text; for HIGH citations
+  save it to `{WORK_DIR}/snapshots/tg<N>.md`. File name = citation prefix (`tgN.md`);
+  header lines `URL:`, `Date:`, `Prefix: [tgN]`, `Extractor: tg-preview`, then a `---` line,
+  then the full text. A file shorter than ~1 000 characters does not close the gate (MEDIUM);
+  HIGH without a snapshot → MEDIUM + "[no-snapshot: blocked]".
 
-## Бюджет: 8-14 вызовов
+## Budget: 8-14 calls
 
-## Платный слой (НЕ активирован)
+## Paid layer (NOT activated)
 
-Telemetrio $25/мес (Stripe, польская карта — рублёвый блокер TGStat не мешает) —
-подключать ТОЛЬКО по триггеру из вердикта совета: «≥30% RU-claims падают из-за
-отсутствия TG-источников на протяжении 5 прогонов» (считается по телеметрии
---channels/ledger). До триггера — бесплатный контур выше. TGStat НЕ продлевать.
+Telemetrio $25/mo (Stripe, a Polish card — the ruble blocker that stopped TGStat is not in the way) —
+connect ONLY on the trigger from the council verdict: "≥30% of RU claims fail because of
+missing TG sources across 5 runs in a row" (counted from the
+--channels/ledger telemetry). Until the trigger — the free setup above. Do NOT renew TGStat.
 
-## Фоллбэк
+## Fallback
 
-tg-preview.sh упал (сеть/разметка t.me сменилась) → цитируй по Brave-сниппетам
-с пометкой «(реконструировано)»; канал при этом sourceQuality не выше MEDIUM.
+tg-preview.sh failed (network / t.me markup changed) → cite from Brave snippets
+with the note "(reconstructed)"; the channel's sourceQuality is then no higher than MEDIUM.

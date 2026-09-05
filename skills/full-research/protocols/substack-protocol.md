@@ -1,135 +1,143 @@
-# Substack — протокол поиска для агента
+# Substack — search protocol for the agent
 
-## Инструмент: `substack-fetch.py` (свой, Bash — MCP для Substack в плагине нет)
+## Tool: `substack-fetch.py` (custom, Bash — there is no Substack MCP in the plugin)
 
-Все вызовы через Bash: `{PLUGIN_ROOT}/scripts/substack-fetch.py <подкоманда> ...`
-(шебанг сам тянет requests через uv). Анонимный `/api/v1` с браузерным UA +
-discovery-заголовками; работает с домашнего IP (облачные IP получают 403 —
-известное ограничение Substack, к нам не относится). Кэш: ключ из всех argv.
+All calls go through Bash: `{PLUGIN_ROOT}/scripts/substack-fetch.py <subcommand> ...`
+(the shebang pulls requests via uv itself). Anonymous `/api/v1` with a browser UA +
+discovery headers; works from a home IP (cloud IPs get 403 —
+a known Substack limitation, does not apply to us). Cache: key from all argv.
 
-| Подкоманда | Что даёт |
+| Subcommand | What it gives |
 |---|---|
-| `archive <pub> [--limit ≤12] [--search Q] [--offset N]` | лента архива: заголовки, даты, id, slug, 👍реакции, 💬счётчики, wordcount, audience. `--search` — поиск ПО изданию (работает анонимно) |
-| `post <pub> <slug>` | ПОЛНЫЙ текст поста → markdown-файл, stdout = путь (Read) |
-| `comments <pub> <post_id>` | ПОЛНОЕ дерево комментариев с текстами → файл, stdout = путь. post_id — числовой id из archive |
-| `search-pub <query>` | глобальный поиск изданий (работает анонимно через discovery-заголовки; exit 3 = пусто → Brave) |
-| `notes <pub>` | best-effort; exit 3 = слой недоступен (НЕ «Notes нет») |
+| `archive <pub> [--limit ≤12] [--search Q] [--offset N]` | archive feed: titles, dates, id, slug, 👍 reactions, 💬 counters, wordcount, audience. `--search` — search WITHIN the publication (works anonymously) |
+| `post <pub> <slug>` | FULL post text → markdown file, stdout = path (Read) |
+| `comments <pub> <post_id>` | FULL comment tree with texts → file, stdout = path. post_id is the numeric id from archive |
+| `search-pub <query>` | global publication search (works anonymously via discovery headers; exit 3 = empty → Brave) |
+| `notes <pub>` | best-effort; exit 3 = layer unavailable (NOT "there are no Notes") |
 
-`<pub>` — канонический handle (`astralcodexten`); кастомные домены редиректят,
-адаптер follow'ит. `audience: only_paid` в archive = пост за пейволлом —
-полного текста не будет (`post` вернёт EMPTY_BODY, exit 3), цитируй по
-subtitle с пометкой «(реконструировано)».
+`<pub>` is the canonical handle (`astralcodexten`); custom domains redirect,
+the adapter follows them. `audience: only_paid` in archive = the post is behind the paywall —
+there will be no full text (`post` returns EMPTY_BODY, exit 3), quote from the
+subtitle with the mark "(reconstructed)".
 
 ## AUTHOR-FIRST Protocol
 
-### Layer 0 — Discovery изданий (1-3 вызова)
+### Layer 0 — Publication discovery (1-3 calls)
 
-**Если SUBSTACK_HANDLES предоставлены оркестратором** — пропусти, используй их.
+**If SUBSTACK_HANDLES are provided by the orchestrator** — skip this, use them.
 
-**Иначе — два пути параллельно:**
+**Otherwise — two paths in parallel:**
 
-1. Основной — Brave `site:` (надёжный, даёт и посты сразу):
+Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt;
+when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md`
+first (native-term dictionary).
+
+1. Main — Brave `site:` (reliable, gives posts right away too):
 ```json
 mcp__plugin_jadlis-research_brave-search__brave_web_search({
-  "query": "site:substack.com <ключевые слова ЗАПРОСА>",
+  "query": "site:substack.com <keywords of the QUERY>",
   "count": 15, "extra_snippets": true
 })
 ```
-Парсить handles из URL (`<handle>.substack.com/p/...` и корень). Дедуп по
-домену обязателен (15 результатов ≈ 12 уникальных handles).
+Parse handles out of the URL (`<handle>.substack.com/p/...` and the root). Dedup by
+domain is mandatory (15 results ≈ 12 unique handles).
 
-2. Дополняющий — глобальный поиск изданий по теме:
+2. Complementary — global publication search by topic:
 ```bash
-{PLUGIN_ROOT}/scripts/substack-fetch.py search-pub "<тема EN>"
+{PLUGIN_ROOT}/scripts/substack-fetch.py search-pub "<topic in the platform language — Substack is mostly English: take the `en` entry of the QUERIES block when given, otherwise the query itself>"
 ```
-exit 3 → путь недоступен, работай только по Brave (не считать провалом).
+exit 3 → the path is unavailable, work by Brave only (do not count this as a failure).
 
-Объединить, выбрать **3-4 самых релевантных** handle.
+Merge the two, pick the **3-4 most relevant** handles.
 
-### Layer 1 — Оценка автора по ленте (3-4 вызова)
+### Layer 1 — Author assessment by the feed (3-4 calls)
 
 ```bash
 {PLUGIN_ROOT}/scripts/substack-fetch.py archive <handle> --limit 12
 ```
-По ленте смотри: каденция (даты соседних постов); тематическая
-последовательность; свежесть (лента без постов ~6 мес = слабый источник);
-вовлечённость (👍/💬 — сигнал, которого MCP-серверы Substack не отдавали).
-Результат — в секцию «Оценка источников». Здесь же отбирай кандидатов
-в Layer 2-3: релевантность заголовка/subtitle + свежесть + 💬.
+In the feed look at: cadence (dates of neighbouring posts); topical
+consistency; freshness (a feed with no posts for ~6 months = weak source);
+engagement (👍/💬 — a signal that Substack MCP servers did not return).
+The result goes into the "Source assessment" section. Here too pick candidates
+for Layers 2-3: relevance of the title/subtitle + freshness + 💬.
 
-### Layer 2 — Тематический срез архива (1-3 вызова)
+### Layer 2 — Topical slice of the archive (1-3 calls)
 
-Лента Layer 1 не покрыла тему → поиск по изданию:
+The Layer 1 feed did not cover the topic → search within the publication:
 ```bash
-{PLUGIN_ROOT}/scripts/substack-fetch.py archive <handle> --search "<тема EN>" --limit 12
+{PLUGIN_ROOT}/scripts/substack-fetch.py archive <handle> --search "<topic, same rule>" --limit 12
 ```
-Глубже в историю: `--offset 12`, `--offset 24` (по 12 за вызов).
+Deeper into history: `--offset 12`, `--offset 24` (12 per call).
 
-### Layer 3 — Полный текст (2-3 вызова, топ-посты)
+### Layer 3 — Full text (2-3 calls, top posts)
 
 ```bash
 {PLUGIN_ROOT}/scripts/substack-fetch.py post <handle> <slug>
 ```
-stdout = путь к markdown с полным текстом — читай через Read. slug — из
-`canonical_url`/`slug` архива. Цитируй из полного текста, НЕ из subtitle.
-СНАПШОТЫ (schema v2): этот файл и есть полный текст — копируй в
-`{WORK_DIR}/snapshots/` для HIGH-relevance цитат.
+stdout = path to the markdown with the full text — read it via Read. slug comes from
+`canonical_url`/`slug` of the archive. Quote from the full text, NOT from the subtitle.
+SNAPSHOTS (schema v4): this file already is the full text — copy it into
+`{WORK_DIR}/snapshots/` for HIGH-relevance quotes. File name = citation prefix
+(`<prefix>N.md`); header lines `URL:`, `Date:`, `Prefix: [<prefix>N]`,
+`Extractor: substack-fetch`, then a `---` line, then the full text. A file shorter
+than ~1 000 characters does not close the gate (MEDIUM); HIGH without a snapshot →
+MEDIUM + "[no-snapshot: blocked]".
 
-### Layer 3.5 — Комментарии читателей (1-2 вызова; НОВОЕ — глубина)
+### Layer 3.5 — Reader comments (1-2 calls; NEW — depth)
 
-Для поста с высоким 💬 (споры, опыт практиков — часто ценнее самого поста):
+For a post with a high 💬 (disputes, practitioners' experience — often more valuable than the post itself):
 ```bash
 {PLUGIN_ROOT}/scripts/substack-fetch.py comments <handle> <post_id>
 ```
-Полное дерево с текстами (60+ КБ на живом треде — читай Read'ом частями).
-Комментарии — источник контраргументов и C-reliability цитат из личного опыта.
+The full tree with texts (60+ KB on a live thread — read it via Read in parts).
+Comments are a source of counter-arguments and C-reliability quotes from personal experience.
 
-### Layer 4 — Cross-Publication (опционально)
+### Layer 4 — Cross-Publication (optional)
 
-Повтори Layer 1-3 для других handles из Layer 0. Каждый дополнительный
-handle = +3-4 вызова сверх бюджета — только если синтеза не хватает.
+Repeat Layers 1-3 for other handles from Layer 0. Each additional
+handle = +3-4 calls over budget — only if the synthesis is not enough.
 
-### Layer 5 — Контраргументы (2-3 вызова)
+### Layer 5 — Counter-arguments (2-3 calls)
 
-1. Brave-поиск критики: `site:substack.com <ТЕМА> criticism` (варианты:
-   problems / overrated / alternative / why <ТЕМА> is wrong), count 15,
-   extra_snippets. Дедуп handles как в Layer 0.
-2. `notes <handle>` — best-effort (exit 3 = недоступно, не «нет критики»).
-3. Для 1-2 постов с реальным контраргументом — `post`, для споров — `comments`.
+1. Brave search for criticism: `site:substack.com <TOPIC> criticism` (variants:
+   problems / overrated / alternative / why <TOPIC> is wrong), count 15,
+   extra_snippets. Dedup handles as in Layer 0.
+2. `notes <handle>` — best-effort (exit 3 = unavailable, not "no criticism").
+3. For 1-2 posts with a real counter-argument — `post`, for disputes — `comments`.
 
-В выходном файле — отдельная секция:
+A separate section in the output file:
 ```
-## Контраргументы (найдены на Substack)
-- [{prefix}N] {контраргумент} — {URL}
+## Counter-arguments (found on Substack)
+- [{prefix}N] {counter-argument} — {URL}
 ```
 
-## Бюджет: 9-15 вызовов
+## Budget: 9-15 calls
 
-| Слой | Вызовы |
+| Layer | Calls |
 |---|---|
-| Layer 0 — discovery | 0 (handles от оркестратора) или 2-3 |
-| Layer 1 — оценка автора | 3-4 `archive` |
-| Layer 2 — тематический срез | 1-3 `archive --search` |
-| Layer 3 — полный текст | 2-3 `post` |
-| Layer 3.5 — комментарии | 1-2 `comments` |
-| Layer 5 — контраргументы | 2-3 |
+| Layer 0 — discovery | 0 (handles from the orchestrator) or 2-3 |
+| Layer 1 — author assessment | 3-4 `archive` |
+| Layer 2 — topical slice | 1-3 `archive --search` |
+| Layer 3 — full text | 2-3 `post` |
+| Layer 3.5 — comments | 1-2 `comments` |
+| Layer 5 — counter-arguments | 2-3 |
 
-## Фоллбэк
+## Fallback
 
-`substack-fetch.py` сломан (сеть, 403, нет `uv`) → Brave
-`site:substack.com <ЗАПРОС>` (цитаты из сниппетов помечать «(реконструировано)»).
-**MCP-фоллбэка в плагине нет** — если и Brave не даёт материала, канал деградирует:
-верни `sourceQuality=LOW` с пустыми citations, workflow продолжится на остальных каналах.
+`substack-fetch.py` is broken (network, 403, no `uv`) → Brave
+`site:substack.com <QUERY>` (mark quotes from snippets as "(reconstructed)").
+**There is no MCP fallback in the plugin** — if Brave gives no material either, the channel degrades:
+return `sourceQuality=LOW` with empty citations, the workflow continues on the other channels.
 
-Вызывай инструменты напрямую. ToolSearch ТОЛЬКО при InputValidationError.
+Call the tools directly. ToolSearch ONLY on InputValidationError.
 
-## Заметки по API (реверс, сверено пробами 2026-08-15)
+## API notes (reverse-engineered, verified by probes 2026-08-15)
 
-- `/api/v1/search/explore/web` — НЕ поиск: query игнорируется, это Explore-фид.
-- Глобальные `publication/search`, `post/search` БЕЗ discovery-заголовков
+- `/api/v1/search/explore/web` — NOT search: query is ignored, this is the Explore feed.
+- Global `publication/search`, `post/search` WITHOUT discovery headers
   (`Origin: https://substack.com`, `Referer: https://substack.com/discover`)
-  отдают тихий ПУСТОЙ результат вместо 401 — адаптер шлёт заголовки сам.
-- `post/{id}/comments` — полное дерево анонимно (проба: 62 КБ текстов).
-- Карта 129 эндпоинтов: `github.com/AnthonyDavidAdams/substack-api-reference`.
-- Notes: `/api/v1/reader/feed/profile/{user_id}` читается, но нужен числовой
-  user_id; `comment/feed` — 403 всегда. Адаптер пробует оба известных пути.
+  return a silent EMPTY result instead of 401 — the adapter sends the headers itself.
+- `post/{id}/comments` — the full tree anonymously (probe: 62 KB of texts).
+- Map of 129 endpoints: `github.com/AnthonyDavidAdams/substack-api-reference`.
+- Notes: `/api/v1/reader/feed/profile/{user_id}` is readable, but a numeric
+  user_id is required; `comment/feed` — always 403. The adapter tries both known paths.

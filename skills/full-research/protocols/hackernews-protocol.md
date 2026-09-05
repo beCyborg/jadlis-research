@@ -1,111 +1,115 @@
-# HackerNews — протокол поиска для агента
+# HackerNews — search protocol for the agent
 
-## Инструмент: `hn-fetch.sh` (свой, Bash — MCP для HN в плагине нет)
+## Tool: `hn-fetch.sh` (in-house, Bash — there is no HN MCP in the plugin)
 
-Все вызовы через Bash: `{PLUGIN_ROOT}/scripts/hn-fetch.sh <подкоманда> ...`.
-Обёртка над Algolia HN Search (поиск, полное дерево комментариев одним вызовом)
-и Firebase HN API (ленты). 0 кредитов, лимит Algolia 10k req/час — не упрёшься.
-Кэш честный: ключ из всех опций (у прежнего MCP-сервера ключом была только строка
-query — повторный вызов с другими tags молча возвращал чужой результат; здесь
-это исправлено, формулировки между слоями можно не варьировать).
+All calls go through Bash: `{PLUGIN_ROOT}/scripts/hn-fetch.sh <subcommand> ...`.
+A wrapper over Algolia HN Search (search, the full comment tree in one call)
+and the Firebase HN API (feeds). 0 credits, Algolia limit 10k req/hour — you will not hit it.
+The cache is honest: the key is built from all options (in the former MCP server the key was
+the query string alone — a repeat call with different tags silently returned someone else's
+result; here this is fixed, so phrasings need not be varied between layers).
 
-| Подкоманда | Что делает |
+| Subcommand | What it does |
 |---|---|
-| `search <q> [--tags T] [--by-date] [--since D] [--until D] [--points N] [--limit N] [--page N]` | Поиск Algolia; `--by-date` = сортировка по свежести (реальный endpoint search_by_date), иначе по релевантности. `--tags`: story / comment / ask_hn / show_hn / author_<user>; запятая = AND, `(a,b)` = OR |
-| `thread <id> [--max-comments N]` | ПОЛНОЕ дерево комментариев одним вызовом → markdown-файл; stdout = путь к файлу (читать через Read). Полные тексты, не сниппеты |
-| `user <username>` | Профиль + полные тексты последних 20 сабмитов |
-| `front [top\|new\|best\|ask\|show] [--limit N]` | Ленты Firebase (работают даже при смерти Algolia) |
-| `canary` | Свежесть Algolia-индекса (exit 5 = индекс отстаёт >1ч) |
+| `search <q> [--tags T] [--by-date] [--since D] [--until D] [--points N] [--limit N] [--page N]` | Algolia search; `--by-date` = sort by recency (the real search_by_date endpoint), otherwise by relevance. `--tags`: story / comment / ask_hn / show_hn / author_<user>; comma = AND, `(a,b)` = OR |
+| `thread <id> [--max-comments N]` | The FULL comment tree in one call → a markdown file; stdout = path to the file (read it with Read). Full texts, not snippets |
+| `user <username>` | Profile + full texts of the last 20 submissions |
+| `front [top\|new\|best\|ask\|show] [--limit N]` | Firebase feeds (work even when Algolia is dead) |
+| `canary` | Freshness of the Algolia index (exit 5 = the index lags by more than 1h) |
 
-Пагинация: Algolia отдаёт max 1000 хитов на запрос и это НЕ обходится `--page`
-(11-я страница пуста). В шапке выдачи есть `nbHits`: если >1000 и нужна полнота —
-режь период окнами `--since/--until` (created_at_i-фильтр), при nbHits≥1000 внутри
-окна — дели окно пополам.
+Pagination: Algolia returns max 1000 hits per query and this is NOT worked around with `--page`
+(page 11 is empty). The response header carries `nbHits`: if it is >1000 and you need completeness —
+cut the period into windows with `--since/--until` (a created_at_i filter); if nbHits≥1000 inside
+a window — split the window in half.
 
 ## DEEP-DIVE Protocol
 
-### Layer 0 — Канарейка (1 вызов)
+### Layer 0 — Canary (1 call)
 
 ```bash
 {PLUGIN_ROOT}/scripts/hn-fetch.sh canary
 ```
-`ALGOLIA_DOWN` (exit 3) → поиск недоступен: работай только `front`-лентами +
-Brave `site:news.ycombinator.com`, в отчёте канала ЧЕСТНО пометь «HN-поиск
-недоступен, только ленты» и снизь sourceQuality. `HN_INDEX_STALE` (exit 5) —
-работать можно, но свежие треды могли не доехать до индекса (пометь в файле).
+`ALGOLIA_DOWN` (exit 3) → search is unavailable: work only with the `front` feeds +
+Brave `site:news.ycombinator.com`, and in the channel report mark HONESTLY "HN search
+unavailable, feeds only" and lower sourceQuality. `HN_INDEX_STALE` (exit 5) —
+you can work, but fresh threads may not have reached the index yet (mark it in the file).
 
-### Layer 1 — Поиск (3 вызова)
+### Layer 1 — Search (3 calls)
 
-1. По stories — базовая формулировка, свежий срез:
+Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator
+prompt; when `languages` contains anything beyond ru/en, Read
+`{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` first (native-term dictionary).
+
+1. By stories — the base phrasing, fresh slice:
 ```bash
-{PLUGIN_ROOT}/scripts/hn-fetch.sh search "<ТЕМА>" --tags story --by-date --since <ГОД-НАЗАД> --limit 30
+{PLUGIN_ROOT}/scripts/hn-fetch.sh search "<TOPIC>" --tags story --by-date --since <ONE-YEAR-AGO> --limit 30
 ```
-2. По комментариям (мнения) — оценочная лексика ("<ТЕМА> опыт проблемы", "<ТЕМА> vs альтернативы"):
+2. By comments (opinions) — evaluative vocabulary ("<TOPIC> experience problems", "<TOPIC> vs alternatives"):
 ```bash
-{PLUGIN_ROOT}/scripts/hn-fetch.sh search "<ТЕМА + аспект>" --tags comment --by-date --since <ГОД-НАЗАД> --limit 20
+{PLUGIN_ROOT}/scripts/hn-fetch.sh search "<TOPIC + aspect>" --tags comment --by-date --since <ONE-YEAR-AGO> --limit 20
 ```
-   Комментарии приходят с ПОЛНЫМ текстом — цитируй из выдачи напрямую.
-3. Канонический проход — релевантностный, БЕЗ окна дат: ловит мегатреды-первоисточники
-   старше года (проверено A/B-бенчмарком 2026-06):
+   Comments arrive with their FULL text — quote directly from the results.
+3. Canonical pass — by relevance, WITHOUT a date window: catches source-of-record megathreads
+   older than a year (verified by the A/B benchmark 2026-06):
 ```bash
-{PLUGIN_ROOT}/scripts/hn-fetch.sh search "<ТЕМА>" --tags story --limit 20
+{PLUGIN_ROOT}/scripts/hn-fetch.sh search "<TOPIC>" --tags story --limit 20
 ```
-   Порог качества при шуме: добавь `--points 10`.
+   Quality threshold when it is noisy: add `--points 10`.
 
-### Layer 2 — Контекст (0-1 вызов)
+### Layer 2 — Context (0-1 calls)
 
-Тема про тренды/вопросы сообщества → `front ask --limit 30`; продуктовая
-(демо, запуски, инструменты) → `front show --limit 30`. Ленты общие, не
-тематические — фильтруй по теме сам. Мегатреды «Who is hiring» ищи как
-`search "who is hiring" --tags story`, не через ленты.
+A topic about trends/community questions → `front ask --limit 30`; a product one
+(demos, launches, tools) → `front show --limit 30`. The feeds are general, not
+topical — filter by topic yourself. Look for "Who is hiring" megathreads as
+`search "who is hiring" --tags story`, not through the feeds.
 
-### Layer 3 — Глубокие комментарии (5-7 вызовов)
+### Layer 3 — Deep comments (5-7 calls)
 
-`thread` для топ 5-7 постов из ОБЪЕДИНЕНИЯ поисков Layer 1:
+`thread` for the top 5-7 posts from the UNION of the Layer 1 searches:
 ```bash
 {PLUGIN_ROOT}/scripts/hn-fetch.sh thread <story_id> --max-comments 100
 ```
-stdout = путь к markdown-файлу с полным деревом — читай через Read (большие
-треды читай частями: Read с limit/offset). Критерии выбора постов:
-comments ≥ 20; высокий points; релевантность; баланс свежих и канонических.
+stdout = path to a markdown file with the full tree — read it with Read (read large
+threads in parts: Read with limit/offset). Criteria for picking posts:
+comments ≥ 20; high points; relevance; a balance of fresh and canonical ones.
 
-### Layer 4 — Контраргументы (2-3 вызова)
+### Layer 4 — Counterarguments (2-3 calls)
 
-1. `search "<инвертированный запрос: criticism/problems/alternatives>" --tags story --by-date --since <ГОД-НАЗАД> --limit 15`
-2. `thread` для топ 1-2 постов с контраргументами.
+1. `search "<inverted query: criticism/problems/alternatives>" --tags story --by-date --since <ONE-YEAR-AGO> --limit 15`
+2. `thread` for the top 1-2 posts with counterarguments.
 
-В выходном файле — отдельная секция:
+In the output file — a separate section:
 ```
-## Контраргументы (найдены на HackerNews)
-- [{prefix}N] {контраргумент} — {URL}
+## Counterarguments (found on HackerNews)
+- [{prefix}N] {counterargument} — {URL}
 ```
 
-### Layer 5 — Эксперты (опционально)
+### Layer 5 — Experts (optional)
 
-Условие: ник встретился ≥2 раз в комментариях Layer 3 И его тезис попал в claim.
+Condition: the handle appeared ≥2 times in the Layer 3 comments AND its thesis made it into a claim.
 ```bash
 {PLUGIN_ROOT}/scripts/hn-fetch.sh user <username>
 ```
 
-## Правила цитирования
+## Citation rules
 
-- У каждой цитаты — метаданные вовлечённости треда: points и число комментариев.
-- Тред старше года → пометка «канонический, {год}» + если тезис load-bearing —
-  быстрая сверка свежести в Layer 4.
-- Не более 3 цитат с одного треда — иначе выборка схлопывается в один источник.
-- СНАПШОТЫ (schema v4): markdown-файлы `thread` уже являются полным текстом —
-  копируй их в `{WORK_DIR}/snapshots/` как снапшот источника (это дешевле
-  повторного fetch и достовернее сниппетов). **Имя копии = префикс цитаты**
-  (`hn3.md`, не `thread-42.md`) — иначе оркестратор не свяжет снапшот с цитатой
-  и цитата уйдёт в MEDIUM как `no-snapshot`. Перед телом — шапка: `URL:`, `Date:`,
-  `Prefix: [hnN]`, `Extractor: hn-fetch`, затем строка `---`.
+- Every quote carries the thread's engagement metadata: points and the number of comments.
+- A thread older than a year → the note "canonical, {year}" + if the thesis is load-bearing,
+  a quick freshness check in Layer 4.
+- No more than 3 quotes from one thread — otherwise the sample collapses into a single source.
+- SNAPSHOTS (schema v4): the markdown files produced by `thread` already are the full text —
+  copy them into `{WORK_DIR}/snapshots/` as the source snapshot (this is cheaper than
+  a repeat fetch and more trustworthy than snippets). **The name of the copy = the citation prefix**
+  (`hn3.md`, not `thread-42.md`) — otherwise the orchestrator will not link the snapshot to the
+  citation and the citation will drop to MEDIUM as `no-snapshot`. Before the body — a header: `URL:`,
+  `Date:`, `Prefix: [hnN]`, `Extractor: hn-fetch`, then a `---` line.
 
-## Бюджет: 8-14 вызовов
+## Budget: 8-14 calls
 
-## Фоллбэк
+## Fallback
 
-`hn-fetch.sh` недоступен/сломан (нет `jq`, нет сети, `exit 3` = поиск HN недоступен) →
-Brave: `{ "query": "site:news.ycombinator.com <ЗАПРОС>", "count": 10 }` (цитаты из
-сниппетов помечать «(реконструировано)»). **MCP-фоллбэка в плагине нет** — если и Brave
-не даёт материала, канал деградирует: верни `sourceQuality=LOW` с пустыми citations,
-workflow продолжится на остальных каналах.
+`hn-fetch.sh` is unavailable/broken (no `jq`, no network, `exit 3` = HN search unavailable) →
+Brave: `{ "query": "site:news.ycombinator.com <QUERY>", "count": 10 }` (quotes from
+snippets must be marked "(reconstructed)"). **There is no MCP fallback in the plugin** — if Brave
+too yields no material, the channel degrades: return `sourceQuality=LOW` with empty citations,
+and the workflow will continue on the remaining channels.
