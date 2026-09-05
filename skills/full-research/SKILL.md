@@ -51,7 +51,7 @@ Phase A (INTAKE: каналы + recon + интервью) → Phase B (Workflow 
 2. **Выбор каналов — роутинг-дерево.** Явно названные пользователем источники
    ("в Reddit и HN", "only twitter") всегда перекрывают дерево;
    "соцсети"/"сообщества" → `["reddit","twitter","hackernews","substack"]`; "web" →
-   `web,codexweb,grokweb` (codexweb — после квотного probe, см. ниже). Иначе — три
+   `web,codexweb,grokweb` (codexweb — после квотного probe, grokweb — после probe живости Grok, см. гейты ниже). Иначе — три
    бинарных вопроса по теме, сверху вниз, срабатывают КУМУЛЯТИВНО:
 
    1. **RU/СНГ-тема?** (кириллическая формулировка про российский рынок/сервисы/цены,
@@ -90,7 +90,8 @@ Phase A (INTAKE: каналы + recon + интервью) → Phase B (Workflow 
    **Default-набор** (ни одна ветка не сработала или кластер смешанный/неопределённый):
    `["web","codexweb","grokweb","reddit","twitter","hackernews","substack"]` — codexweb
    входит по умолчанию (после квотного probe из ветки 2; probe провален → выкинуть из
-   набора с сообщением). Уточнение матрицы «кластер → каналы» — по телеметрии
+   набора с сообщением); `grokweb` и `twitter` — после probe живости Grok (гейт ниже;
+   `GROK_DOWN` → выкинуть оба из набора этого прогона, сам набор не менять). Уточнение матрицы «кластер → каналы» — по телеметрии
    (локальный `full-research-telemetry.py --trends`, `--channels`), не суждением.
 
    **Гейт `yandex`.** Канал требует ключа `YC_SEARCH_API_KEY` в `env` файла settings.json
@@ -106,6 +107,38 @@ Phase A (INTAKE: каналы + recon + интервью) → Phase B (Workflow 
    MCP `mcp__plugin_jadlis-research_youtube__*` для поиска и метаданных. Без ключа —
    MCP-вызовы **пропускать**, канал работает через Brave `site:youtube.com` +
    транскрипты (`scripts/yt-transcript.py`), это штатная деградация.
+
+   **Гейт `grokweb` / `twitter` (probe живости Grok).** Оба канала идут через Grok CLI,
+   у которого баланс подписки Grok Build кончается независимо от Claude (03-04.09.2026 —
+   468 отказов `API error (status 402 Payment Required): Grok Build usage balance exhausted`,
+   05.09 баланс пополнен). Probe перед включением (стоимость $0; 402 приходит за ~0,6 с,
+   живой ответ 5-10 с):
+
+   ```bash
+   GROK_ISO_HOME="$HOME/.cache/grok-iso-home"; mkdir -p "$GROK_ISO_HOME"
+   GROK_PROBE=$(HOME="$GROK_ISO_HOME" GROK_HOME="$HOME/.grok" ~/.grok/bin/grok \
+     -p 'ok' -m grok-4.6 --effort low --max-turns 1 2>&1 | head -20)
+   echo "$GROK_PROBE" | grep -qiE '402|balance exhausted|Payment Required|unauthenticated' \
+     && echo GROK_DOWN || echo GROK_OK
+   ```
+
+   `HOME="$GROK_ISO_HOME"` обязателен — иначе Grok читает `permissions.deny` основного
+   профиля и глушит собственный `web_fetch` (см. `protocols/grok-web-protocol.md`).
+   Ненулевой exit и `Error: max turns reached` — НЕ признак смерти: probe судит ТОЛЬКО
+   по grep, `--max-turns 1` штатно обрывает живой ответ на первом же tool-call.
+
+   `GROK_DOWN` → выкинь `grokweb` и `twitter` из `SELECTED_CHANNELS` этого прогона и
+   сообщи: «Grok недоступен (402 usage balance exhausted) — каналы grokweb/twitter
+   пропущены; вернутся сами после пополнения баланса». Дефолтный набор каналов при этом
+   НЕ меняется — probe гейтит прогон, а не конфиг, и после пополнения баланса каналы
+   возвращаются сами, без правок и рендера. `GROK_OK` → оба канала работают как обычно.
+
+   **Краевой случай.** Явный режим «web» = `web,codexweb,grokweb`: если Grok мёртв И
+   квотный probe codexweb провален, остаётся один канал → workflow вернёт
+   `insufficient-sources`. Тогда предложи добавить `reddit`/`hackernews` или уйти в
+   `/jadlis-research:search`. В default-наборе такой дыры нет: без Grok остаются
+   `web, codexweb, reddit, hackernews, substack` = 4 семейства из 5, гейт достаточности
+   проходит (реальный прогон 03.09: каналов 5/7, семей 4/5, статус ok).
 
 3. **Разведка (recon).** Сделай 1-2 вызова `mcp__plugin_jadlis-research_brave-search__brave_web_search`
    (тариф Search: 50 req/s, параллель OK; `count: 5`): широкий обзор темы + опц. уточняющий аспект. Цель —
