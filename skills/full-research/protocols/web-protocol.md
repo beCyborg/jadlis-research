@@ -8,7 +8,8 @@
 |---|---|
 | `mcp__plugin_jadlis-research_brave-search__brave_llm_context` | **Дефолт для research**: возвращает ИЗВЛЕЧЁННЫЙ КОНТЕНТ страниц по запросу (не только ссылки) — закрывает большинство потребностей без скрапинга |
 | `mcp__plugin_jadlis-research_brave-search__brave_web_search` | Keyword-based discovery источников — когда нужны САМИ ссылки/охват (+`extra_snippets`) |
-| `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape` | Полный контент ОДНОЙ конкретной страницы — только когда llm_context не хватило |
+| `defuddle parse <url> --md` (Bash, CLI 0.19.3) | **Дефолтный писатель снапшотов**: полный текст ОДНОЙ страницы дословно, 0 кредитов (лестница извлечения — Layer 3) |
+| `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape` | Анти-бот/JS-страницы — ПОСЛЕДНЯЯ ступень лестницы; никогда для PDF и x.com (хук плагина deny-ит) |
 
 **КРИТИЧНО:** Перед использованием любого инструмента — загрузи его через ToolSearch если недоступен.
 **RATE LIMIT:** Brave (тариф Search): 50 req/s — **параллельные вызовы OK** (несколько tool calls в одном сообщении). Firecrawl scrape: 1 req/s. При 429 — подождать 1 сек, retry (max 2x).
@@ -93,24 +94,28 @@ python3 {PLUGIN_ROOT}/scripts/websearch.py exa "<описание страниц
 4. **HIGH-relevance — ТОЛЬКО по полному тексту (правило глубины, 2026-08-15).** Сниппет
    web_search и фрагмент llm_context — это 150–800 символов из страницы; цитата «HIGH»
    по ним — это цитата по обложке. Для каждого источника, который пойдёт в отчёт с
-   relevance HIGH: догрузи ПОЛНУЮ страницу (llm_context с явным URL в запросе →
-   firecrawl_scrape → defuddle) и цитируй из полного текста. Полный текст обязан лечь
-   снапшотом в `{WORK_DIR}/snapshots/` (schema v2) — **HIGH-цитата без снапшота
-   недопустима**: не смог достать полный текст (пейволл/челлендж) → максимум MEDIUM
-   + пометка «[no-snapshot: blocked]».
+   relevance HIGH: догрузи ПОЛНУЮ страницу по лестнице извлечения Layer 3 и цитируй из
+   полного текста. Полный текст обязан лечь снапшотом в `{WORK_DIR}/snapshots/<префикс>.md`
+   (schema v4, шапка `URL:` / `Date:` / `Prefix:` / `Extractor:` + `---`) — **HIGH-цитата без
+   снапшота недопустима**: не смог достать полный текст (пейволл/челлендж) → максимум MEDIUM
+   + пометка «[no-snapshot: blocked]»; файл короче ~1 000 символов гейт не закрывает.
 5. Выбери URL для полнотекстового догруза (все будущие HIGH) — обычно 3-5
 
-### Layer 3 — Полнотекстовый догруз (2-5 вызовов: все HIGH-кандидаты + пробелы)
+### Layer 3 — Полнотекстовый догруз: лестница извлечения (2-5 URL: все HIGH-кандидаты + пробелы)
 
-> **PDF-предчек (до любого `firecrawl_scrape`).** PDF-URL (`.pdf`/`/TXT/PDF/`/`?format=pdf`) НЕ через Firecrawl — он биллит 1 кредит/страницу, fan-out субагентов множит расход. Делай: `out=$(bash {PLUGIN_ROOT}/scripts/pdf-fetch.sh "<url>")` → `Read "$out"` (0 кр). `exit 2` (PDF_UNREACHABLE/PDF_EMPTY — JS-gate, скан, paywall) → эскалация free-first: научная статья по DOI → OA-ссылка Unpaywall → снова `pdf-fetch.sh`; затем `firecrawl_scrape` с `parsers:["pdf"]` И `pdfOptions.maxPages ≤ 20` (хук плагина пропускает только так). Без эскалации — цитируй по сниппетам с пометкой «(реконструировано)».
+Порядок ступеней фиксирован (аудит стека 2026-09: дословность и цена). Ступень закрыла
+страницу (тело ≥ ~1 000 символов, не challenge-разметка) → дальше не идти. В шапку снапшота
+пиши реальную ступень: `Extractor: <pdf-fetch|defuddle|jina|exa-full|tavily|firecrawl>`.
+`timeout`-утилиты на macOS нет — лимит времени задавай параметром `timeout` Bash-тула.
 
-Для отобранных URL:
-```
-mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape(url="<url1>", formats=["markdown"], onlyMainContent=true)
-```
+1. **PDF-URL** (`.pdf`/`/TXT/PDF/`/`?format=pdf`) → ТОЛЬКО `out=$(bash {PLUGIN_ROOT}/scripts/pdf-fetch.sh "<url>")` → `Read "$out"` (0 кр). `exit 2` (PDF_UNREACHABLE/PDF_EMPTY — JS-gate, скан, paywall) → научная статья по DOI → OA-ссылка Unpaywall → снова `pdf-fetch.sh`; крайнее — `firecrawl_scrape` с `parsers:["pdf"]` И `pdfOptions.maxPages ≤ 20` (хук плагина пропускает только так). Без эскалации — цитируй по сниппетам с пометкой «(реконструировано)».
+2. **HTML — дефолт:** `defuddle parse "<url>" --md` (Bash, `timeout: 60000`; при 403 — `-u "<браузерный User-Agent>"`) → stdout = чистый markdown основного контента (навигацию режет сам; проба 2026-09-06: дока Cloudflare → 1,1 КБ чистого текста против 18 КБ у Reader с меню). Пусто / < 1 000 символов / challenge-текст → ступень 3.
+3. **CSR / JS-рендер:** `curl -s --max-time 45 "https://r.jina.ai/<url>"` (Reader, без ключа; проба 2026-09-06 — 200, 18 КБ; таймаут обязателен — виснет на тяжёлых страницах). Пусто → ступень 4.
+4. **URL-точный индекс:** `python3 {PLUGIN_ROOT}/scripts/websearch.py contents "<url>" --full` (Exa contents, ~$0.001/стр.; **всегда `--full`** — дефолт режет до 8 000 символов, обрезок не закрывает гейт).
+5. **Tavily extract — только при ключе `TAVILY_API_KEY`** в `env` settings.json (keyless-режима НЕТ: без ключа `POST /extract` → 401 «missing or invalid API key», проверено 2026-09-06): `curl -s --max-time 30 -X POST https://api.tavily.com/extract -H "Authorization: Bearer $TAVILY_API_KEY" -H 'Content-Type: application/json' -d '{"urls":["<url>"]}'` → `.results[0].raw_content`. Ключа нет → ступень пропускается молча.
+6. **Анти-бот — последняя ступень:** `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape(url, formats=["markdown"], onlyMainContent=true)`; провал → retry с `waitFor: 5000`. **Никогда** для PDF (ступень 1) и x.com/twitter.com (AI-пересказ за 30 кредитов, хук deny-ит; твиты — канал twitter). За логином — только Playwright MCP.
 
-Детект провала: ошибка или пустой/минимальный контент → retry с `waitFor: 5000`.
-Если retry не помог → пометь URL как `[ИСТОЧНИК НЕДОСТУПЕН]` + defuddle fallback (см. Фоллбэк).
+Ни одна ступень не дала тела → пометь URL `[ИСТОЧНИК НЕДОСТУПЕН]`, цитату — максимум MEDIUM «[no-snapshot: blocked]».
 
 ### Layer 4 — Дополнение (опционально, 0-2 вызова)
 
@@ -168,10 +173,8 @@ Claude Code — 2026-08»:
 ## Фоллбэк
 
 1. При сбое `brave_llm_context` → продолжай на `brave_web_search` (+`extra_snippets`) и Layer 3. При сбое `brave_web_search` → retry с перефразированным keyword query + `count=5`. Max 2 retry.
-2. При ошибке `firecrawl_scrape`:
-   a. Retry с `waitFor: 5000` (ловит JS-rendered страницы).
-   b. defuddle CLI: `defuddle parse <url> --md`.
-   c. Playwright MCP — **только для залогиненных сессий**.
+2. Полный текст страницы — только по лестнице Layer 3 (defuddle → jina → Exa `--full` → Tavily
+   при ключе → Firecrawl последним); Playwright MCP — **только для залогиненных сессий**.
 3. Если все каналы дают провал → зафиксировать `[WEB ИСТОЧНИК НЕДОСТУПЕН]` и завершить с тем, что есть.
 
 Перед использованием любого инструмента — загрузи его через ToolSearch если недоступен.

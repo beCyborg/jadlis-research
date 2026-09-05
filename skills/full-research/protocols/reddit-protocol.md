@@ -201,12 +201,16 @@ CLI-обёртка с троттлингом: `python3 {PLUGIN_ROOT}/scripts/red
    `https://arctic-shift.photon-reddit.com/api/posts/search?subreddit=<sub>&limit=100`
    (+ `after`/`before` ISO-даты, `author`, `query` — FTS внутри одного сабреддита).
    Лимит ~2000 rpm, архив 2005→сейчас, **лаг свежести ~месяц** — свежее только через MCP.
-2. **Полнотекст/ключевик по ВСЕМУ Reddit** (не умеют ни MCP, ни Arctic Shift) → **PullPush** `q=`:
-   `https://api.pullpush.io/reddit/search/submission/?q=<query>&size=100` (и `.../search/comment/`).
-   Лимиты: soft **15 rpm** / hard **30 rpm** (~1000/час) → sleep ~4 с между вызовами, 1 воркер.
-   Best-effort: волонтёрский, без SLA, гэпы в данных после 2023 — Arctic Shift первичнее, где хватает.
-   2026-08-26: HTTP 429 на первый же запрос с любого IP (и VPN, и домашний) — при 429 НЕ ретраить,
-   сразу Arctic Shift (`sub`/`comments`) или MCP.
+2. **Ключевик по ВСЕМУ Reddit** (не умеют ни MCP, ни Arctic Shift) → **Reddit search RSS**
+   с браузерным User-Agent (2026-09-05 — вместо PullPush: тот отдаёт 429 на первый запрос с любого IP
+   с 2026-08-26 и агентам отказывает явно):
+   `https://www.reddit.com/search.rss?q=<query>&sort=new` (+ `&t=year`, `&restrict_sr=1` в
+   `r/<sub>/search.rss`). Обёртка: `python3 {PLUGIN_ROOT}/scripts/reddit-archive.py search "<query>"`
+   (Atom → JSON: title/url/subreddit/date/summary; только посты, комментариев в RSS нет — дерево
+   через `comments`). Ответ без `<entry>` при 200 = поиск пуст, не блок; 429/403 → сразу Arctic
+   Shift (`sub` с `query`) или MCP.
+   > discover hosted MCP и метаданные Arctic Shift — НЕ источник истины по размерам сабреддитов
+   > (r/mcp: discover отдавал 73 456 при ~119 953 реальных); метрики Arctic Shift моложе ~36 ч не читать.
 3. **Бэкфилл за пределами 1000-item cap / глубокая история** → Arctic Shift, при массовых
    объёмах — bulk-dumps Watchful1 (github.com/Watchful1/PushshiftDumps, ~4 ТБ).
 
