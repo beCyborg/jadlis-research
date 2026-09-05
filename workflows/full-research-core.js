@@ -198,8 +198,9 @@ const URLHEALTH_SCHEMA = {
           quoteStatus: { type: 'string', enum: ['matched', 'notFound', 'notChecked'] },
           fabricationSuspect: { type: 'boolean' },
           snapshotChars: { type: 'integer', description: 'длина тела снапшота в символах (0 — снапшота нет/не прочитан)' },
+          snapshotExtractor: { type: 'string', description: 'значение Extractor: из шапки снапшота (пустая строка — не указан); телеметрия, на гейт не влияет' },
         },
-        required: ['prefix', 'url', 'urlStatus', 'quoteStatus', 'fabricationSuspect', 'snapshotChars'],
+        required: ['prefix', 'url', 'urlStatus', 'quoteStatus', 'fabricationSuspect', 'snapshotChars', 'snapshotExtractor'],
       },
     },
     elapsedSec: { type: 'number' },
@@ -286,7 +287,7 @@ ${TOOL_NOTE}
    F — нельзя оценить.
    В reliabilityWhy — одна строка: тип источника / автор и его экспертиза / дата / bias-сигналы.
 4. НЕ спавни sub-agents — делай всё сам. Все выходные данные на РУССКОМ — КРОМЕ поля quotes (см. п. 6).
-5. СНАПШОТЫ (schema v2, ОБЯЗАТЕЛЬНЫЙ шаг — аудит 2026-08-15 показал 0 снапшотов за все прогоны): для 3-5 САМЫХ ВАЖНЫХ источников (relevance HIGH) сохрани полный извлечённый текст страницы в ${WORK_DIR}/snapshots/${c.prefix}<N>.md (Write; шапка: URL + дата + твой префикс цитаты). Это замороженная доказательная база для верификаторов — они читают один и тот же текст, а не разные версии страницы. ПРАВИЛО: цитата с relevance HIGH БЕЗ снапшота недопустима — не смог достать полный текст (пейволл/CAPTCHA/challenge) → снапшот не пиши, но relevance снизь до MEDIUM и пометь «[no-snapshot: blocked]»; пустой или обрезанный текст — НЕ контент. Пути записанных файлов верни в поле snapshots[] схемы (пустой массив = честное «ни одного»). Оркестратор энфорсит правило кодом: у канала с HIGH-цитатами и нулём снапшотов все HIGH понижаются до MEDIUM.
+5. СНАПШОТЫ (schema v4, ОБЯЗАТЕЛЬНЫЙ шаг): для 3-5 САМЫХ ВАЖНЫХ источников (relevance HIGH) сохрани полный извлечённый текст страницы в ${WORK_DIR}/snapshots/${c.prefix}<N>.md (Write). ИМЯ ФАЙЛА = ПРЕФИКС ЦИТАТЫ (\`${c.prefix}3.md\`, не \`thread-42.md\`) — иначе оркестратор не свяжет снапшот с цитатой. Шапка файла (первые строки, затем строка \`---\` и полный текст): \`URL: <url>\`, \`Date: <YYYY-MM-DD>\`, \`Prefix: [${c.prefix}N]\`, \`Extractor: <firecrawl|defuddle|pdf-fetch|exa-full|hn-fetch|substack-fetch|tg-preview|yt-transcript|llm-mediated>\` — чем реально извлечён текст (телеметрия, честно). Это замороженная доказательная база для верификаторов — они читают один и тот же текст, а не разные версии страницы. ПРАВИЛА: (a) цитата с relevance HIGH БЕЗ снапшота недопустима — не смог достать полный текст (пейволл/CAPTCHA/challenge) → снапшот не пиши, relevance снизь до MEDIUM и пометь «[no-snapshot: blocked]»; (b) файл короче ~${MIN_SNAPSHOT_CHARS} символов гейт НЕ закрывает (сниппет/заглушка/обрезок — не контент) — тогда тоже MEDIUM; (c) каналы codexweb/grokweb/yandex — потолок MEDIUM независимо от снапшота (выдача — синтез модели, а снапшот страницы ты пишешь постфактум; ставь HIGH только если уверен, что верификатор найдёт спан в снапшоте, гейт всё равно опустит до MEDIUM — это не ошибка). Пути записанных файлов верни в поле snapshots[] схемы (пустой массив = честное «ни одного»). Оркестратор энфорсит гейт кодом пер-цитатно: no-snapshot / llm-mediated / short-snapshot / quote-not-found → HIGH опускается до MEDIUM; повышений нет.
 6. EVIDENCE-ПАКЕТ (schema v3): у каждой цитаты поле quotes — 1-3 ДОСЛОВНЫХ фрагмента текста источника (≤400 симв. каждый), НА ЯЗЫКЕ ОРИГИНАЛА — это исключение из правила «всё на русском»: спаны сверяются со снапшотом и первоисточником символ в символ, перевод их обесценивает. Пересказ на русском — в context. Дословного текста нет (сниппет поисковика, реконструкция, недоступная страница) → quotes: [] — не сочиняй.
 
 ТЕЛЕМЕТРИЯ (обязательно):
@@ -341,7 +342,7 @@ function urlhealthPrompt(items) {
 1. Через Write запиши в ${inFile} ДОСЛОВНО JSON между маркерами <<<IN и IN>>>.
 2. ОДИН Bash-вызов (timeout: 180000):
 python3 "${PLUGIN_ROOT}/scripts/urlhealth.py" --in "${inFile}" --workdir "${WORK_DIR}" --deadline 90 --per-url 10 > "${outFile}" 2>"${WORK_DIR}/_urlhealth.err"; echo "EXIT=$?"
-3. Прочитай ${outFile} (Read) и верни по схеме: status ("ok" если partial=false и нет поля error; "partial" если partial=true; "failed" если файл пуст/не JSON/есть error), items — массив {prefix,url,urlStatus,quoteStatus,fabricationSuspect,snapshotChars} из .items (urlStatus не из набора ok|blocked|dead → "skipped"; quoteStatus не из набора → "notChecked"; fabricationSuspect отсутствует → false; snapshotChars — целое из .snapshotChars, отсутствует/не число → 0), elapsedSec из .elapsedSec (нет → 0), note — краткая строка (summary счётчиков или текст ошибки).
+3. Прочитай ${outFile} (Read) и верни по схеме: status ("ok" если partial=false и нет поля error; "partial" если partial=true; "failed" если файл пуст/не JSON/есть error), items — массив {prefix,url,urlStatus,quoteStatus,fabricationSuspect,snapshotChars,snapshotExtractor} из .items (urlStatus не из набора ok|blocked|dead → "skipped"; quoteStatus не из набора → "notChecked"; fabricationSuspect отсутствует → false; snapshotChars — целое из .snapshotChars, отсутствует/не число → 0; snapshotExtractor — строка из .snapshotExtractor, отсутствует/null → ""), elapsedSec из .elapsedSec (нет → 0), note — краткая строка (summary счётчиков или текст ошибки).
 Файл не появился или не разобрался → status="failed", items=[], note с причиной. НЕ чини скрипт, НЕ повторяй запросы вручную, НЕ спавни sub-agents.
 
 <<<IN
@@ -358,10 +359,13 @@ const REDDIT_CMD = `ToolSearch "select:mcp__plugin_jadlis-research_reddit__execu
 function evidenceBlock(claim) {
   const ev = claim.evidence || []
   if (!ev.length) return 'EVIDENCE: куратор не привязал ни одной реальной цитаты (evidenceless) — проверяй claim с нуля.'
-  return `EVIDENCE (дословные спаны источников каналов — проверяй ИХ, а не пересказ):
-${ev.map(e => `- [${e.prefix}] ${e.url}${e.snapshotPath ? ` (снапшот: ${e.snapshotPath})` : ''}${e.health ? ` [url:${e.health.urlStatus}, quote:${e.health.quoteStatus}${e.health.fabricationSuspect ? ', FABRICATION-SUSPECT' : ''}]` : ''}
+  const snapInfo = e => e.snapshotPath ? ` (снапшот: ${e.snapshotPath}${Number.isFinite(e.snapshotChars) ? `, ${e.snapshotChars}B` : ''}, extractor:${e.snapshotExtractor || '?'})` : ''
+  const ceilInfo = e => e.snapshotDemoted ? ` [ceiling:MEDIUM — ${e.snapshotDemoted}]` : ''
+  return `EVIDENCE (дословные спаны источников каналов — проверяй ИХ, а не пересказ; relevance каждой цитаты уже прошла снапшот-гейт):
+${ev.map(e => `- [${e.prefix}] ${e.url}${snapInfo(e)}${e.health ? ` [url:${e.health.urlStatus}, quote:${e.health.quoteStatus}${e.health.fabricationSuspect ? ', FABRICATION-SUSPECT' : ''}]` : ''}${ceilInfo(e)}
 ${(e.quotes || []).length ? e.quotes.map(q => `  «${q}»`).join('\n') : '  (дословного спана нет — только пересказ: ' + String(e.context || '').slice(0, 300) + ')'}`).join('\n')}
-Пометка FABRICATION-SUSPECT / url:dead / quote:notFound = спан не подтверждён снапшотом или источник мёртв — считай такой спан НЕ доказательством; url:blocked / quote:notChecked — нейтрально (доступ ограничен, не вина источника).`
+Пометка FABRICATION-SUSPECT / url:dead / quote:notFound = спан не подтверждён снапшотом или источник мёртв — считай такой спан НЕ доказательством; url:blocked / quote:notChecked — нейтрально (доступ ограничен, не вина источника).
+[ceiling:MEDIUM — <причина>] = цитата опущена гейтом с HIGH до MEDIUM: no-snapshot (полного текста нет), llm-mediated (канал codexweb/grokweb/yandex или x.com — выдача модели/AI-пересказ, а не тело страницы), short-snapshot (файл < ${MIN_SNAPSHOT_CHARS} симв.), quote-not-found (спан не найден в снапшоте). llm-mediated и short-snapshot — НЕ фабрикация, а ограничение канала: спан может быть верным, но подтвердить его по снапшоту нельзя — ищи первоисточник сам.`
 }
 
 function verifyPrompt(claim, idx) {
@@ -470,8 +474,8 @@ ${files.map(f => `- ${f}`).join('\n')}
 показывает тон, плотность и оформление. Обязательный контракт — спека формата выше;
 структуру и объём адаптируй под тему, скелет примера не копируй буквально.
 
-CROSS-VERIFICATION LEDGER (live-проверка claims; у каждого verdict, credibility 1-6, вектор голосов votes[], claimType, loadBearing, evidence-спаны, при эскалации — escalation):
-${JSON.stringify(ledger.map(c => ({ id: c.id, statement: c.statement, channels: c.channels, strength: c.strength, claimType: c.claimType, loadBearing: c.loadBearing, verdict: c.verdict, votes: c.votes, voteCount: c.voteCount, credibility: c.credibility, evidence: c.verifierEvidence, urls: c.urls, evidenceRefs: (c.evidence || []).map(e => e.prefix), weakEvidence: !!c.weakEvidence, evidenceless: !!c.evidenceless, escalation: c.escalation ? { status: c.escalation.status, confirmsExclusion: c.escalation.confirmsExclusion, reasoning: c.escalation.reasoning } : null, escalationSkipped: c.escalationSkipped || null })), null, 2)}
+CROSS-VERIFICATION LEDGER (live-проверка claims; у каждого verdict, credibility 1-6, вектор голосов votes[], claimType, loadBearing, evidence-спаны, ceilingCapped — все evidence claim'а опущены снапшот-гейтом до MEDIUM, при эскалации — escalation):
+${JSON.stringify(ledger.map(c => ({ id: c.id, statement: c.statement, channels: c.channels, strength: c.strength, claimType: c.claimType, loadBearing: c.loadBearing, verdict: c.verdict, votes: c.votes, voteCount: c.voteCount, credibility: c.credibility, evidence: c.verifierEvidence, urls: c.urls, evidenceRefs: (c.evidence || []).map(e => e.prefix), weakEvidence: !!c.weakEvidence, evidenceless: !!c.evidenceless, ceilingCapped: !!c.ceilingCapped, escalation: c.escalation ? { status: c.escalation.status, confirmsExclusion: c.escalation.confirmsExclusion, reasoning: c.escalation.reasoning } : null, escalationSkipped: c.escalationSkipped || null })), null, 2)}
 
 СВОДКА LEDGER: ${JSON.stringify(stats)}
 
@@ -480,7 +484,7 @@ ${JSON.stringify(ledger.map(c => ({ id: c.id, statement: c.statement, channels: 
 - WEB-СЕМЬЯ: файлы web.md/web-codex.md/web-grok.md/web-yandex.md — ДВИЖКИ (Brave [w], Codex [cx], Grok [gw], Яндекс [y]) над ОДНИМ открытым вебом. Дедупь их находки по URL. Совпадение движков = усиление ВНУТРИ типа web, НЕ независимая триангуляция (независимость = web+community). Находка, которую дал только ОДИН движок и не подтвердил никто другой — пониженная достоверность (цифра бейджа не выше 3) + краткая пометка "только {движок}".
 - Community consensus = сильный ТОЛЬКО при независимости (разные аккаунты/время, без incentives).
 - ВЕСА (schema v3): вес утверждения складывается из четырёх осей — (1) независимость: число РАЗНЫХ семей источников (web, reddit, hn, twitter, substack, youtube, telegram); (2) надёжность источника: Admiralty A-F из файлов каналов; (3) тип claim: для factual решает первоисточник (веб/дока — приоритетная семья), для experiential решают сообщества (первое лицо с конкретикой, Admiralty C, — полноценное свидетельство, веб лишь дополняет); (4) подтверждённость: credibility 1-6 из ledger. Не применяй глобальный приоритет «соцсети важнее веба» или наоборот — семья приоритетна ПО ТИПУ claim.
-- Claims из ledger: CONFIRMED → не только разрешают вердикты в выводах, но и РЕНДЕРЯТСЯ ЯВНО в подсекции «Проверенные факты» секции «📚 Контекст и находки» (с evidence и бейджем достоверности) — это подтверждённый фундамент, его нельзя «растворять» в выводах. ВЕКТОР ГОЛОСОВ виден читателю: у каждого проверенного факта пометка «(2 голоса)» при voteCount=2 или «(1 голос — split: второй верификатор не смог проверить)» при voteCount=1 — читатель обязан различать двойное и одиночное подтверждение. DISPUTED → подсекция «Спорные факты» (голоса разошлись, третий голос исключение не подтвердил): статement + в чём расхождение + бейдж; в выводы и советы НЕ входит. CHALLENGED/OUTDATED → НЕ в выводы и НЕ в контекст, только строка в callout методологии с причиной отсева. UNCHECKED → НЕ в отчёт; в callout методологии одной строкой: «не удалось проверить: N claims (причины кратко)». weakEvidence/evidenceless → бейдж не выше 3 даже при CONFIRMED.
+- Claims из ledger: CONFIRMED → не только разрешают вердикты в выводах, но и РЕНДЕРЯТСЯ ЯВНО в подсекции «Проверенные факты» секции «📚 Контекст и находки» (с evidence и бейджем достоверности) — это подтверждённый фундамент, его нельзя «растворять» в выводах. ВЕКТОР ГОЛОСОВ виден читателю: у каждого проверенного факта пометка «(2 голоса)» при voteCount=2 или «(1 голос — split: второй верификатор не смог проверить)» при voteCount=1 — читатель обязан различать двойное и одиночное подтверждение. DISPUTED → подсекция «Спорные факты» (голоса разошлись, третий голос исключение не подтвердил): статement + в чём расхождение + бейдж; в выводы и советы НЕ входит. CHALLENGED/OUTDATED → НЕ в выводы и НЕ в контекст, только строка в callout методологии с причиной отсева. UNCHECKED → НЕ в отчёт; в callout методологии одной строкой: «не удалось проверить: N claims (причины кратко)». weakEvidence/evidenceless → бейдж не выше 3 даже при CONFIRMED. ceilingCapped → бейдж не выше 3 даже при CONFIRMED (все evidence claim'а — llm-mediated/short-snapshot/no-snapshot/quote-not-found: это не фабрикация, а ограничение канала — спан не подтверждён по телу страницы); в callout методологии одной строкой: «потолок MEDIUM по снапшот-гейту: N claims».
 
 БЕЙДЖИ ДОСТОВЕРНОСТИ: каждая ссылка в советах и «Источниках» — вида [w1·B2](URL): буква A-F — reliability источника (из файлов каналов, поле Admiralty), цифра 1-6 — подтверждённость информации. Цифру присваиваешь ТЫ по правилам: 1-2 ТОЛЬКО при независимом подтверждении (CONFIRMED в ledger или 2+ источников разных типов); 3 — единичный правдоподобный источник; 4-5 — сомнительно/неправдоподобно; 6 — нельзя оценить. Шкалы независимы: бывает A6 и E1.
 
@@ -495,7 +499,7 @@ tags: []
 query: "{исходный запрос; внутренние двойные кавычки замени на «»}"
 decision: "{решение пользователя или пусто}"
 channels: [{ключи выбранных каналов; web-движки (web/codexweb/grokweb) схлопни в один "web"; yandex (если был выбран) — отдельным ключом}]
-ledger_schema: 3
+ledger_schema: 4
 claims_confirmed: ${stats.confirmed}
 claims_disputed: ${stats.disputed}
 claims_dropped: ${stats.challenged + stats.outdated}
@@ -687,6 +691,7 @@ try {
           const chars = Number.isFinite(h.snapshotChars) ? h.snapshotChars : 0
           e.health = { urlStatus: h.urlStatus, quoteStatus: h.quoteStatus, fabricationSuspect: !!h.fabricationSuspect }
           e.snapshotChars = chars
+          e.snapshotExtractor = h.snapshotExtractor ? String(h.snapshotExtractor) : null
           e.weak = h.urlStatus === 'dead' || !!h.fabricationSuspect || h.quoteStatus === 'notFound'
           if (chars > 0) (snapCharsByChannel[e.channel] || (snapCharsByChannel[e.channel] = [])).push(chars)
           // Ступень 2 гейта: индекс уже мог понизить цитату (no-snapshot/llm-mediated) — тогда причина остаётся первой.
@@ -808,8 +813,9 @@ const weakEvidence = claimLedger.filter(c => c.weakEvidence).length
 const evidencelessN = claimLedger.filter(c => c.evidenceless).length
 const credVals = claimLedger.filter(c => c.verdict !== 'UNCHECKED' && c.verdict !== 'UNVERIFIED').map(c => c.credibility).sort((a, b) => a - b)
 const credibilityMedian = credVals.length ? (credVals.length % 2 ? credVals[(credVals.length - 1) / 2] : (credVals[credVals.length / 2 - 1] + credVals[credVals.length / 2]) / 2) : null
-const ledgerSummary = { total: claimLedger.length, confirmed, confirmedSplit, challenged, outdated, unchecked, disputed, escalated: escalationStats.escalated, escalationSkipped: Object.values(escalationStats.skipped).reduce((a, b) => a + b, 0), weakEvidence, evidenceless: evidencelessN, credibilityMedian, claimsDroppedByCap }
-log(`Ledger v3: CONFIRMED=${confirmed} (split: ${confirmedSplit}), DISPUTED=${disputed}, CHALLENGED=${challenged}, OUTDATED=${outdated}, UNCHECKED=${unchecked}; эскалаций ${escalationStats.escalated}, пропущено ${ledgerSummary.escalationSkipped}; weakEvidence=${weakEvidence}; медиана credibility=${credibilityMedian}`)
+const ceilingCappedN = claimLedger.filter(c => c.ceilingCapped).length
+const ledgerSummary = { total: claimLedger.length, confirmed, confirmedSplit, challenged, outdated, unchecked, disputed, escalated: escalationStats.escalated, escalationSkipped: Object.values(escalationStats.skipped).reduce((a, b) => a + b, 0), weakEvidence, evidenceless: evidencelessN, ceilingCapped: ceilingCappedN, credibilityMedian, claimsDroppedByCap }
+log(`Ledger v4: CONFIRMED=${confirmed} (split: ${confirmedSplit}), DISPUTED=${disputed}, CHALLENGED=${challenged}, OUTDATED=${outdated}, UNCHECKED=${unchecked}; эскалаций ${escalationStats.escalated}, пропущено ${ledgerSummary.escalationSkipped}; weakEvidence=${weakEvidence}; ceilingCapped=${ceilingCappedN}; медиана credibility=${credibilityMedian}`)
 
 // ═══ Phase 3 — Synthesize ═══
 phase('Synthesize')
