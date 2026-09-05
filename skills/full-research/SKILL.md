@@ -194,19 +194,25 @@ analyst — **Fable 5.1 через мост** (headless `claude -p`, билли�
 Отключение моста: `fableBridge: false` → analyst тоже на Opus 5 — тогда передай
 `aiModel: "claude-opus-5"`, frontmatter отчёта не должен врать.
 
-Workflow (ledger schema v3) читает протоколы каналов сам: curator выделяет до 16 claims
-с evidence-префиксами (спаны подставляет код), `urlhealth` проверяет evidence-URL и цитаты
-по снапшотам, два верификатора голосуют (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), при
+Workflow (ledger schema v4) читает протоколы каналов сам: curator выделяет до 16 claims
+с evidence-префиксами (спаны подставляет код); снапшот-гейт пер-цитатно опускает HIGH до
+MEDIUM (`no-snapshot` · `llm-mediated` — codexweb/grokweb/yandex и x.com по константе ·
+`short-snapshot` < 1 000 симв. · `quote-not-found`), `urlhealth` проверяет evidence-URL и цитаты
+по снапшотам (`snapshotChars` в evidence), два верификатора голосуют (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), при
 расхождении голосов третий голос даёт Codex (GPT-6 Astra, живой поиск; кап 8 эскалаций;
 `codexModel: "gpt-5.6-sol"` в args — откат);
 не подтверждённое исключение → `DISPUTED` (спорные, в выводы не входят). Отсеянные claims
 **фильтруются** (не просто дописывается критика), затем analyst пишет draft-отчёт в
 `{WORK_DIR}/report.md`. Дождись `<task-notification>`, затем используй объект:
 `{workDir, status, ledgerSchemaVersion, channelsAnswered, channelStatus, failedChannels,
-aiModelActual, evidenceHealth, urlhealthSummary, escalationStats, reportPath, queryRu,
+aiModelActual, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, reportPath, queryRu,
 relatedCandidates, claimLedger, synthMeta}`; `synthMeta.ledgerSummary` = `{total, confirmed,
 confirmedSplit, challenged, outdated, unchecked, disputed, escalated, escalationSkipped,
-weakEvidence, evidenceless, credibilityMedian, claimsDroppedByCap}`. Прогресс — в `/workflows`.
+weakEvidence, evidenceless, credibilityMedian, claimsDroppedByCap}`; `snapshotGate` =
+`{minChars, llmMediatedChannels, demotedTotal, byReason: {noSnapshot, shortSnapshot, llmMediated,
+quoteNotFound}, byChannel, ceilingCapped}` — сколько HIGH-цитат опущено до MEDIUM и почему
+(`args.channelCeiling: {codexweb: "HIGH"}` — явный escape потолка канала, автоматики нет).
+Прогресс — в `/workflows`.
 `escalationCap: N` в args меняет кап эскалаций (дефолт 8; квота Codex — общий пул с verif).
 
 ## Phase C — WRITE (vault-контракт, главная сессия)
@@ -229,7 +235,7 @@ weakEvidence, evidenceless, credibilityMedian, claimsDroppedByCap}`. Прогр�
      То же для `disputed > 0` и `### Спорные факты` (claims с verdict=DISPUTED: statement +
      голоса + `escalation.reasoning`).
    - **Ledger-метрики во frontmatter (H8).** Сверь с `synthMeta.ledgerSummary` и поправь
-     детерминированно (значения — числа, не строки): `ledger_schema: 3`,
+     детерминированно (значения — числа, не строки): `ledger_schema: 4`,
      `claims_confirmed`, `claims_disputed`, `claims_dropped` (= challenged + outdated),
      `claims_unchecked`, `votes_confirmed_2` (= confirmed − confirmedSplit),
      `votes_confirmed_1` (= confirmedSplit), `escalations` (= escalated),

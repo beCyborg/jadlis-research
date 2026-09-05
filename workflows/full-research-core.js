@@ -105,6 +105,18 @@ const ALL_CHANNELS = {
 // открытым вебом: их совпадение НЕ является независимой триангуляцией.
 const FAMILY = { web: 'web', codexweb: 'web', grokweb: 'web', yandex: 'web', reddit: 'reddit', twitter: 'twitter', hackernews: 'hn', substack: 'substack', youtube: 'youtube', telegram: 'telegram' }
 const COMMUNITY = ['reddit', 'twitter', 'hackernews', 'substack', 'youtube', 'telegram']
+// ── Снапшот-гейт (schema v4, 2026-09-05): пер-цитатный потолок relevance ──
+// Снапшот короче MIN_SNAPSHOT_CHARS гейт не закрывает (заглушка/обрезок, не контент).
+const MIN_SNAPSHOT_CHARS = 1000
+// LLM-опосредованные каналы: выдача — синтез модели, снапшот страницы пишет агент постфактум,
+// и подтвердить, что цитата взята из страницы, а не из пересказа, нечем → потолок MEDIUM
+// по константе канала (шапка снапшота — самоотчёт агента, на гейт не влияет).
+// Escape только явный: args.channelCeiling = { codexweb: 'HIGH' } снимает потолок для канала.
+const LLM_MEDIATED_CHANNELS = new Set(['codexweb', 'grokweb', 'yandex'])
+// x.com/twitter.com: Firecrawl отдаёт AI-обработанный текст, дословного тела страницы нет.
+const LLM_MEDIATED_HOSTS = /(^|\.)(x\.com|twitter\.com|mobile\.twitter\.com)$/i
+const CHANNEL_CEILING = (A.channelCeiling && typeof A.channelCeiling === 'object') ? A.channelCeiling : {}
+const hostOf = u => { try { return String(new URL(String(u || '')).hostname || '').toLowerCase() } catch (e) { return '' } }
 const SELECTED = (Array.isArray(A.channels) && A.channels.length)
   ? A.channels.filter(c => ALL_CHANNELS[c])
   : ['web', 'codexweb', 'grokweb', 'reddit', 'twitter', 'hackernews', 'substack']
@@ -185,8 +197,9 @@ const URLHEALTH_SCHEMA = {
           urlStatus: { type: 'string', enum: ['ok', 'blocked', 'dead', 'skipped'] },
           quoteStatus: { type: 'string', enum: ['matched', 'notFound', 'notChecked'] },
           fabricationSuspect: { type: 'boolean' },
+          snapshotChars: { type: 'integer', description: 'длина тела снапшота в символах (0 — снапшота нет/не прочитан)' },
         },
-        required: ['prefix', 'url', 'urlStatus', 'quoteStatus', 'fabricationSuspect'],
+        required: ['prefix', 'url', 'urlStatus', 'quoteStatus', 'fabricationSuspect', 'snapshotChars'],
       },
     },
     elapsedSec: { type: 'number' },
@@ -328,7 +341,7 @@ function urlhealthPrompt(items) {
 1. Через Write запиши в ${inFile} ДОСЛОВНО JSON между маркерами <<<IN и IN>>>.
 2. ОДИН Bash-вызов (timeout: 180000):
 python3 "${PLUGIN_ROOT}/scripts/urlhealth.py" --in "${inFile}" --workdir "${WORK_DIR}" --deadline 90 --per-url 10 > "${outFile}" 2>"${WORK_DIR}/_urlhealth.err"; echo "EXIT=$?"
-3. Прочитай ${outFile} (Read) и верни по схеме: status ("ok" если partial=false и нет поля error; "partial" если partial=true; "failed" если файл пуст/не JSON/есть error), items — массив {prefix,url,urlStatus,quoteStatus,fabricationSuspect} из .items (urlStatus не из набора ok|blocked|dead → "skipped"; quoteStatus не из набора → "notChecked"; fabricationSuspect отсутствует → false), elapsedSec из .elapsedSec (нет → 0), note — краткая строка (summary счётчиков или текст ошибки).
+3. Прочитай ${outFile} (Read) и верни по схеме: status ("ok" если partial=false и нет поля error; "partial" если partial=true; "failed" если файл пуст/не JSON/есть error), items — массив {prefix,url,urlStatus,quoteStatus,fabricationSuspect,snapshotChars} из .items (urlStatus не из набора ok|blocked|dead → "skipped"; quoteStatus не из набора → "notChecked"; fabricationSuspect отсутствует → false; snapshotChars — целое из .snapshotChars, отсутствует/не число → 0), elapsedSec из .elapsedSec (нет → 0), note — краткая строка (summary счётчиков или текст ошибки).
 Файл не появился или не разобрался → status="failed", items=[], note с причиной. НЕ чини скрипт, НЕ повторяй запросы вручную, НЕ спавни sub-agents.
 
 <<<IN
@@ -543,24 +556,60 @@ const files = channelResults.map(r => r.fileWritten).filter(Boolean)
 const okChannel = r => r.sourceQuality !== 'LOW' && Array.isArray(r.citations) && r.citations.some(c => c && c.url)
 const okResults = channelResults.filter(okChannel)
 
-// H9 — гейт снапшотов, детерминированно: правило промпта «HIGH без снапшота недопустима»
-// энфорсится кодом — у канала с HIGH-цитатами и нулём снапшотов все HIGH → MEDIUM.
-const snapshotDemotions = {}
+// Индекс цитат по префиксу: curator возвращает только префиксы, спаны подставляет JS
+// (curator физически не может выдумать цитату — только сослаться на несуществующую).
+// Строится ДО гейта (schema v4): гейт работает пер-цитатно по индексу. citationRefs —
+// обратные ссылки на объекты цитат каналов (отдельная карта: запись индекса копируется
+// в claim.evidence → леджер → wf-лог, ссылка на объект дала бы дубли).
+const normPrefix = p => String(p || '').replace(/[\[\]\s]/g, '').toLowerCase()
+const citationIndex = {}
+const citationRefs = {}
 for (const r of channelResults) {
-  const cits = Array.isArray(r.citations) ? r.citations : []
-  const highs = cits.filter(c => c && c.relevance === 'HIGH')
-  const snaps = Array.isArray(r.snapshots) ? r.snapshots.filter(Boolean) : []
-  if (highs.length && !snaps.length) {
-    highs.forEach(c => { c.relevance = 'MEDIUM'; c.snapshotDemoted = true })
-    snapshotDemotions[r.channelKey] = highs.length
+  const snaps = (Array.isArray(r.snapshots) ? r.snapshots : []).filter(Boolean)
+  for (const c of (r.citations || [])) {
+    if (!c || !c.prefix) continue
+    const p = normPrefix(c.prefix)
+    const snap = snaps.find(s => normPrefix(String(s).split('/').pop().replace(/\.md$/i, '')) === p) || null
+    if (!citationIndex[p]) {
+      citationIndex[p] = { prefix: p, url: c.url, quotes: Array.isArray(c.quotes) ? c.quotes.filter(Boolean).map(q => String(q).slice(0, 400)) : [], context: c.context || '', reliability: c.reliability || 'F', relevance: c.relevance, channel: r.channelKey, snapshotPath: snap, snapshotDemoted: null }
+      citationRefs[p] = c
+    }
   }
 }
-if (Object.keys(snapshotDemotions).length) log(`⚠ Гейт снапшотов: HIGH→MEDIUM у каналов без снапшотов: ${Object.entries(snapshotDemotions).map(([k, n]) => `${k}(${n})`).join(', ')}`)
 
+// Снапшот-гейт (schema v4) — пер-цитатный, детерминированный. Порядок причин фиксирован,
+// первая побеждает: no-snapshot → llm-mediated. short-snapshot / quote-not-found — после
+// urlhealth (нужно чтение файлов, в песочнице раннера fs нет). Повышений нет никогда.
+// Меняем relevance и в индексе (→ evidence claims), и на объекте цитаты канала (→ channelStatus).
+const demote = (p, reason) => {
+  const e = citationIndex[p]; const c = citationRefs[p]
+  if (!e || e.snapshotDemoted) return false
+  e.relevance = 'MEDIUM'; e.snapshotDemoted = reason
+  if (c) { c.relevance = 'MEDIUM'; c.snapshotDemoted = reason }
+  return true
+}
+const REASON_KEY = { 'no-snapshot': 'noSnapshot', 'short-snapshot': 'shortSnapshot', 'llm-mediated': 'llmMediated', 'quote-not-found': 'quoteNotFound' }
+const demotedBy = {}   // channel → { noSnapshot, shortSnapshot, llmMediated, quoteNotFound }
+const noteDemotion = (channel, reason) => {
+  const d = demotedBy[channel] || (demotedBy[channel] = { noSnapshot: 0, shortSnapshot: 0, llmMediated: 0, quoteNotFound: 0 })
+  d[REASON_KEY[reason]]++
+}
+const channelCeiling = k => (CHANNEL_CEILING[k] === 'HIGH') ? 'HIGH' : (LLM_MEDIATED_CHANNELS.has(k) ? 'MEDIUM' : 'HIGH')
+for (const p of Object.keys(citationIndex)) {
+  const e = citationIndex[p]
+  if (e.relevance !== 'HIGH') continue
+  const reason = !e.snapshotPath ? 'no-snapshot'
+    : (channelCeiling(e.channel) === 'MEDIUM' || LLM_MEDIATED_HOSTS.test(hostOf(e.url))) ? 'llm-mediated'
+    : null
+  if (reason && demote(p, reason)) noteDemotion(e.channel, reason)
+}
+if (Object.keys(demotedBy).length) log(`⚠ Снапшот-гейт (v4): HIGH→MEDIUM: ${Object.entries(demotedBy).map(([k, d]) => `${k}(${Object.entries(d).filter(([, n]) => n).map(([r, n]) => `${r} ${n}`).join(', ')})`).join('; ')}`)
+
+const sumDemoted = d => d ? Object.values(d).reduce((a, b) => a + b, 0) : 0
 const channelStatus = SELECTED.map(k => {
   const r = channelResults.find(x => x.channelKey === k)
   const cits = r ? (r.citations || []) : []
-  return { channel: k, answered: !!r, ok: r ? okChannel(r) : false, sourceQuality: r ? r.sourceQuality : null, citations: cits.length, snapshots: r ? (r.snapshots || []).length : 0, highCitations: cits.filter(c => c && c.relevance === 'HIGH').length, quotedCitations: cits.filter(c => c && Array.isArray(c.quotes) && c.quotes.length).length, snapshotDemoted: snapshotDemotions[k] || 0 }
+  return { channel: k, answered: !!r, ok: r ? okChannel(r) : false, sourceQuality: r ? r.sourceQuality : null, citations: cits.length, snapshots: r ? (r.snapshots || []).length : 0, highCitations: cits.filter(c => c && c.relevance === 'HIGH').length, quotedCitations: cits.filter(c => c && Array.isArray(c.quotes) && c.quotes.length).length, snapshotDemoted: sumDemoted(demotedBy[k]), snapshotDemotedBy: demotedBy[k] || { noSnapshot: 0, shortSnapshot: 0, llmMediated: 0, quoteNotFound: 0 }, ceiling: channelCeiling(k), snapshotBytesMedian: null }
 })
 const failedChannels = channelStatus.filter(s => !s.ok).map(s => s.channel)
 const answeredFamilies = [...new Set(okResults.map(r => FAMILY[r.channelKey]))]
@@ -571,7 +620,7 @@ log(`Каналов успешно: ${okResults.length}/${SELECTED.length} (уп
 // а успешна лишь одна — триангуляции не будет. Намеренный web-only (1 семья) — OK.
 if (okResults.length < 2 || (selectedFamilies.length >= 2 && answeredFamilies.length < 2)) {
   log(`Недостаточно независимых источников (успешных каналов: ${okResults.length}, семей: ${answeredFamilies.length}) — отдаю что есть, без синтеза.`)
-  return { workDir: WORK_DIR, status: 'insufficient-sources', ledgerSchemaVersion: 3, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [] }
+  return { workDir: WORK_DIR, status: 'insufficient-sources', ledgerSchemaVersion: 4, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [] }
 }
 
 // ═══ Phase 2 — Verify (per-claim live counter-search) ═══
@@ -590,19 +639,6 @@ if (!curated || !Array.isArray(curated.claims)) {
   curated = { claims: [] }
 }
 
-// Индекс цитат по префиксу: curator возвращает только префиксы, спаны подставляет JS
-// (curator физически не может выдумать цитату — только сослаться на несуществующую).
-const normPrefix = p => String(p || '').replace(/[\[\]\s]/g, '').toLowerCase()
-const citationIndex = {}
-for (const r of channelResults) {
-  const snaps = (Array.isArray(r.snapshots) ? r.snapshots : []).filter(Boolean)
-  for (const c of (r.citations || [])) {
-    if (!c || !c.prefix) continue
-    const p = normPrefix(c.prefix)
-    const snap = snaps.find(s => String(s).split('/').pop().replace(/\.md$/i, '').toLowerCase() === p) || null
-    if (!citationIndex[p]) citationIndex[p] = { prefix: p, url: c.url, quotes: Array.isArray(c.quotes) ? c.quotes.filter(Boolean).map(q => String(q).slice(0, 400)) : [], context: c.context || '', reliability: c.reliability || 'F', relevance: c.relevance, channel: r.channelKey, snapshotPath: snap }
-  }
-}
 const STRENGTH_RANK = { STRONG: 3, MODERATE: 2, WEAK: 1 }
 const NUMERIC_RE = /\d/
 const allClaims = curated.claims.map((c, i) => {
@@ -639,20 +675,46 @@ try {
       const counts = { ok: 0, blocked: 0, dead: 0, skipped: 0, matched: 0, notFound: 0, notChecked: 0, fabricationSuspect: 0 }
       for (const it of uh.items) { counts[it.urlStatus] = (counts[it.urlStatus] || 0) + 1; counts[it.quoteStatus] = (counts[it.quoteStatus] || 0) + 1; if (it.fabricationSuspect) counts.fabricationSuspect++ }
       // Политика: dead / fabricationSuspect / notFound → спан weak; blocked / notChecked НИКОГДА не понижают.
+      // Снапшот-гейт v4, вторая ступень (нужно чтение файлов): quote notFound → 'quote-not-found',
+      // тело снапшота < MIN_SNAPSHOT_CHARS → 'short-snapshot'. В e.weak новые причины НЕ входят
+      // (иначе весь codexweb стал бы «слабым доказательством» и потянул strength) — вместо этого
+      // агрегат c.ceilingCapped для analyst'а (бейдж credibility ≤3).
+      const snapCharsByChannel = {}
       for (const c of claims) {
         for (const e of c.evidence) {
           const h = byPrefix[e.prefix]
           if (!h) continue
+          const chars = Number.isFinite(h.snapshotChars) ? h.snapshotChars : 0
           e.health = { urlStatus: h.urlStatus, quoteStatus: h.quoteStatus, fabricationSuspect: !!h.fabricationSuspect }
+          e.snapshotChars = chars
           e.weak = h.urlStatus === 'dead' || !!h.fabricationSuspect || h.quoteStatus === 'notFound'
+          if (chars > 0) (snapCharsByChannel[e.channel] || (snapCharsByChannel[e.channel] = [])).push(chars)
+          // Ступень 2 гейта: индекс уже мог понизить цитату (no-snapshot/llm-mediated) — тогда причина остаётся первой.
+          const reason = h.quoteStatus === 'notFound' ? 'quote-not-found'
+            : (e.snapshotPath && chars > 0 && chars < MIN_SNAPSHOT_CHARS) ? 'short-snapshot'
+            : null
+          if (reason && (citationIndex[e.prefix] ? citationIndex[e.prefix].relevance === 'HIGH' : e.relevance === 'HIGH')) {
+            if (demote(e.prefix, reason)) noteDemotion(e.channel, reason)
+          }
+          if (citationIndex[e.prefix] && citationIndex[e.prefix].snapshotDemoted) { e.relevance = 'MEDIUM'; e.snapshotDemoted = citationIndex[e.prefix].snapshotDemoted }
         }
         const checked = c.evidence.filter(e => e.health)
         c.weakEvidence = checked.length > 0 && checked.every(e => e.weak)
         if (c.weakEvidence && c.strength === 'STRONG') { c.strength = 'MODERATE'; c.strengthDemoted = 'weak-evidence' }
+        c.ceilingCapped = c.evidence.length > 0 && c.evidence.every(e => !!e.snapshotDemoted)
+      }
+      // channelStatus строится до раннего return — допатчиваем после urlhealth.
+      for (const st of channelStatus) {
+        const cr = channelResults.find(x => x.channelKey === st.channel)
+        if (cr) st.highCitations = (cr.citations || []).filter(c => c && c.relevance === 'HIGH').length
+        st.snapshotDemoted = sumDemoted(demotedBy[st.channel])
+        st.snapshotDemotedBy = demotedBy[st.channel] || st.snapshotDemotedBy
+        const v = (snapCharsByChannel[st.channel] || []).slice().sort((a, b) => a - b)
+        st.snapshotBytesMedian = v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : Math.round((v[v.length / 2 - 1] + v[v.length / 2]) / 2)) : null
       }
       evidenceHealth = uh.status
       urlhealthSummary = { ...counts, items: uh.items.length, elapsedSec: uh.elapsedSec, note: uh.note }
-      log(`urlhealth (${uh.status}, ${uh.elapsedSec}s): url ok=${counts.ok} blocked=${counts.blocked} dead=${counts.dead} skipped=${counts.skipped}; quote matched=${counts.matched} notFound=${counts.notFound} notChecked=${counts.notChecked}; fabricationSuspect=${counts.fabricationSuspect}; claims weakEvidence=${claims.filter(c => c.weakEvidence).length}`)
+      log(`urlhealth (${uh.status}, ${uh.elapsedSec}s): url ok=${counts.ok} blocked=${counts.blocked} dead=${counts.dead} skipped=${counts.skipped}; quote matched=${counts.matched} notFound=${counts.notFound} notChecked=${counts.notChecked}; fabricationSuspect=${counts.fabricationSuspect}; claims weakEvidence=${claims.filter(c => c.weakEvidence).length}, ceilingCapped=${claims.filter(c => c.ceilingCapped).length}`)
     } else {
       log(`⚠ urlhealth не дал результата (${uh && uh.note ? uh.note : 'нет ответа'}) — шаг пропущен.`)
     }
@@ -774,7 +836,9 @@ return {
   // v2 (2026-08-15): UNCHECKED + вектор голосов + атомарный куратор + снапшоты.
   // v3 (2026-09-01): evidence-префиксы curator + urlhealth + линза W2 + эскалация Codex +
   //   DISPUTED + numberVerbatim + кап 16 claims + снапшот-гейт кодом.
-  ledgerSchemaVersion: 3,
+  // v4 (2026-09-05): пер-цитатный снапшот-гейт (no-snapshot / llm-mediated / short-snapshot /
+  //   quote-not-found → потолок MEDIUM), ceilingCapped, snapshotChars в evidence, snapshotGate.
+  ledgerSchemaVersion: 4,
   channelsAnswered: channelResults.length,
   channelsSelected: SELECTED,
   channelStatus,
@@ -786,6 +850,14 @@ return {
   claimLedger: ledgerOut,
   evidenceHealth,
   urlhealthSummary,
+  snapshotGate: {
+    minChars: MIN_SNAPSHOT_CHARS,
+    llmMediatedChannels: [...LLM_MEDIATED_CHANNELS],
+    demotedTotal: Object.values(demotedBy).reduce((n, d) => n + sumDemoted(d), 0),
+    byReason: Object.values(demotedBy).reduce((acc, d) => { for (const k of Object.keys(d)) acc[k] = (acc[k] || 0) + d[k]; return acc }, { noSnapshot: 0, shortSnapshot: 0, llmMediated: 0, quoteNotFound: 0 }),
+    byChannel: demotedBy,
+    ceilingCapped: claimLedger.filter(c => c.ceilingCapped).length,
+  },
   escalationStats,
   reportPath: report.reportPath || `${WORK_DIR}/report.md`,
   queryRu: report.queryRu,
