@@ -91,6 +91,15 @@ Condition: the handle appeared ≥2 times in the Layer 3 comments AND its thesis
 {PLUGIN_ROOT}/scripts/hn-fetch.sh user <username>
 ```
 
+## Evidence gates (A/B verdict 2026-09-06 — EN protocol adopted, ADOPT_B 2:1)
+
+1. **Engagement sweep is mandatory.** Besides the freshness searches of Layer 1, run one Algolia story search sorted by points over the last 12-24 months (`hn-fetch.sh search "<TOPIC>" --tags story --points 100 --limit 20`) and include at least 2 threads with ≥100 points — the A/B lost threads at 432/517/622 points without it.
+2. **Two sampling axes, ≥2 threads each:** (a) "meta" threads — ownership, governance, rewrites, institutional decisions; (b) operational threads — complaints and measurements (segfault/OOM/latency/benchmarks/migration reports). One axis alone skews the output into ideology or anecdotes.
+3. **Uniqueness gate.** Coverage is counted by unique thread URLs; never present one thread as several references. Not more than 3 citations per thread (rule below).
+4. **Per-quote provenance.** Every span carries author + date + permalink to the specific comment (`item?id=<comment_id>`), and the parent story's points/comments are always resolved.
+5. **No title-only citations.** A citation without at least one verbatim fragment of a post/comment body carries no finding — mark it as a "signal" (max 2 per run) outside the numbered citation list. Counterarguments are "who + why + points + link"; a thread title is not a counterargument.
+6. **Release sweep with a label.** The freshest release threads of the topic are read even at zero engagement and marked "vendor claims, not crowd-verified".
+
 ## Citation rules
 
 - Every quote carries the thread's engagement metadata: points and the number of comments.
