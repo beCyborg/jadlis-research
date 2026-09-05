@@ -26,6 +26,12 @@ const VERIFIERS = 2
 const CLAIM_HARD_CAP = 16
 // Кап эскалаций в Codex на прогон (расхождения голосов сверх капа → исключение по одному голосу + флаг 'cap').
 const ESCALATION_CAP = Number.isFinite(A.escalationCap) ? A.escalationCap : 8
+// Модель Codex для эскалации (третий голос). gpt-6-astra с 2026-09-05 (решение пользователя);
+// откат — args.codexModel: 'gpt-5.6-sol' (в каталоге CLI жив). Effort high явно (дефолт Astra —
+// medium), service_tier default явно (глобальный конфиг мог бы отдать priority ≈2,5× квоты).
+// Литералы канала codexweb живут в protocols/codex-web-protocol.md — агент читает файл сам.
+const CODEX_MODEL = A.codexModel || 'gpt-6-astra'
+const CODEX_LABEL = A.codexModel ? `Codex/${A.codexModel}` : 'Codex/GPT-6 Astra'
 // Воркер: пиннинг Opus 5 + effort xhigh через субагента researcher-opus-xhigh.
 // Реестр агентов кэшируется на старте сессии — если субагент создан в текущей сессии,
 // оркестратор может передать workerOpts: { model: 'opus' } как фоллбэк.
@@ -83,7 +89,7 @@ const bridgeTail = fieldsHint => `\n\nФИНАЛЬНЫЙ ВЫВОД (ты раб
 const PROTO_DIR = `${PLUGIN_ROOT}/skills/full-research/protocols`
 const ALL_CHANNELS = {
   web: { source: 'Web (Brave Search)', prefix: 'w', protocol: `${PROTO_DIR}/web-protocol.md`, file: 'web.md' },
-  codexweb: { source: 'Web (Codex/GPT-5.6 Sol)', prefix: 'cx', protocol: `${PROTO_DIR}/codex-web-protocol.md`, file: 'web-codex.md' },
+  codexweb: { source: `Web (${CODEX_LABEL})`, prefix: 'cx', protocol: `${PROTO_DIR}/codex-web-protocol.md`, file: 'web-codex.md' },
   grokweb: { source: 'Web (Grok)', prefix: 'gw', protocol: `${PROTO_DIR}/grok-web-protocol.md`, file: 'web-grok.md' },
   reddit: { source: 'Reddit', prefix: 'r', protocol: `${PROTO_DIR}/reddit-protocol.md`, file: 'reddit.md' },
   twitter: { source: 'Twitter/X', prefix: 'x', protocol: `${PROTO_DIR}/twitter-protocol.md`, file: 'twitter.md' },
@@ -392,7 +398,7 @@ ${TOOL_NOTE}
 НЕ спавни sub-agents.`
 }
 
-// ── Эскалация расхождения голосов: третий голос Codex (GPT-5.6 Sol) с гейтом живого поиска ──
+// ── Эскалация расхождения голосов: третий голос Codex (CODEX_MODEL) с гейтом живого поиска ──
 function escalationPrompt(claim, votes) {
   const pf = `${WORK_DIR}/_codex-esc-${claim.id}-prompt.md`
   const jf = `${WORK_DIR}/_codex-esc-${claim.id}.jsonl`
@@ -422,7 +428,7 @@ Answer with EXACTLY one JSON object as the final message, no prose after it:
 2. Проверь бинарник: Bash \`command -v codex >/dev/null && echo HAVE || echo NONE\`. NONE → верни status="no-binary" (остальные поля: confirmsExclusion=false, verdictSuggested="UNCHECKED", reasoning="codex binary missing", urls=[], liveSearchEvents=0) и остановись.
 
 3. ОДИН Bash-вызов (параметр timeout: 300000; < /dev/null обязателен):
-codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c 'tools.web_search={mode="live"}' --json -o "${lf}" "$(cat "${pf}")" < /dev/null > "${jf}" 2>"${WORK_DIR}/_codex-esc-${claim.id}.err"; echo "EXIT=$?"
+codex exec -m ${CODEX_MODEL} -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json -o "${lf}" "$(cat "${pf}")" < /dev/null > "${jf}" 2>"${WORK_DIR}/_codex-esc-${claim.id}.err"; echo "EXIT=$?"
 
 4. Разбор:
    - EXIT≠0 и в ${jf}/.err есть «usage limit» / «quota» / «rate limit» / 429 → status="quota". Bash-таймаут (вызов прерван) → status="timeout".

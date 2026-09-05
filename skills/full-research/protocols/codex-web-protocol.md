@@ -1,17 +1,17 @@
-# Web (Codex/GPT-5.6 Sol) — протокол поиска для агента
+# Web (Codex/GPT-6 Astra) — протокол поиска для агента
 
 ## Инструмент: Codex CLI (через Bash)
 
-Web-поиск через **Codex CLI** (`codex exec`) с включённым web search. Биллинг — подписка ChatGPT → marginal cost ≈ $0 (плюс оплаченный priority-тир, см. ниже). Модель, reasoning effort и тир запинены прямо в командах: `gpt-5.6-sol`, effort `high`, `service_tier="priority"` — канал не зависит от глобального дефолта `~/.codex/config.toml`. При смене поколения модели обновить пин здесь (все три команды) и подпись источника в `{PLUGIN_ROOT}/workflows/full-research-core.js` (`ALL_CHANNELS.codexweb.source`).
+Web-поиск через **Codex CLI** (`codex exec`) с включённым web search. Биллинг — подписка ChatGPT → marginal cost ≈ $0. Модель, reasoning effort и тир запинены прямо в командах: `gpt-6-astra`, effort `high`, `service_tier="default"` — канал не зависит от глобального дефолта `~/.codex/config.toml`. При смене поколения модели обновить пин здесь (все команды ниже, включая эскалацию), константу `CODEX_MODEL` и подпись источника в `{PLUGIN_ROOT}/workflows/full-research-core.js`, probe в `SKILL.md` и строку канала в `README.md`.
 
-> [!note] «Быстрая модель» = `service_tier="priority"`, НЕ отдельная модель
-> Имени `gpt-5.6-sol-fast` у API не существует (HTTP 400 «not supported when using Codex with a ChatGPT account» — проверено 2026-08-15). Настройка «Fast» в UI Codex = **`service_tier="priority"`** — официальное описание из каталога моделей: «1.5x speed, increased usage» (быстрее, но сжигает лимиты быстрее). Оплачена и запинена в командах ниже; A/B 2026-08-15 на боевом промпте: sol-high 177 с → 151 с (**−15%**), живых поисков одинаково (11). Если priority-лимиты кончатся — вернуть `"default"`.
-> **Модель канала — ВСЕГДА `gpt-5.6-sol`** (решение пользователя 2026-08-15). Luna/Terra не использовать: замер luna-high дал −43% времени, но вдвое меньше живых поисков (5 vs 11) — глубина поиска и есть смысл канала.
+> [!note] `service_tier="priority"` («Fast» в UI Codex) — НЕ использовать
+> Имени `gpt-5.6-sol-fast` у API не существует (HTTP 400 «not supported when using Codex with a ChatGPT account» — проверено 2026-08-15). Настройка «Fast» в UI Codex = `service_tier="priority"`: официально «1.5x speed, increased usage», по оценке пользователя ≈2,5× расхода квоты при −15 % времени (A/B 2026-08-15: sol-high 177 с → 151 с, живых поисков одинаково — 11). Решение 2026-09-05: приоритет — квота под доказательность, не скорость → во всех командах явный `service_tier="default"` (глобальный `~/.codex/config.toml` тоже на `default`, чтобы вызов без флага не унаследовал priority).
+> **Модель канала — `gpt-6-astra` с 2026-09-05** (решение пользователя; часть B Плана 1 «astra vs sol» как гейт снята — сравнение живых поисков идёт постфактум по первой эскалации транша 1 Плана 2). Effort `high` явно: дефолт Astra — `medium`, а глубина поиска и есть смысл канала. Luna/Terra не использовать: замер luna-high дал −43% времени, но вдвое меньше живых поисков (5 vs 11). **Откат** — `gpt-5.6-sol` (в каталоге CLI жив, priority 6): если первая эскалация даёт < 5 живых `web_search` при ориентире Sol 11 (замер 2026-08-15) — вернуть литералы здесь и `CODEX_MODEL` в ядре одним коммитом.
 
 Базовая команда (Bash, `timeout: 300000` мс на вызов):
 
 ```bash
-codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json '<ПРОМПТ>' < /dev/null
+codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json '<ПРОМПТ>' < /dev/null
 ```
 
 > [!warning] `< /dev/null` ОБЯЗАТЕЛЕН во всех вызовах — без него канал висит до таймаута
@@ -52,13 +52,13 @@ codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c model_reasoning_
 ### Вызов 1 — Широкий обзор (обязательно)
 
 ```bash
-codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json 'Research the web for: <развёрнутый запрос — тема, аспекты, что за решение принимается>. Use ONLY the web search tool - run real searches, do NOT answer from memory. Every claim MUST have a source URL and publication date; omit claims without URLs. Prefer 2024-2026 sources. Open and READ THE FULL PAGE of every key source before citing it - do NOT cite from search-result snippets alone; quote specifics that only appear in the page body. Return: key findings (bulleted, each with URL), notable numbers/quotes with URLs, and a final Sources section listing all URLs.' < /dev/null
+codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json 'Research the web for: <развёрнутый запрос — тема, аспекты, что за решение принимается>. Use ONLY the web search tool - run real searches, do NOT answer from memory. Every claim MUST have a source URL and publication date; omit claims without URLs. Prefer 2024-2026 sources. Open and READ THE FULL PAGE of every key source before citing it - do NOT cite from search-result snippets alone; quote specifics that only appear in the page body. Return: key findings (bulleted, each with URL), notable numbers/quotes with URLs, and a final Sources section listing all URLs.' < /dev/null
 ```
 
 ### Вызов 2 — Контраргументы (обязательно)
 
 ```bash
-codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json 'Search the web for criticism, problems, failures and counter-arguments about: <тема>. Use ONLY the web search tool - real searches, NOT memory; every claim needs a source URL. Who disagrees and why? Known issues, regressions, negative experience reports. Open and READ THE FULL PAGE of key sources before citing - do NOT cite from snippets alone. Return bulleted findings with URLs + Sources section.' < /dev/null
+codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json 'Search the web for criticism, problems, failures and counter-arguments about: <тема>. Use ONLY the web search tool - real searches, NOT memory; every claim needs a source URL. Who disagrees and why? Known issues, regressions, negative experience reports. Open and READ THE FULL PAGE of key sources before citing - do NOT cite from snippets alone. Return bulleted findings with URLs + Sources section.' < /dev/null
 ```
 
 Оба вызова запускай ОДНИМ сообщением (двумя Bash-вызовами параллельно), каждый с `timeout` ~300000 мс.
@@ -96,7 +96,7 @@ codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c model_reasoning_
 Вызов (делает лёгкий субагент-мост, промпт `escalationPrompt` в core.js):
 
 ```bash
-codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c 'tools.web_search={mode="live"}' --json -o "<workDir>/_codex-esc-<claimId>-last.md" "$(cat "<workDir>/_codex-esc-<claimId>-prompt.md")" < /dev/null > "<workDir>/_codex-esc-<claimId>.jsonl"
+codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json -o "<workDir>/_codex-esc-<claimId>-last.md" "$(cat "<workDir>/_codex-esc-<claimId>-prompt.md")" < /dev/null > "<workDir>/_codex-esc-<claimId>.jsonl"
 ```
 
 - **Гейт живого поиска:** в JSONL должно быть ≥1 события `web_search` (`grep -c '"web_search'`); 0 → голос не считается (`escalationSkipped: 'no-live-search'`) — Codex отвечал по памяти.

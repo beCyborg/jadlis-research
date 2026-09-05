@@ -73,8 +73,8 @@ Phase A (INTAKE: каналы + recon + интервью) → Phase B (Workflow 
       маркетинг/продажи; транскрипты бесплатны с домашнего IP).
       `codexweb` — во ВСЕХ темах (default-набор). **Квотный probe codexweb (всегда перед
       включением):** квота Codex-подписки — общий пул с верификатором
-      `/jadlis-research:verif` (приоритет у verif). Probe: `codex exec -m gpt-5.6-sol
-      -s read-only --skip-git-repo-check 'ok' < /dev/null` (≈6 с); usage-limit ошибка → канал
+      `/jadlis-research:verif` (приоритет у verif). Probe: `codex exec -m gpt-6-astra
+      -s read-only --skip-git-repo-check -c service_tier="default" 'ok' < /dev/null` (≈6 с); usage-limit ошибка → канал
       ВЫКЛ, сообщи пользователю («codexweb пропущен: квота Codex зарезервирована/исчерпана»).
       Бинарника `codex` нет → канал ВЫКЛ без сообщения об ошибке.
    3. **Академическая тема?** → предложи `/jadlis-research:search-paper` (вместо или
@@ -197,7 +197,8 @@ analyst — **Fable 5.1 через мост** (headless `claude -p`, билли�
 Workflow (ledger schema v3) читает протоколы каналов сам: curator выделяет до 16 claims
 с evidence-префиксами (спаны подставляет код), `urlhealth` проверяет evidence-URL и цитаты
 по снапшотам, два верификатора голосуют (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), при
-расхождении голосов третий голос даёт Codex (GPT-5.6 Sol, живой поиск; кап 8 эскалаций);
+расхождении голосов третий голос даёт Codex (GPT-6 Astra, живой поиск; кап 8 эскалаций;
+`codexModel: "gpt-5.6-sol"` в args — откат);
 не подтверждённое исключение → `DISPUTED` (спорные, в выводы не входят). Отсеянные claims
 **фильтруются** (не просто дописывается критика), затем analyst пишет draft-отчёт в
 `{WORK_DIR}/report.md`. Дождись `<task-notification>`, затем используй объект:
