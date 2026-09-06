@@ -271,7 +271,9 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
    the error, show what was collected in `{WORK_DIR}`, write NOTHING to the vault, stop here.
    Otherwise continue.
 
-2. **Read the draft:** `{WORK_DIR}/report.md`.
+2. **Read the draft:** the path from the workflow object's `reportPath` — normally
+   `{WORK_DIR}/report.md`, but the synthesiser occasionally saves under another name
+   (a live run produced `synthesis.md`). Use `reportPath`, never the hardcoded name.
 
 2a. **Draft post-check (deterministic).**
    - **Honest `ai_model`.** Compare the frontmatter `ai_model` with `aiModelActual` from the
