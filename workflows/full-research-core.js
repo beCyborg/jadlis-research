@@ -33,13 +33,13 @@ const ESCALATION_CAP = Number.isFinite(A.escalationCap) ? A.escalationCap : 8
 // the agent reads that file itself.
 const CODEX_MODEL = A.codexModel || 'gpt-6-astra'
 const CODEX_LABEL = A.codexModel ? `Codex/${A.codexModel}` : 'Codex/GPT-6 Astra'
-// Worker: Opus 5 pinned with effort xhigh through the researcher-opus-xhigh subagent.
+// Worker: Opus 5 pinned with effort high through the researcher-opus subagent.
 // The agent registry is cached at session start — if the subagent was created in the current
 // session, the orchestrator may pass workerOpts: { model: 'opus' } as a fallback.
-const WORKER_OPTS = A.workerOpts || { agentType: 'jadlis-research:researcher-opus-xhigh' }
+const WORKER_OPTS = A.workerOpts || { agentType: 'jadlis-research:researcher-opus' }
 const w = extra => Object.assign({}, WORKER_OPTS, extra)
 // Orchestrator roles (curator, analyst — heavy logic: claim selection, synthesis).
-// curator ALWAYS goes through orchestrator-fable-xhigh (Opus 5) — structural claim extraction is
+// curator ALWAYS goes through orchestrator-opus (Opus 5) — structural claim extraction is
 // not intelligence-sensitive, there is no Fable edge here.
 // analyst is the only place with a real Fable advantage (synthesis over 400–600K of context).
 // The bridge exists because of alias remapping: CLAUDE_CODE_SUBAGENT_MODEL maps subagents
@@ -48,9 +48,9 @@ const w = extra => Object.assign({}, WORKER_OPTS, extra)
 // process `claude -p --model claude-fable-5-1` is not subject to the remap (verified: exit 0, ~7 s start).
 // Hence the analyst default is the FABLE BRIDGE: a light worker writes the role prompt to a file and
 // runs it in nested headless Fable. Disable: args.fableBridge=false → analyst also goes through
-// orchestrator-fable-xhigh (Opus 5).
+// orchestrator-opus (Opus 5).
 const FABLE_BRIDGE = A.fableBridge !== false
-const ORCH_OPTS = A.orchOpts || { agentType: 'jadlis-research:orchestrator-fable-xhigh' }
+const ORCH_OPTS = A.orchOpts || { agentType: 'jadlis-research:orchestrator-opus' }
 const o = extra => Object.assign({}, ORCH_OPTS, extra)
 
 // ── Language slot (Plan 2, tranche 2). languages[] = languages the channels must search in;
