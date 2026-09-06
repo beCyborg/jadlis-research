@@ -79,7 +79,7 @@ Exa is an embedding index: it catches pages that keyword-Brave does not find (A/
 python3 {PLUGIN_ROOT}/scripts/websearch.py exa "<description of the target page: e.g. practitioner blog post explaining how X works in production>" --tag research -n 8 --out json
 ```
 
-- **Key gate:** `exit 2` = no `EXA_API_KEY` → SKIP the layer silently (not a fallback, not a channel error).
+- **Key gate:** `exit 2` = no `EXA_API_KEY` anywhere (env, `~/.config/exa/key`, Keychain via `scripts/secret.sh`) → SKIP the layer silently (not a fallback, not a channel error).
 - RU topic → add `--type keyword` (auto/fast drift toward English-language sources).
 - The results go into the same Layer 2 candidate pool marked with the source `exa`; URL duplicates against the Brave results are collapsed. Exa-only candidates go through the same selection and full-text fetch (Layer 3), and their reliability badge is no higher than the rest.
 - Budget: 1 call (2 for a narrow topic with different angles); $0.007/call.
@@ -117,7 +117,7 @@ async def m():
     async with AsyncWebCrawler(verbose=False) as c: r=await c.arun(url=sys.argv[1]); print(r.markdown if isinstance(r.markdown,str) else r.markdown.raw_markdown)
 asyncio.run(m())' "<url>"` (bake-off 2026-09-06: 3/3 URLs, quote matched, <2 s each; output keeps navigation like Reader does). Venv missing → skip.
 4. **URL-exact index:** `python3 {PLUGIN_ROOT}/scripts/websearch.py contents "<url>" --full` (Exa contents, ~$0.001/page; **always `--full`** — the default truncates to 8 000 characters, and a truncated piece does not close the gate).
-5. **Tavily extract — only with the key `TAVILY_API_KEY`** in `env` of settings.json (there is NO keyless mode: without a key `POST /extract` → 401 "missing or invalid API key", checked 2026-09-06): `curl -s --max-time 30 -X POST https://api.tavily.com/extract -H "Authorization: Bearer $TAVILY_API_KEY" -H 'Content-Type: application/json' -d '{"urls":["<url>"]}'` → `.results[0].raw_content`. No key → the rung is skipped silently.
+5. **Tavily extract — only with the key `TAVILY_API_KEY`** (resolve it first: `eval "$(bash "{PLUGIN_ROOT}/scripts/secret.sh" --export TAVILY_API_KEY)"` — env, then the macOS Keychain; there is NO keyless mode: without a key `POST /extract` → 401 "missing or invalid API key", checked 2026-09-06): `curl -s --max-time 30 -X POST https://api.tavily.com/extract -H "Authorization: Bearer $TAVILY_API_KEY" -H 'Content-Type: application/json' -d '{"urls":["<url>"]}'` → `.results[0].raw_content`. No key → the rung is skipped silently.
 6. **Anti-bot — the last rung:** `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape(url, formats=["markdown"], onlyMainContent=true)`; on failure → retry with `waitFor: 5000`. **Never** for PDFs (rung 1) and x.com/twitter.com (an AI retelling for 30 credits, the hook denies it; tweets — the twitter channel). Behind a login — Playwright MCP only.
 
 No rung produced a body → mark the URL `[SOURCE UNAVAILABLE]`, the citation — MEDIUM at most, "[no-snapshot: blocked]".
@@ -184,7 +184,7 @@ and prices must be CROSS-CHECKED against the venue's site — cards go stale.
 
 ### Google-layer slots (off by default)
 
-1. **Serper fallback — ONLY if the env var `SERPER_API_KEY` is set** (check with Bash `test -n "$SERPER_API_KEY"`), and ONLY when a query needs Google operators that Brave handles poorly — `site:` on a non-English platform, `filetype:`, an exact phrase in quotes. Then call `curl -s -X POST https://google.serper.dev/search -H "X-API-KEY: $SERPER_API_KEY" -H 'Content-Type: application/json' -d '{"q":"<query>","num":10,"gl":"<country>","hl":"<lang>"}'` and read `.organic[]` (title/link/snippet). No key → skip silently, Brave stays the engine.
+1. **Serper fallback — ONLY if `SERPER_API_KEY` resolves** (`eval "$(bash "{PLUGIN_ROOT}/scripts/secret.sh" --export SERPER_API_KEY)"; test -n "${SERPER_API_KEY:-}"` — env, then the macOS Keychain), and ONLY when a query needs Google operators that Brave handles poorly — `site:` on a non-English platform, `filetype:`, an exact phrase in quotes. Then call `curl -s -X POST https://google.serper.dev/search -H "X-API-KEY: $SERPER_API_KEY" -H 'Content-Type: application/json' -d '{"q":"<query>","num":10,"gl":"<country>","hl":"<lang>"}'` and read `.organic[]` (title/link/snippet). No key → skip silently, Brave stays the engine.
 2. **DataForSEO slot** — reserved for non-Google engines (Bing/Naver/Baidu SERP API). Not enabled, no deposit; do not call anything, this is a placeholder note: enabled in tranche 4 after the owner's trial.
 
 Before using any tool — load it via ToolSearch if it is unavailable.

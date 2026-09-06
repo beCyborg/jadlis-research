@@ -117,9 +117,9 @@ turn only — do not rely on it beyond the first turn.
    from this run's set, do not change the set itself). Refinement of the "cluster → channels"
    matrix — by telemetry (local `full-research-telemetry.py --trends`, `--channels`), not by judgement.
 
-   **Gate `yandex`.** The channel needs the key `YC_SEARCH_API_KEY` in the `env` of settings.json
-   (set by the skill `/jadlis-research:keys`; the plugin userConfig is no good here — sensitive
-   values do not reach Bash). Key not configured → do not offer `yandex` at all. If there is no key
+   **Gate `yandex`.** The channel needs the key `YC_SEARCH_API_KEY` (env, or the macOS Keychain via `scripts/secret.sh`)
+   (written by the skill `/jadlis-research:keys` into the Keychain; the plugin userConfig is no
+   good here — sensitive values do not reach Bash). Key not configured → do not offer `yandex` at all. If there is no key
    but the channel was still chosen: `yandex-search.sh` returns `exit 2`, the channel degrades
    (`sourceQuality=LOW`, empty citations) and the workflow does NOT fail. Paid: ≈0.1-0.15 ₽/topic.
    Outside the RU branch — only on explicit request («с Яндексом»). Brave's Runet layer is weak
