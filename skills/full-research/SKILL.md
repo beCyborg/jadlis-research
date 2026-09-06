@@ -1,20 +1,6 @@
 ---
 name: full-research
-description: >
-  Full research of a topic: web search with three engines (Brave + Codex web search +
-  Grok web search) + community research (Reddit, Twitter/X, HackerNews, Substack,
-  YouTube, Telegram; opt-in language layers ja/zh/ko/eu) in parallel through a workflow.
-  Recon + interview → N parallel researchers → per-claim cross-channel verification →
-  synthesis → Obsidian vault (Знания/Ресерчи/).
-  TRIGGER when: user says "полный ресерч", "full research", "исследуй тему полностью",
-  "deep research", "глубокий ресерч", "все источники", "research everywhere",
-  "исследование по всем источникам", "в соцсетях", "что говорят люди",
-  "мнения в сообществах", "обсуждения на форумах", "community research",
-  "what do people think", or explicitly asks for combined web + community research,
-  or asks about opinions/discussions/sentiment on a topic across social platforms.
-  DO NOT TRIGGER when: only web search (use /jadlis-research:search),
-  scientific literature (use /jadlis-research:search-paper),
-  library docs (use Context7).
+description: "Full topic research: web (Brave, Codex, Grok) + communities (Reddit, X, HN, Substack, YouTube, Telegram) via workflow, per-claim verification → vault note. Triggers: full research, deep research, what do people think. RU triggers: полный ресерч, глубокий ресерч, все источники, в соцсетях, что говорят люди. Do NOT use for: web search → /search; papers → /search-paper; docs → Context7."
 allowed-tools:
   - Read
   - Write
