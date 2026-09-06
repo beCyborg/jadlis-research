@@ -136,15 +136,17 @@ turn only — do not rely on it beyond the first turn.
    and `Error: max turns reached` are NOT signs of death: the probe judges ONLY by the grep,
    `--max-turns 1` legitimately cuts a live answer at the first tool call.
 
-   `GROK_DOWN` → drop `grokweb` and `twitter` from this run's `SELECTED_CHANNELS` and tell the
-   user: «Grok недоступен (402 usage balance exhausted) — каналы grokweb/twitter пропущены;
-   вернутся сами после пополнения баланса». The default channel set is NOT changed — the probe
-   gates the run, not the config, and after a top-up the channels return by themselves, without
-   edits or a render. `GROK_OK` → both channels work as usual.
-   Twitter degradation slot (off by default): with `GROK_DOWN` AND the env var `TWITTERAPI_IO_KEY`
-   set, the `twitter` channel may stay in the set in keyword-only mode through the TwitterAPI.io
-   MCP (protocol section "Degradation slot"); no key → skip as above. Enabled in tranche 4 after
-   the owner's trial.
+   `GROK_DOWN` → drop `grokweb` from this run's `SELECTED_CHANNELS`; for `twitter` first check
+   the TwitterAPI.io key (`bash ${CLAUDE_PLUGIN_ROOT}/scripts/twitterapi.sh balance` → JSON = key
+   ok, `exit 2` = no key): with the key the channel STAYS in the set in keyword-only mode
+   (protocol section "TwitterAPI.io layer", Mode B); without it drop `twitter` too. Tell the
+   user: «Grok недоступен (402 usage balance exhausted) — grokweb пропущен; twitter идёт
+   keyword-only через TwitterAPI.io» (or «…grokweb/twitter пропущены; вернутся сами после
+   пополнения баланса» when there is no key). The default channel set is NOT changed — the
+   probe gates the run, not the config, and after a top-up the channels return by themselves,
+   without edits or a render. `GROK_OK` → both channels work as usual; with the key the
+   `twitter` channel additionally runs Mode A of the same section (replies, author profile,
+   trends — ≤3 cheap REST calls).
 
    **Edge case.** The explicit "web" mode = `web,codexweb,grokweb`: if Grok is dead AND the
    codexweb quota probe failed, one channel remains → the workflow returns
