@@ -17,6 +17,7 @@ effort: high
 ---
 
 # /jadlis-research:full-research — full research of a topic (hybrid Skill + Workflow)
+Before Phase A read `references/gotchas.md` — run failure modes (analyst session limit and resume, the ledger dropping claims, forbidden characters in `QUERY_RU`, paired runs).
 
 The heavy part (N channel researchers → per-claim verification with live Brave counter-search →
 analyst synthesis) runs in the deterministic workflow **`full-research-core`**. The skill does the
