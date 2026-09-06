@@ -13,7 +13,7 @@ allowed-tools:
   - mcp__plugin_jadlis-research_brave-search__brave_web_search
 argument-hint: "<query — research topic>"
 model: claude-opus-5
-effort: xhigh
+effort: high
 ---
 
 # /jadlis-research:full-research — full research of a topic (hybrid Skill + Workflow)
