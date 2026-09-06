@@ -235,7 +235,7 @@ Workflow({
 ```
 
 Models inside the workflow: channels, verifiers and curator — Opus 5
-(`jadlis-research:researcher-opus-xhigh` / `jadlis-research:orchestrator-fable-xhigh`);
+(`jadlis-research:researcher-opus` / `jadlis-research:orchestrator-opus`);
 analyst — **Fable 5.1 through the bridge** (headless `claude -p`, billed to the same subscription).
 Disable the bridge: `fableBridge: false` → analyst also on Opus 5 — then pass
 `aiModel: "claude-opus-5"`, the report frontmatter must not lie.
