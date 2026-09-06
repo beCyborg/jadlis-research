@@ -59,6 +59,17 @@ subtitles in both cases; the plugin's built-in yt-dlp fallback does not fire
 (`--sub-langs all` + a 30 s timeout). Do NOT patch the plugin (autoUpdate wipes edits).
 A window of mass IpBlocked (every video in a row `blocked`) → `YT_TRANSCRIPT_FORCE_YTDLP=1` before
 the command — straight to yt-dlp, one wasted request per video less.
+ROOT CAUSE of the yt-dlp 429 (pinned down 2026-08-26): it is NOT the IP and NOT the VPN — the home
+IP (`--source-address`, Play AS9141) returns the same `HTTP 429` on timedtext as the VPN egress. The
+real cause is a missing PO token (proof-of-origin): the yt-dlp log shows
+`[pot:bgutil] Error reaching GET http://127.0.0.1:4416/ping` — the bgutil PO-provider is not running.
+Without a PO token the timedtext endpoint throttles, and once the volume adds up (~40 requests per
+session) YouTube escalates to a captcha challenge on the WHOLE egress
+(`web_safari: requiring a captcha challenge`) — then BOTH paths are blocked. Switching `player_client`
+(tv/android/ios/mweb/web_safari) under an active challenge does not help. The challenge cooldown is
+> 15 min. The durable fix for the fallback is to raise the bgutil PO-provider (deno + node are
+installed), but it cannot be validated while a challenge is active — do it in a quiet moment.
+
 Both paths failed (`error_type: blocked_or_network`) → fallback: hosted Supadata
 ($5/300) — only with confirmation.
 

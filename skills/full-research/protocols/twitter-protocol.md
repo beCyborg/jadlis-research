@@ -203,6 +203,11 @@ is down. Wrapper: `{PLUGIN_ROOT}/scripts/twitterapi.sh` (REST via curl, key from
   the MCP for this channel.
 - **Rate.** A paid balance has no QPS cap (6 parallel calls fine). A free-tier key is limited to
   **1 request / 5 s** (HTTP 429) — on a 429, space the calls with `sleep 5`.
+- **Ad-hoc REST outside the wrapper.** Balance: `curl -H "x-api-key: $TWITTERAPI_IO_KEY" https://api.twitterapi.io/oapi/my/info`;
+  trends: `GET /twitter/trends?woeid=1&count=10` (name/rank/query). A bare urllib request is blocked by
+  Cloudflare (error 1010) — send a `User-Agent` header. Credit accounting: 1 credit = $0.00001, a 20-tweet
+  page ≈ 300 credits = $0.003; the 2026-09-06 smoke of 12/12 tools took ~25 calls = 4 458 credits ≈ $0.045,
+  latency 1–6 s per call.
 
 ### Mode A — complement (Grok probe = `GROK_OK`, the default)
 

@@ -68,6 +68,25 @@ negative experience, but also in paid-placement posts (see reliability below).
   then the full text. A file shorter than ~1 000 characters does not close the gate (MEDIUM);
   HIGH without a snapshot → MEDIUM + "[no-snapshot: blocked]".
 
+## Free catalog search — what works, what is closed (checked 2026-08-17)
+
+TGStat API START expired 2026-08-16, word quota 5/5 — treat it as unavailable until renewed.
+
+Works, free:
+- **`lyzem.com/search?q=`** — the only open full-text search over channel names/bios/posts (curl, no JS).
+  The search is OR-ish and ignores quotes → a lot of noise, filter by hand.
+- **`t.me/s/<channel>?q=<phrase>`** — post search inside a public channel without a login; this is how
+  advertisers are found in community publics. Does not work for groups/chats and does not show comments.
+- **web.telegram.org** global search (logged in, via `/browser`) — matches names/usernames only, capped at
+  5 results per query.
+
+Does not work: tgstat.ru `/search` (post search only on a 2 940 ₽/mo subscription, curl 403),
+telemetr.me (behind a login), telegramchannels.me / tdirectory.me (Cyrillic is not indexed),
+tlgrm.ru (404), telegago (JS / Google CSE).
+
+Order for topping up channels in a niche: lyzem → `t.me/s/` preview to check liveness (subscribers, date of
+the last post) → `t.me/s/<public>?q=` by keywords. In Ad Library / Yandex there is almost no Telegram.
+
 ## Budget: 8-14 calls
 
 ## Paid layer (NOT activated)

@@ -15,6 +15,16 @@ Namespace: `mcp__plugin_jadlis-research_reddit__*`
 
 **КРИТИЧНО:** `parameters` в `execute_operation` — ВСЕГДА native JSON object, НЕ строка.
 
+> [!warning] 401 после смены хоста MCP — нужен повторный вход в браузере
+> Хост `https://mcp.dialog.tools/mcp` закрыт OAuth: на голый `initialize` он отвечает **401** с
+> `www-authenticate: Bearer error="invalid_token"` и `resource_metadata=…/.well-known/oauth-protected-resource/mcp`.
+> Авторизационный сервер — Descope (`api.descope.com/v1/apps/P33G9OI0uZKubCM9c3RE9KGxPJbn`), scopes
+> `openid profile email`, есть `registration_endpoint`. Смена URL сервера (06.09.2026) обнуляет сохранённую
+> авторизацию: до повторного входа канал получает 401 и уходит на no-auth-лестницу (Arctic Shift / search.rss)
+> и `reddit-alt`. Лечение: после рестарта CLI пройти OAuth-флоу в браузере при первом обращении к серверу
+> (или `/mcp` → reconnect). Затем сверить дефект размеров: `discover_subreddits("model context protocol")` —
+> r/mcp 73 456 значит дефект вендора, ~119 953 — прежний сервер врал.
+
 ## THREE-LAYER Protocol
 
 ### Layer 1 — Discover (2 вызова: лексический + семантический)
