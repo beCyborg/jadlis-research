@@ -226,7 +226,6 @@ Workflow({
     languages: LANGUAGES,               // e.g. ["ru"] or ["ja","en"]; omitted → detected from the query
     queries: QUERIES,                   // {lang: native phrasing}; may be {}
     substackHandles: SUBSTACK_HANDLES,  // may be empty
-    aiModel: "claude-fable-5-1",        // analyst model (synthesis goes through the Fable bridge)
     date: DATE,
     workDir: WORK_DIR,
     pluginRoot: PLUGIN_ROOT,            // ${CLAUDE_PLUGIN_ROOT} is NOT interpolated in JS — passed as a value
@@ -237,9 +236,10 @@ Workflow({
 
 Models inside the workflow: channels, verifiers and curator — Opus 5
 (`jadlis-research:researcher-opus` / `jadlis-research:orchestrator-opus`);
-analyst — **Fable 5.1 through the bridge** (headless `claude -p`, billed to the same subscription).
-Disable the bridge: `fableBridge: false` → analyst also on Opus 5 — then pass
-`aiModel: "claude-opus-5"`, the report frontmatter must not lie.
+analyst — **Fable 5.1 as an ordinary subagent** (`jadlis-research:synth-fable`, effort high).
+`fableBridge: false` → analyst on `jadlis-research:synth-opus` instead. Do NOT pass `aiModel`:
+the workflow derives the frontmatter value itself and reports the model that actually ran in
+`aiModelActual` (a Fable analyst that returns null is retried once on Opus 5).
 
 The workflow (ledger schema v4) reads the channel protocols itself: the curator selects up to 16
 claims with evidence prefixes (the code substitutes the spans); the snapshot gate lowers HIGH to
@@ -266,15 +266,18 @@ Codex quota is a shared pool with verif).
 
 The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contract.md`.
 
-1. **Partial result.** If `status: "insufficient-sources"` (<2 channels) — report the error, show
-   what was collected in `{WORK_DIR}`. Otherwise continue.
+1. **Partial result.** If `status: "insufficient-sources"` (<2 channels) or
+   `status: "synthesis-failed"` (the analyst returned null twice — no report was written) — report
+   the error, show what was collected in `{WORK_DIR}`, write NOTHING to the vault, stop here.
+   Otherwise continue.
 
 2. **Read the draft:** `{WORK_DIR}/report.md`.
 
 2a. **Draft post-check (deterministic).**
    - **Honest `ai_model`.** Compare the frontmatter `ai_model` with `aiModelActual` from the
-     workflow object (the bridge may have fallen back to Opus — then the frontmatter lies). On a
-     mismatch fix the frontmatter line to `ai_model: "{aiModelActual}"` before writing to the vault.
+     workflow object. They normally agree; a mismatch means the Fable analyst fell back to the
+     Opus retry — fix the frontmatter line to `ai_model: "{aiModelActual}"` before writing to the
+     vault.
    - **Canonical sections.** If `synthMeta.ledgerSummary.confirmed > 0`, check
      `grep -c '^### Проверенные факты$' draft`. No section → render it programmatically from
      `claimLedger` (claims with verdict=CONFIRMED: statement translated into Russian + «(N голосов)»
@@ -336,7 +339,7 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      снапшот-гейту M (причины из byReason); urlhealth: dead/fabrication».
      `evidenceHealth: "skipped"` → say the URL health was not checked.
    - Gaps (`synthMeta.gaps`): what the research did not cover.
-   - Synthesis model: `aiModelActual` — the one that actually ran (the bridge may have fallen back to Opus).
+   - Synthesis model: `aiModelActual` — the one that actually ran (Fable, or Opus 5 on the retry).
    - Report path: `REPORT_PATH` (vault, `Знания/Ресерчи`).
    - Working directory: `{WORK_DIR}/` (per-source files + draft — the full process).
    - Reminder: the report frontmatter has `verified: false` — an AI draft. After review the user
@@ -345,6 +348,9 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
 ## Error handling
 
 - The workflow returned `insufficient-sources` — show what was collected, do not write to the vault.
+- The workflow returned `synthesis-failed` — the analyst returned null on both Fable and the Opus
+  retry. The material is in `{WORK_DIR}` but there is no report: show the working directory, do not
+  write to the vault. A re-run of Phase B synthesises from the same material.
 - Channel agents have built-in fallbacks (Brave `site:` instead of MCP) inside the protocols.
 - Channel `yandex`: `exit 2` — no `YC_SEARCH_API_KEY`; `exit 3` — API error; `exit 4` — polling
   timeout. In all three cases the channel returns `sourceQuality=LOW` without retries and without a

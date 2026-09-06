@@ -4,7 +4,7 @@ export const meta = {
   phases: [
     { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты' },
     { title: 'Verify', detail: 'curator (Opus 5) выделяет claims с evidence-префиксами → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: линза-опровержение (Brave) + кросс-тип линза → расхождение голосов → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED (schema v4)' },
-    { title: 'Synthesize', detail: 'analyst (Fable 5.1 через мост) пишет отчёт (verified:false): три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
+    { title: 'Synthesize', detail: 'analyst (Fable 5.1, agentType) пишет отчёт (verified:false): три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
 
@@ -13,7 +13,6 @@ export const meta = {
 const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
 const QUERY = A.refinedQuery || 'Compare local AI coding assistants in 2026: privacy vs capability'
 const DECISION = A.decisionContext || ''
-const AI_MODEL = A.aiModel || 'unknown'
 const DATE = A.date || 'DRYRUN-DATE'
 const WORK_DIR = A.workDir || '.full-research/dryrun'
 // ${CLAUDE_PLUGIN_ROOT} is NOT interpolated inside JS — the skill passes it as a value.
@@ -42,14 +41,15 @@ const w = extra => Object.assign({}, WORKER_OPTS, extra)
 // curator ALWAYS goes through orchestrator-opus (Opus 5) — structural claim extraction is
 // not intelligence-sensitive, there is no Fable edge here.
 // analyst is the only place with a real Fable advantage (synthesis over 400–600K of context).
-// The bridge exists because of alias remapping: CLAUDE_CODE_SUBAGENT_MODEL maps subagents
-// (opts.model, the Agent tool, agentType frontmatter) to Opus 5 — deliberate routing (Fable plans,
-// Opus executes), NOT Fable being closed to subagents (disproved 2026-07-05). A separate headless
-// process `claude -p --model claude-fable-5-1` is not subject to the remap (verified: exit 0, ~7 s start).
-// Hence the analyst default is the FABLE BRIDGE: a light worker writes the role prompt to a file and
-// runs it in nested headless Fable. Disable: args.fableBridge=false → analyst also goes through
-// orchestrator-opus (Opus 5).
-const FABLE_BRIDGE = A.fableBridge !== false
+// It runs as an ordinary subagent: the headless bridge existed only to dodge our own
+// CLAUDE_CODE_SUBAGENT_MODEL_FORCE, removed 2026-09-07. The two synth-* agents pin the model,
+// effort high and the tool allow-list (Read, Write, Glob) — agent() has no allowedTools option.
+// The argument name stays `fableBridge`: one vocabulary across all eight workflows.
+const FABLE_SYNTH = A.fableBridge !== false
+const SYNTH_AGENT = FABLE_SYNTH ? 'jadlis-research:synth-fable' : 'jadlis-research:synth-opus'
+// ai_model of the report: printed from what actually ran, not from what the caller guessed.
+const AI_MODEL = FABLE_SYNTH ? 'claude-fable-5-1' : 'claude-opus-5'
+const AI_MODEL_RETRY = 'claude-opus-5'
 const ORCH_OPTS = A.orchOpts || { agentType: 'jadlis-research:orchestrator-opus' }
 const o = extra => Object.assign({}, ORCH_OPTS, extra)
 
@@ -77,38 +77,6 @@ const QUERIES = (A.queries && typeof A.queries === 'object') ? A.queries : {}
 const NON_DEFAULT_LANGS = LANGUAGES.filter(l => l !== 'ru' && l !== 'en')
 const LANGUAGE_LAYERS = `${PLUGIN_ROOT}/skills/full-research/references/language-layers.md`
 
-function bridgePrompt(role, rolePrompt, allowedTools, fieldsHint, schemaObj) {
-  const pf = `${WORK_DIR}/_fable-${role}-prompt.md`
-  const of = `${WORK_DIR}/_fable-${role}-out.json`
-  const sf = `${WORK_DIR}/_fable-${role}-schema.json`
-  // Derived schema for --json-schema: no root $schema/$id/title/description and no numeric/string
-  // constraints (otherwise structured_output silently switches off).
-  const derived = JSON.parse(JSON.stringify(schemaObj), (k, v) =>
-    (k === 'minLength' || k === 'minimum' || k === 'maximum') ? undefined : v)
-  delete derived.$schema; delete derived.$id; delete derived.title; delete derived.description
-  return `You are a technical BRIDGE to the Fable 5.1 model. Do NOT do the role work yourself (except in the "Degradation" step). Exactly four steps:
-
-1. With Write, save to ${pf} VERBATIM the whole text between the markers <<<ROLE_PROMPT and ROLE_PROMPT>>> (markers excluded; do not alter or shorten the text).
-
-2. With Write, save to ${sf} VERBATIM the JSON between the markers <<<SCHEMA and SCHEMA>>>.
-
-3. ONE Bash call (parameter timeout: 600000; --settings mutes hooks, < /dev/null is mandatory):
-cat "${pf}" | claude -p --model claude-fable-5-1 --effort high --allowedTools "${allowedTools}" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --settings '{"disableAllHooks":true}' --json-schema "$(cat "${sf}")" --output-format json > "${of}" 2>"${WORK_DIR}/_fable-${role}.err" < /dev/null; echo "EXIT=$?"
-
-4. Read ${of} (Read): take the field .structured_output — a ready object with the fields ${fieldsHint}; return it by your schema WITHOUT changes. If there is no .structured_output key — take the JSON block at the end of .result.
-
-Degradation: EXIT≠0 or neither .structured_output nor valid JSON in .result → repeat step 3 once; if it fails again — execute the role prompt from ${pf} YOURSELF and return the result by the schema (mark the first text field with "[bridge-fallback: opus]"; if the role prompt wrote a report file with frontmatter — replace ai_model in it with "claude-opus-5").
-
-<<<SCHEMA
-${JSON.stringify(derived)}
-SCHEMA>>>
-
-<<<ROLE_PROMPT
-${rolePrompt}
-ROLE_PROMPT>>>`
-}
-// Tail of the role prompt for headless execution (no StructuredOutput — the final answer is printed as a JSON block)
-const bridgeTail = fieldsHint => `\n\nFINAL OUTPUT (you run headless): end your answer with EXACTLY ONE JSON object with the fields ${fieldsHint} inside a \`\`\`json ... \`\`\` block — and no text after the block.`
 
 const PROTO_DIR = `${PLUGIN_ROOT}/skills/full-research/protocols`
 const ALL_CHANNELS = {
@@ -503,7 +471,7 @@ ROLE_PROMPT>>>`
 
 // ── Analyst prompt (decision-first report: conclusions and actions for the reader; process → callout/frontmatter).
 //    Instructions are in English; the REPORT ITSELF is written in Russian — it becomes the vault note as is. ──
-function analystPrompt(files, ledger, stats) {
+function analystPrompt(files, ledger, stats, aiModel) {
   return `You are the analyst. Read the channel results, cross-validate them and write the final report IN RUSSIAN in the DECISION-FIRST + CONTEXT format: on top — conclusions and advice for the decision (what the reader sees first); below — a separate section «📚 Контекст и находки» with the researched substance of the topic. The collapsed callout «Методология» takes ONLY the meta-process (how you searched, what was dropped), NOT the substantive context of the subject. IMPORTANT: claims with verdict CHALLENGED/OUTDATED go neither into the conclusions nor into the context — filter, do not append criticism. DISPUTED claims go into a separate subsection «Спорные факты» and are not part of the conclusions.
 
 QUERY: ${QUERY}
@@ -536,7 +504,7 @@ type: research
 created: ${DATE}
 ai_drafted: true
 verified: false
-ai_model: "${AI_MODEL}"
+ai_model: "${aiModel}"
 tags: []
 query: "{the original query; replace inner double quotes with «»}"
 decision: "{the user's decision or empty}"
@@ -863,19 +831,30 @@ log(`Ledger v4: CONFIRMED=${confirmed} (split: ${confirmedSplit}), DISPUTED=${di
 // ═══ Phase 3 — Synthesize ═══
 phase('Synthesize')
 
-const ANALYST_FIELDS = '{reportPath,queryRu,mainConclusion,relatedCandidates,droppedClaims,disputedClaims,gaps}'
-const report = FABLE_BRIDGE
-  ? await agent(bridgePrompt('analyst', analystPrompt(files, claimLedger, ledgerSummary) + bridgeTail(ANALYST_FIELDS), 'Read,Write,Glob', ANALYST_FIELDS, ANALYST_SCHEMA),
-      w({ label: 'analyst→fable', phase: 'Synthesize', schema: ANALYST_SCHEMA }))
-  : await agent(analystPrompt(files, claimLedger, ledgerSummary), o({ label: 'analyst', phase: 'Synthesize', schema: ANALYST_SCHEMA }))
-
-// Honest ai_model: the marker "[bridge-fallback: opus]" in mainConclusion means the synthesis was
-// executed by Opus, not Fable — Phase C of the skill checks the report frontmatter against it.
-const bridgeFallback = FABLE_BRIDGE && /\[bridge-fallback: opus\]/.test(String(report.mainConclusion || ''))
-const aiModelActual = FABLE_BRIDGE && !bridgeFallback ? AI_MODEL : 'claude-opus-5'
+// Options are assembled explicitly, NOT through o()/w(): a caller-supplied orchOpts.model would
+// survive the merge and beat the agent frontmatter (per-invocation model wins).
+const synthOpts = (label, agentType) => ({ label, phase: 'Synthesize', schema: ANALYST_SCHEMA, agentType })
 
 // Ledger out — without raw votes (rawVotes duplicate evidence/urls)
 const ledgerOut = claimLedger.map(({ rawVotes, ...c }) => c)
+
+let report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL),
+  synthOpts(FABLE_SYNTH ? 'analyst→fable' : 'analyst', SYNTH_AGENT))
+
+// One retry on Opus 5 — only on the Fable branch: with fableBridge:false the first call was already
+// Opus, and a repeat would just re-run what a human may have skipped on purpose.
+let synthFellBack = false
+if (!report && FABLE_SYNTH) {
+  log('analyst (Fable) вернул null — одна попытка на Opus 5.')
+  report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL_RETRY),
+    synthOpts('analyst→opus-retry', 'jadlis-research:synth-opus'))
+  synthFellBack = true
+}
+if (!report) {
+  log('Синтез не удался дважды. Материалы собраны, отчёт не написан.')
+  return { workDir: WORK_DIR, status: 'synthesis-failed', claimLedger: ledgerOut, synthMeta: { ledgerSummary } }
+}
+const aiModelActual = (FABLE_SYNTH && !synthFellBack) ? 'claude-fable-5-1' : 'claude-opus-5'
 
 return {
   workDir: WORK_DIR,
