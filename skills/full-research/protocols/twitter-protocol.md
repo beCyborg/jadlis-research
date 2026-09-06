@@ -131,6 +131,9 @@ median of **118.5 s** against the 101 s baseline — the baseline+20 % threshold
 ```
 
 > **`x_thread_fetch` — only as a line inside this prompt, NOT as a separate CLI call.**
+> When `TWITTERAPI_IO_KEY` resolves, do NOT ask Grok for the thread at all — take the replies
+> deterministically through the TwitterAPI.io layer below (`twitterapi.sh replies <id>`, ~2 s,
+> 34 replies with likes), and keep this prompt to search only.
 > Probe 2026-08-06: the content is excellent (146 substantive replies, polar opinions — exactly the
 > sentiment the channel does not otherwise obtain), but 95 s against a 60 s threshold ≈ the cost of a whole
 > Call 1 → it is not budgeted as a separate call (the second REJECT in a row, now on
@@ -143,10 +146,12 @@ In the output file — a separate section:
 - [{prefix}N] {counterargument} — {URL}
 ```
 
-## Budget: 2 calls (hard)
+## Budget: 2 Grok calls (hard) + ≤3 TwitterAPI.io calls (key-gated)
 
-Do NOT make additional CLI calls — even if the result seems incomplete: the price of the
+Do NOT make additional Grok CLI calls — even if the result seems incomplete: the price of the
 third call is another ~40-60s of tail on the whole /full-research. Better less, but on time.
+The TwitterAPI.io calls (section below) are cheap (~2 s, ~$0.003 each) and run AFTER the Grok
+results are parsed, in parallel with each other.
 
 **Annotation — keep it compact.** For every citation: Admiralty A-F + ONE reliabilityWhy line.
 Expanded dossiers on authors, multi-line bias analyses, meta tags beyond the format —
@@ -164,7 +169,7 @@ Consequence: if the topic is **visual** (memes, interface screenshots, demo vide
 the channel goes blind on that dimension — state this limitation explicitly in findings, so that the synthesis does not
 mistake the absence of a visual signal for its absence in reality.
 
-## Degradation (CLI-only, NO fallback)
+## Degradation of the Grok CLI calls
 
 One call failed (non-zero exit / timeout / empty `.text`), the other is fine → work with what
 came back, mark the missing angle in findings.
@@ -173,26 +178,63 @@ Both calls failed → ONE sequential retry of the combined call (the parallel
 launch may have hit a rate limit). If that one failed too:
 - return **empty** findings + the note "X channel unavailable (CLI)";
 - citations/counterarguments empty; sourceQuality = LOW;
-- **do NOT switch** to MCP `x_search` or brave — the channel works ONLY through the CLI
-  (MCP grok-mcp = xAI API, paid credits — forbidden by design);
+- **do NOT switch** to MCP `x_search` or brave (MCP grok-mcp = xAI API, paid credits — forbidden
+  by design); the ONLY permitted fallback is the keyword-only mode of the TwitterAPI.io layer
+  below, and only when its key resolves;
 - **do NOT crash** the workflow — the other /full-research channels must finish.
 
 Failure causes for diagnostics: an expired OIDC token (needs `grok login`, visible as exit≠0) or a subscription rate limit. stderr warnings `Transport channel closed / AuthorizationRequired` at exit 0 are harmless (grok's internal MCP servers), the result is valid.
 
-## Degradation slot: TwitterAPI.io (off by default)
+## TwitterAPI.io layer (on when the key resolves; checked 2026-09-06)
 
-> [!note] Enabled in tranche 4 after the owner's trial; until then this subsection only documents the slot.
+TwitterAPI.io is a third-party pay-per-call Twitter/X data API (tweets $0.15 / 1K, profiles
+$0.18 / 1K, minimum 15 credits = $0.00015 per call; a 20-tweet page ≈ $0.003). It has NO
+semantic search, so it never replaces Grok — it closes the three holes Grok cannot fill
+deterministically (thread replies, author profile, trends) and keeps the channel alive when Grok
+is down. Wrapper: `{PLUGIN_ROOT}/scripts/twitterapi.sh` (REST via curl, key from `scripts/secret.sh`).
 
-- **Trigger.** The Grok liveness probe returned `GROK_DOWN` (in that case the orchestrator/skill already
-  drops the channel from the run — see the `grokweb` / `twitter` gate in `SKILL.md`).
-- **Key gate.** In that case the channel MAY degrade to keyword-only search through the TwitterAPI.io MCP
-  ONLY if the env var `TWITTERAPI_IO_KEY` is set. Check from Bash: `test -n "$TWITTERAPI_IO_KEY"`.
-  No key → the channel is skipped exactly as today (the section above), with no fallback.
-- **With the key, exactly three call types are allowed**, and only for the gaps Grok cannot fill:
-  1. `get_tweet_replies` — thread replies of one high-engagement post;
-  2. `get_user_info` + `get_user_about` — author profiling for the Admiralty reliability rating;
-  3. `get_trends` — a topic trend check.
-- **No general keyword sweeps through TwitterAPI.io.** Grok `x_keyword_search` / `x_semantic_search`
-  remain the primary path.
-- **Budget: ≤3 calls per run** — every TwitterAPI.io call costs credits (a paid vendor, not the subscription).
-- While the slot is off, the "do NOT switch" rule of the section above stays in force in full.
+- **Key gate.** `bash {PLUGIN_ROOT}/scripts/twitterapi.sh balance` → JSON with credits = key ok;
+  `exit 2` = no `TWITTERAPI_IO_KEY` anywhere (env, macOS Keychain) → skip the whole layer
+  silently, the channel behaves exactly as the sections above (no fallback).
+- **Why REST, not the vendor MCP** (`mcp.twitterapi.io`, checked 2026-09-06): its `get_trends`
+  returns 30 empty `{}` objects, its `get_tweet_replies` rejects the `queryType=Top` its own
+  catalog advertises (backend accepts `Relevance|Latest|Likes`), and its tweet objects are
+  flattened (no `author{}`, `entities`, `card`). REST returns the full objects. Do not register
+  the MCP for this channel.
+- **Rate.** A paid balance has no QPS cap (6 parallel calls fine). A free-tier key is limited to
+  **1 request / 5 s** (HTTP 429) — on a 429, space the calls with `sleep 5`.
+
+### Mode A — complement (Grok probe = `GROK_OK`, the default)
+
+After BOTH Grok calls are parsed, at most three calls, all in ONE message (parallel Bash):
+
+1. `twitterapi.sh replies <tweetId> Likes` — for the ONE highest-engagement post found by Grok
+   (by replies/likes). Take 2-3 contrasting replies into «Counterarguments», marked as dependent
+   sources (replies of one thread). Reply objects carry `likeCount`, `author.userName`,
+   `author.followers`. The first item may be the root post itself — skip it.
+2. `twitterapi.sh user <userName>` — for at most TWO key authors whose reliability decides a
+   claim: `data.description`, `data.followers`, `data.createdAt`, `data.isBlueVerified` feed the
+   Admiralty rating (one reliabilityWhy line, no dossiers).
+3. `twitterapi.sh trends <woeid> 10` — ONLY when the topic is itself a trend/news event and the
+   question is "is it trending now"; otherwise skip. `1`=Worldwide, `23424975`=UK, `23424977`=USA,
+   `23424923`=Poland, `23424848`=India.
+
+Citations from this layer use the same `x` prefix and URL scheme (`https://x.com/<user>/status/<id>`);
+they are raw posts (not llm-mediated), so the per-citation snapshot gate treats them like any
+x.com URL.
+
+### Mode B — keyword-only fallback (Grok probe = `GROK_DOWN`)
+
+The `twitter` channel stays in the run (SKILL.md keeps it when the key resolves). Budget ≤4 calls:
+
+1. `twitterapi.sh search '<keywords + operators> since:YYYY-MM-DD lang:xx' Latest`
+2. `twitterapi.sh search '<same or the semantic angle rephrased as keywords>' Top`
+3. `twitterapi.sh replies <id> Likes` on the top-engagement post from 1-2 (counterarguments).
+4. optional second page of 1 via `next_cursor` (`twitterapi.sh search '<q>' Latest <cursor>`)
+   when the first page is on-topic and `has_next_page` is true.
+
+Operators are the standard Twitter advanced-search set (`from:` `since:` `until:` `lang:`
+`min_faves:` `-filter:retweets` `url:`); one page = ~20 tweets. Native-language queries work
+(`lang:ru` verified). Mark `sourceQuality` no higher than MEDIUM and write in findings that the
+semantic angle and Grok's expert deep-dive are missing — keyword-only coverage is not the same
+channel, and the synthesis must not mistake its silence for absence of a signal.
