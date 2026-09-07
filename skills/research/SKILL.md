@@ -1,5 +1,5 @@
 ---
-name: full-research
+name: research
 description: "Full topic research: web (Brave, Codex, Grok) + communities (Reddit, X, HN, Substack, YouTube, Telegram) via workflow, per-claim verification → vault note. Triggers: full research, deep research, what do people think. RU triggers: полный ресерч, глубокий ресерч, все источники, в соцсетях, что говорят люди. Do NOT use for: web search → /search; papers → /search-paper; docs → Context7."
 allowed-tools:
   - Read
@@ -10,13 +10,13 @@ allowed-tools:
   - EnterPlanMode
   - ExitPlanMode
   - Workflow
-  - mcp__plugin_jadlis-research_brave-search__brave_web_search
+  - mcp__plugin_search_brave-search__brave_web_search
 argument-hint: "<query — research topic>"
 model: claude-opus-5
 effort: high
 ---
 
-# /jadlis-research:full-research — full research of a topic (hybrid Skill + Workflow)
+# /research — full research of a topic (hybrid Skill + Workflow)
 Before Phase A read `references/gotchas.md` — run failure modes (analyst session limit and resume, the ledger dropping claims, forbidden characters in `QUERY_RU`, paired runs).
 
 The heavy part (N channel researchers → per-claim verification with live Brave counter-search →
@@ -77,12 +77,12 @@ turn only — do not rely on it beyond the first turn.
       `youtube` — offer as opt-in (strong clusters: tech/AI tutorials and reviews, marketing/sales;
       transcripts are free from the home IP).
       `codexweb` — in ALL topics (default set). **Codex quota probe (always before enabling):** the
-      Codex subscription quota is a shared pool with the verifier `/jadlis-research:verif` (verif has
+      Codex subscription quota is a shared pool with the verifier `/verif` (verif has
       priority). Probe: `codex exec -m gpt-6-astra
       -s read-only --skip-git-repo-check -c service_tier="default" 'ok' < /dev/null` (≈6 s); a
       usage-limit error → channel OFF, tell the user («codexweb пропущен: квота Codex
       зарезервирована/исчерпана»). No `codex` binary → channel OFF without an error message.
-   3. **Academic topic?** → suggest `/jadlis-research:search-paper` (instead of or next to
+   3. **Academic topic?** → suggest `/science-research` (instead of or next to
       full-research).
    4. **Local / everyday topic (places)?** («найди/выбери заведение, клинику, сервис, секцию в
       Варшаве/городе») → the `web` channel gets the place layer (section "Place layer" in
@@ -105,7 +105,7 @@ turn only — do not rely on it beyond the first turn.
    matrix — by telemetry (local `full-research-telemetry.py --trends`, `--channels`), not by judgement.
 
    **Gate `yandex`.** The channel needs the key `YC_SEARCH_API_KEY` (env, or the macOS Keychain via `scripts/secret.sh`)
-   (written by the skill `/jadlis-research:keys` into the Keychain; the plugin userConfig is no
+   (written by the skill `/search:keys` into the Keychain; the plugin userConfig is no
    good here — sensitive values do not reach Bash). Key not configured → do not offer `yandex` at all. If there is no key
    but the channel was still chosen: `yandex-search.sh` returns `exit 2`, the channel degrades
    (`sourceQuality=LOW`, empty citations) and the workflow does NOT fail. Paid: ≈0.1-0.15 ₽/topic.
@@ -114,7 +114,7 @@ turn only — do not rely on it beyond the first turn.
    SERP entries appeared in no other engine).
 
    **Gate `youtube`.** With the key `YOUTUBE_API_KEY` (plugin userConfig) the channel uses the
-   MCP `mcp__plugin_jadlis-research_youtube__*` for search and metadata. Without the key — **skip**
+   MCP `mcp__plugin_search_youtube__*` for search and metadata. Without the key — **skip**
    the MCP calls, the channel works through Brave `site:youtube.com` + transcripts
    (`scripts/yt-transcript.py`), a normal degradation.
 
@@ -152,11 +152,11 @@ turn only — do not rely on it beyond the first turn.
    **Edge case.** The explicit "web" mode = `web,codexweb,grokweb`: if Grok is dead AND the
    codexweb quota probe failed, one channel remains → the workflow returns
    `insufficient-sources`. Then offer to add `reddit`/`hackernews` or to fall back to
-   `/jadlis-research:search`. The default set has no such hole: without Grok
+   `/search`. The default set has no such hole: without Grok
    `web, codexweb, reddit, hackernews, substack` = 4 families out of 5 remain, the sufficiency
    gate passes (real run 03.09: channels 5/7, families 4/5, status ok).
 
-3. **Recon.** Make 1-2 calls of `mcp__plugin_jadlis-research_brave-search__brave_web_search`
+3. **Recon.** Make 1-2 calls of `mcp__plugin_search_brave-search__brave_web_search`
    (Search tier: 50 req/s, parallel OK; `count: 5`): a broad overview of the topic + optionally one
    clarifying aspect. The goal is orientation (aspects, sub-topics, controversies), not data
    collection. Read-only — plan mode allows it.
@@ -178,7 +178,7 @@ turn only — do not rely on it beyond the first turn.
    topic lives on platforms in another language (branch 5 above, or the user says «на японском /
    по китайским источникам»): e.g. `["ja","en"]`. For every non-default language also prepare
    `QUERIES` — one native phrasing per language using the platform's own terms
-   (`{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` is the dictionary:
+   (`{PLUGIN_ROOT}/skills/research/references/language-layers.md` is the dictionary:
    個人開発, 独立开发者, 1인 개발자 …) — e.g. `{"ja": "個人開発 収益 報告 2026", "en": "indie developer revenue reports 2026"}`.
    Rule: a platform is searched in its own language; an English query on a Japanese platform
    returns translators and schools, not practitioners.
@@ -235,9 +235,9 @@ Workflow({
 ```
 
 Models inside the workflow: channels, verifiers and curator — Opus 5
-(`jadlis-research:researcher-opus` / `jadlis-research:orchestrator-opus`);
-analyst — **Fable 5.1 as an ordinary subagent** (`jadlis-research:synth-fable`, effort high).
-`fableBridge: false` → analyst on `jadlis-research:synth-opus` instead. Do NOT pass `aiModel`:
+(`research:researcher-opus` / `research:orchestrator-opus`);
+analyst — **Fable 5.1 as an ordinary subagent** (`research:synth-fable`, effort high).
+`fableBridge: false` → analyst on `research:synth-opus` instead. Do NOT pass `aiModel`:
 the workflow derives the frontmatter value itself and reports the model that actually ran in
 `aiModelActual` (a Fable analyst that returns null is retried once on Opus 5).
 

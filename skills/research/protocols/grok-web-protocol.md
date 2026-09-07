@@ -64,7 +64,7 @@ The point of this channel is to compare the findings of a different search stack
 
 ## Protocol (2 calls IN ONE message — in parallel)
 
-Search the web in the platform's own languages: use the LANGUAGES / QUERIES block from the orchestrator prompt — when `languages` contains anything beyond ru/en, the `-p` prompt must state explicitly which languages to search in (Grok's `web_search` follows the language of the query), and Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` first (native-term dictionary).
+Search the web in the platform's own languages: use the LANGUAGES / QUERIES block from the orchestrator prompt — when `languages` contains anything beyond ru/en, the `-p` prompt must state explicitly which languages to search in (Grok's `web_search` follows the language of the query), and Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md` first (native-term dictionary).
 
 ### Call 1 — Broad overview (mandatory, `--max-turns 6`)
 

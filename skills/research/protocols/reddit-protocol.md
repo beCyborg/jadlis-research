@@ -1,17 +1,17 @@
 # Reddit — протокол поиска для агента
 
 > [!note] Протокол остаётся на русском — вердикт A/B-бенчмарка 2026-09-06 (KEEP_A, 2:1)
-> Слепые судьи (`Знания/Ресерчи/Система/Бенчмарк языка протоколов full-research — 2026-09-06`): RU-форма дала 55 цитат против 33 и 28 контраргументов против 22 у EN; EN выиграл только свежесть. Провалы EN — протокольные (цитаты «только заголовок», невыкачанные деревья комментариев), поэтому ниже добавлены гейты, а язык оставлен. Формат выходного файла задаёт промпт оркестратора (английские заголовки секций) — он главнее шаблона в этом файле. Языковой слот: площадку ищи на её языке (блок LANGUAGES / QUERIES из промпта; при языках вне ru/en сначала Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md`).
+> Слепые судьи (`Знания/Ресерчи/Система/Бенчмарк языка протоколов full-research — 2026-09-06`): RU-форма дала 55 цитат против 33 и 28 контраргументов против 22 у EN; EN выиграл только свежесть. Провалы EN — протокольные (цитаты «только заголовок», невыкачанные деревья комментариев), поэтому ниже добавлены гейты, а язык оставлен. Формат выходного файла задаёт промпт оркестратора (английские заголовки секций) — он главнее шаблона в этом файле. Языковой слот: площадку ищи на её языке (блок LANGUAGES / QUERIES из промпта; при языках вне ru/en сначала Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md`).
 
 
 ## MCP-инструменты
 
-Namespace: `mcp__plugin_jadlis-research_reddit__*`
+Namespace: `mcp__plugin_search_reddit__*`
 
 Все операции выполняются через 3 инструмента:
-- `mcp__plugin_jadlis-research_reddit__discover_operations` — список операций
-- `mcp__plugin_jadlis-research_reddit__get_operation_schema` — схема параметров
-- `mcp__plugin_jadlis-research_reddit__execute_operation` — выполнение
+- `mcp__plugin_search_reddit__discover_operations` — список операций
+- `mcp__plugin_search_reddit__get_operation_schema` — схема параметров
+- `mcp__plugin_search_reddit__execute_operation` — выполнение
 
 **КРИТИЧНО:** `parameters` в `execute_operation` — ВСЕГДА native JSON object, НЕ строка.
 
@@ -29,7 +29,7 @@ Namespace: `mcp__plugin_jadlis-research_reddit__*`
 
 ### Layer 1 — Discover (2 вызова: лексический + семантический)
 
-**Шаг 1 (первым, всегда): `mcp__plugin_jadlis-research_reddit-alt__reddit_search_communities`** (`q`, `limit: 10`) —
+**Шаг 1 (первым, всегда): `mcp__plugin_search_reddit-alt__reddit_search_communities`** (`q`, `limit: 10`) —
 лексический поиск официального листинга. Находит точные имена, к которым слеп семантический
 индекс primary (r/mcp первым результатом — замер 3×3 2026-08-15; вердикт совета 2026-08-15:
 reddit-alt = первая линия discovery, свой OAuth-клиент/заявка НЕ нужны, пока reddit-alt жив).
@@ -183,7 +183,7 @@ execute_operation({
 ## Резервный Reddit-MCP — `reddit-alt` (redditapis-mcp, ступень 1.5)
 
 Второй MCP, независимый бэкенд (api.redditapis.com, live-данные, полные метрики).
-Namespace: `mcp__plugin_jadlis-research_reddit-alt__*` — 32 плоских тула (без execute_operation-обёртки).
+Namespace: `mcp__plugin_search_reddit-alt__*` — 32 плоских тула (без execute_operation-обёртки).
 Платный: ~$0.002/read с прикреплённого ключа (в env конфига), т.е. полный протокол ≈ $0.05.
 `reddit_deep_comment_search` — «premium call» с недокументированной ценой, по умолчанию не звать.
 
@@ -242,7 +242,7 @@ CLI-обёртка с троттлингом: `python3 {PLUGIN_ROOT}/scripts/red
 
 ## Фоллбэк (Brave, если и бэкенды недоступны)
 
-При сбое Reddit MCP и бэкендов — `mcp__plugin_jadlis-research_brave-search__brave_web_search`:
+При сбое Reddit MCP и бэкендов — `mcp__plugin_search_brave-search__brave_web_search`:
 ```json
 { "query": "site:reddit.com <ЗАПРОС>", "count": 10, "result_filter": ["web", "discussions"] }
 ```

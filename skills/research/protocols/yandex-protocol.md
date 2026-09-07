@@ -35,7 +35,7 @@ bash "$Y" "<topic in Russian, keywords>" --out json
 The query is in Russian, ≤400 chars and ≤40 words. A second call only if the first gave weak
 relevance (one rephrasing, no more).
 Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt;
-when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md`
+when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md`
 first (native-term dictionary).
 
 ### Layer 2 — Anchor platforms (2-3 calls)
@@ -92,7 +92,7 @@ if Layer 2 already gave counter-arguments, this call can be skipped.
 - Take the nature of the unique layer into account: dzen.ru and corporate blogs are more often C-E (content marketing),
   business media (incrussia.ru, secrets.tbank.ru) — B-C. Do not pass SEO listicles off as expertise.
 - Passages from `--out json` are enough for most citations; the full page text — only
-  when necessary, via `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape` (1 req/s), NOT via Yandex.
+  when necessary, via `mcp__plugin_search_firecrawl__firecrawl_scrape` (1 req/s), NOT via Yandex.
 
 ## Degradation (NO fallback to Brave)
 

@@ -10,10 +10,10 @@ Not connected on purpose: XHS (Xiaohongshu), Weibo, Bilibili, any Apify workarou
 |---|---|
 | `python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source v2ex <node>` | V2EX node Atom feeds (`create` = 分享创造, `programmer`, `ideas`, `career`); rules of the node require a write-up with numbers, not a bare link — good first-person material |
 | `python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source juejin <query>` | Juejin has no public feed: the script returns the Brave query to run (exit 3). Trial with a manual cap: ≤3 Brave calls per run |
-| `mcp__plugin_jadlis-research_brave-search__brave_web_search` | Zhihu ONLY through Brave in Chinese (`site:zhihu.com 独立开发者 收入`) — no direct crawl; Juejin the same |
+| `mcp__plugin_search_brave-search__brave_web_search` | Zhihu ONLY through Brave in Chinese (`site:zhihu.com 独立开发者 收入`) — no direct crawl; Juejin the same |
 | Extraction ladder (web-protocol.md, Layer 3) | V2EX threads: `defuddle parse "<url>" --md`; Zhihu/Juejin bodies are JS-gated → `r.jina.ai`, then Exa `--full`; Firecrawl last |
 
-**MANDATORY first step:** Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` —
+**MANDATORY first step:** Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md` —
 the term is `独立开发者`; `月入3万` and `副业赚钱` lead to content farms. Seed = the `zh` entry of
 the QUERIES block; expand with `独立开发 收入`, `独立开发者 月收入`, `出海 独立开发`.
 

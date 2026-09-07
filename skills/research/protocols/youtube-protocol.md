@@ -22,7 +22,7 @@ brave_web_search({ "query": "site:youtube.com <TOPIC + review/vs/experience>", "
 ```
 Parse video_id out of the URL (`watch?v=<id>`). Freshness — `freshness="py"`.
 Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt;
-when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md`
+when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md`
 first (native-term dictionary).
 
 ### Layer 2 — Precise top-up (0-3 API calls, NO MORE)

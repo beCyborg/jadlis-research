@@ -6,10 +6,10 @@
 
 | Tool | Purpose |
 |---|---|
-| `mcp__plugin_jadlis-research_brave-search__brave_llm_context` | **Default for research**: returns the EXTRACTED CONTENT of pages for a query (not just links) — covers most needs without scraping |
-| `mcp__plugin_jadlis-research_brave-search__brave_web_search` | Keyword-based discovery of sources — when you need the LINKS THEMSELVES / coverage (+`extra_snippets`) |
+| `mcp__plugin_search_brave-search__brave_llm_context` | **Default for research**: returns the EXTRACTED CONTENT of pages for a query (not just links) — covers most needs without scraping |
+| `mcp__plugin_search_brave-search__brave_web_search` | Keyword-based discovery of sources — when you need the LINKS THEMSELVES / coverage (+`extra_snippets`) |
 | `defuddle parse <url> --md` (Bash, CLI 0.19.3) | **Default snapshot writer**: the full text of ONE page verbatim, 0 credits (extraction ladder — Layer 3) |
-| `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape` | Anti-bot / JS pages — the LAST rung of the ladder; never for PDFs and x.com (the plugin hook denies it) |
+| `mcp__plugin_search_firecrawl__firecrawl_scrape` | Anti-bot / JS pages — the LAST rung of the ladder; never for PDFs and x.com (the plugin hook denies it) |
 
 **CRITICAL:** Before using any tool — load it via ToolSearch if it is unavailable.
 **RATE LIMIT:** Brave (Search plan): 50 req/s — **parallel calls are OK** (several tool calls in one message). Firecrawl scrape: 1 req/s. On 429 — wait 1 s, retry (max 2x).
@@ -58,7 +58,7 @@ QUERY PHRASING RULES:
   - GOOD: "AI agent frameworks enterprise adoption comparison 2026"
 - For `brave_llm_context`: an expanded query is acceptable (the tool extracts the relevant content itself)
 - For fresh information: `freshness="pm"` (month) or `freshness="pw"` (week)
-- Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt; when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` first (native-term dictionary).
+- Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt; when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md` first (native-term dictionary).
 - For Russian-language topics: the query in Russian (details — the "RU topics" block below)
 
 **RU topics (verified 2026-08-06).** The driver of how "Runet-heavy" the results are is **the language of the query, not geo**:
@@ -118,7 +118,7 @@ async def m():
 asyncio.run(m())' "<url>"` (bake-off 2026-09-06: 3/3 URLs, quote matched, <2 s each; output keeps navigation like Reader does). Venv missing → skip.
 4. **URL-exact index:** `python3 {PLUGIN_ROOT}/scripts/websearch.py contents "<url>" --full` (Exa contents, ~$0.001/page; **always `--full`** — the default truncates to 8 000 characters, and a truncated piece does not close the gate).
 5. **Tavily extract — only with the key `TAVILY_API_KEY`** (resolve it first: `eval "$(bash "{PLUGIN_ROOT}/scripts/secret.sh" --export TAVILY_API_KEY)"` — env, then the macOS Keychain; there is NO keyless mode: without a key `POST /extract` → 401 "missing or invalid API key", checked 2026-09-06): `curl -s --max-time 30 -X POST https://api.tavily.com/extract -H "Authorization: Bearer $TAVILY_API_KEY" -H 'Content-Type: application/json' -d '{"urls":["<url>"]}'` → `.results[0].raw_content`. No key → the rung is skipped silently.
-6. **Anti-bot — the last rung:** `mcp__plugin_jadlis-research_firecrawl__firecrawl_scrape(url, formats=["markdown"], onlyMainContent=true)`; on failure → retry with `waitFor: 5000`. **Never** for PDFs (rung 1) and x.com/twitter.com (an AI retelling for 30 credits, the hook denies it; tweets — the twitter channel). Behind a login — Playwright MCP only.
+6. **Anti-bot — the last rung:** `mcp__plugin_search_firecrawl__firecrawl_scrape(url, formats=["markdown"], onlyMainContent=true)`; on failure → retry with `waitFor: 5000`. **Never** for PDFs (rung 1) and x.com/twitter.com (an AI retelling for 30 credits, the hook denies it; tweets — the twitter channel). Behind a login — Playwright MCP only.
 
 No rung produced a body → mark the URL `[SOURCE UNAVAILABLE]`, the citation — MEDIUM at most, "[no-snapshot: blocked]".
 
@@ -156,7 +156,7 @@ Claude Code — 2026-08":
    `regionCode=PL` is hardcoded; the field mask is fixed (Enterprise SKU, free tier
    1000/month — research volumes are free). exit 3 = `PLACES_KEY_MISSING` —
    the key has not been issued yet (a user gate) → step 2.
-2. **Draft / fallback — Brave Place:** `mcp__plugin_jadlis-research_brave-search__brave_place_search`
+2. **Draft / fallback — Brave Place:** `mcp__plugin_search_brave-search__brave_place_search`
    with **`country="PL"` MANDATORY** (without it the results drift to the US; measured
    precision: Brave 6.2 vs Google 8.2). Good for a rough map of options.
 3. **Fallback — Serper** ($1/1000) — only if 1-2 are unavailable and the place
