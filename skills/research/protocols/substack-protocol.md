@@ -29,12 +29,12 @@ subtitle with the mark "(reconstructed)".
 **Otherwise — two paths in parallel:**
 
 Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt;
-when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md`
+when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md`
 first (native-term dictionary).
 
 1. Main — Brave `site:` (reliable, gives posts right away too):
 ```json
-mcp__plugin_jadlis-research_brave-search__brave_web_search({
+mcp__plugin_search_brave-search__brave_web_search({
   "query": "site:substack.com <keywords of the QUERY>",
   "count": 15, "extra_snippets": true
 })

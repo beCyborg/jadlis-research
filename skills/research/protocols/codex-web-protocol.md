@@ -49,7 +49,7 @@ This is exactly the point of the channel: to compare what a DIFFERENT search sta
 
 ## Protocol (2 calls IN ONE message — in parallel)
 
-Query language: whenever `languages` is not ru/en only, both `codex exec` prompts must explicitly ask Codex to search in the LANGUAGES from the orchestrator prompt (e.g. "search in Japanese and English") — Codex web search returns pages in the language of the query — and in that case Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` first (native-term dictionary).
+Query language: whenever `languages` is not ru/en only, both `codex exec` prompts must explicitly ask Codex to search in the LANGUAGES from the orchestrator prompt (e.g. "search in Japanese and English") — Codex web search returns pages in the language of the query — and in that case Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md` first (native-term dictionary).
 
 ### Call 1 — Broad overview (mandatory)
 
@@ -103,12 +103,12 @@ codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_
 
 - **Live-search gate:** the JSONL must contain ≥1 `web_search` event (`grep -c '"web_search'`); 0 → the voice does not count (`escalationSkipped: 'no-live-search'`) — Codex was answering from memory.
 - Codex confirms the exclusion → the claim is `CHALLENGED`/`OUTDATED` (dropped). Does not confirm → `DISPUTED` (a JS aggregate, not a verifier enum): credibility ≥4, a `### Спорные факты` section in the report, not included in the conclusions.
-- Degradations collapse into a single `escalationSkipped` enum: `no-binary` · `quota` · `timeout` · `invalid-output` · `no-live-search` · `budget` · `cap` → exclusion on a single voice as in schema v2 + a flag in the ledger/telemetry. There are no retries: the Codex quota is a shared pool with `/jadlis-research:verif`, and verif has priority.
+- Degradations collapse into a single `escalationSkipped` enum: `no-binary` · `quota` · `timeout` · `invalid-output` · `no-live-search` · `budget` · `cap` → exclusion on a single voice as in schema v2 + a flag in the ledger/telemetry. There are no retries: the Codex quota is a shared pool with `/verif`, and verif has priority.
 - Rules for Codex in the prompt: the absence of confirmation ≠ a refutation (that is UNCHECKED); a discrepancy in numbers that is purely a matter of notation/rounding ±2% is not a refutation; confirm an exclusion ONLY on the basis of a source that directly contradicts or supersedes the claim.
 
 ## The quota pool has a third consumer: the Responses-API replacement (since 2026-09-04)
 
-The ChatGPT-subscription quota is one finite pool for the codexweb channel (automatic, ~2 calls per run), the Codex verifier of `/jadlis-research:verif` (on request) and — since 2026-09-04 — every script that used to call the OpenAI Responses API. `OPENAI_API_KEY` returned 12 answers (`gpt-5.5-2026-04-23` + `web_search`, ≈31K tokens and 40 s per call) and then hit **`HTTP 429: You have no credits remaining`**; the API balance is ≈0 and `GET /v1/organization/costs` is not available to that key (no `api.usage.read` scope). Only the owner can top the balance up (platform.openai.com → Billing).
+The ChatGPT-subscription quota is one finite pool for the codexweb channel (automatic, ~2 calls per run), the Codex verifier of `/verif` (on request) and — since 2026-09-04 — every script that used to call the OpenAI Responses API. `OPENAI_API_KEY` returned 12 answers (`gpt-5.5-2026-04-23` + `web_search`, ≈31K tokens and 40 s per call) and then hit **`HTTP 429: You have no credits remaining`**; the API balance is ≈0 and `GET /v1/organization/costs` is not available to that key (no `api.usage.read` scope). Only the owner can top the balance up (platform.openai.com → Billing).
 
 Replacement, same OpenAI web_search backend (Bing index + OAI-SearchBot), ≈30–80 s per question, `agent_message.text` = JSON matching the schema:
 
@@ -116,4 +116,4 @@ Replacement, same OpenAI web_search backend (Bing index + OAI-SearchBot), ≈30�
 codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c 'tools.web_search={mode="live"}' --json --output-schema schema.json '<PROMPT>' < /dev/null
 ```
 
-`web_search` events show the queries (but not the list of opened sources — only the cited ones). Priority inside the pool: `/jadlis-research:verif` > codexweb > everything else. Before a mass run make one probe API call (the 429 arrives immediately) and one `codex exec ... 'ok' < /dev/null` probe; a usage-limit answer means the channel goes off. Any script built on the Responses API must ship with a `codex exec` fallback.
+`web_search` events show the queries (but not the list of opened sources — only the cited ones). Priority inside the pool: `/verif` > codexweb > everything else. Before a mass run make one probe API call (the 429 arrives immediately) and one `codex exec ... 'ok' < /dev/null` probe; a usage-limit answer means the channel goes off. Any script built on the Responses API must ship with a `codex exec` fallback.

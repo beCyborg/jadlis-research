@@ -8,23 +8,23 @@ decision), no Deaddrop (paid). Only public web previews and search dorks.
 
 | Tool | Purpose |
 |---|---|
-| `mcp__plugin_jadlis-research_brave-search__brave_web_search` with `site:t.me` | Discovery of channels and posts — the main one |
+| `mcp__plugin_search_brave-search__brave_web_search` with `site:t.me` | Discovery of channels and posts — the main one |
 | Yandex (`yandex-search.sh`, if the yandex channel is selected for the run) | RU dorks `site:t.me` — the Runet index goes deeper |
 | `{PLUGIN_ROOT}/scripts/tg-preview.sh <handle>` | Reading a public channel: the last ~20 posts in FULL text, pagination `--before <msg_id>` |
-| `{PLUGIN_ROOT}/skills/full-research/references/telegram-seed-handles.md` | 44 AI / vibe-coding channels (vc.ru/3060557) — seeds for AI topics |
+| `{PLUGIN_ROOT}/skills/research/references/telegram-seed-handles.md` | 44 AI / vibe-coding channels (vc.ru/3060557) — seeds for AI topics |
 
 ## Protocol
 
 ### Layer 0 — Discovery (2-3 calls)
 
-Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt; when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` first (native-term dictionary).
+Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt; when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md` first (native-term dictionary).
 
 1. Dorks over posts and channels:
 ```json
 brave_web_search({ "query": "site:t.me <ТЕМА по-русски>", "count": 15, "extra_snippets": true })
 ```
 2. Channel roundups: `подборка telegram каналов <тема>` (vc.ru / habr — donors of handles).
-3. AI topics → take the relevant ones straight from `{PLUGIN_ROOT}/skills/full-research/references/telegram-seed-handles.md`.
+3. AI topics → take the relevant ones straight from `{PLUGIN_ROOT}/skills/research/references/telegram-seed-handles.md`.
 
 Parse handles out of the URLs: `t.me/<handle>` and `t.me/s/<handle>`; `t.me/+...` are
 private invite links, they are NOT readable, discard them.

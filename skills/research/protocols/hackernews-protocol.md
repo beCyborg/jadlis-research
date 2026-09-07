@@ -38,7 +38,7 @@ you can work, but fresh threads may not have reached the index yet (mark it in t
 
 Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator
 prompt; when `languages` contains anything beyond ru/en, Read
-`{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` first (native-term dictionary).
+`{PLUGIN_ROOT}/skills/research/references/language-layers.md` first (native-term dictionary).
 
 1. By stories — the base phrasing, fresh slice:
 ```bash

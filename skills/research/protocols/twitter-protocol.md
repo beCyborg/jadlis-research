@@ -76,7 +76,7 @@ url:example.com                                ← by link
 
 `mode=Latest` — chronology (research/dynamics); `mode=Top` — popular.
 
-Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt; when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/full-research/references/language-layers.md` first (native-term dictionary).
+Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt; when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md` first (native-term dictionary).
 
 > Verified 2026-08-06:
 > - **`url:<domain>` works cleanly** — `query="<topic> url:github.com"` returned 10/10 posts with
