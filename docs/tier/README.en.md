@@ -22,19 +22,14 @@ The problem this solves: half an hour of searching gives you the same thing in s
 
 Read the pipeline: collection by channels first, then a separate verification phase, and only then synthesis.
 
-```mermaid
-flowchart TD
-  A["Recon + interview<br/>mandatory question: which decision will you make"] --> B["Channels in parallel<br/>7 of 14 by default: web x3, Reddit, X, HN, Substack"]
-  B --> C{"Sufficiency gate<br/>2+ channels and 2+ source families answered"}
-  C -- no --> X["insufficient-sources<br/>nothing is written to the vault"]
-  C -- yes --> D["Curator: up to 16 claims<br/>with evidence prefixes"]
-  D --> E["urlhealth + snapshot gate<br/>MEDIUM ceiling on a weak citation"]
-  E --> F["2 verifiers per claim<br/>refutation lens + another source type"]
-  F -- votes split --> G["3rd vote: Codex<br/>no more than 8 escalations per run"]
-  F -- agreement --> H["Synthesis: survivors only<br/>dropped = one line with the reason"]
-  G --> H
-  H --> I["Note in Знания/Ресерчи/<br/>verified: false until you read it"]
-```
+1. **Recon + interview** — mandatory question: which decision will you make.
+2. **Channels in parallel** — 7 of 14 by default: web ×3, Reddit, X, HN, Substack.
+3. **Sufficiency gate** — 2+ channels and 2+ source families answered. No → `insufficient-sources`, nothing is written to the vault.
+4. **Curator** — up to 16 claims with evidence prefixes.
+5. **urlhealth + snapshot gate** — MEDIUM ceiling on a weak citation.
+6. **Two verifiers per claim** — refutation lens + another source type. Votes split → third vote by Codex (no more than 8 escalations per run).
+7. **Synthesis** — survivors only; dropped = one line with the reason.
+8. **Note in `Знания/Ресерчи/`** — `verified: false` until you read it.
 
 ![Two magnifiers over one card: through one it is intact, through the other it is cracked](https://github.com/beCyborg/jadlis-hub/blob/main/docs/img/05-full-research-01.webp?raw=1)
 
