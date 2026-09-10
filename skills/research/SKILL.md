@@ -10,7 +10,7 @@ allowed-tools:
   - EnterPlanMode
   - ExitPlanMode
   - Workflow
-  - mcp__plugin_search_brave-search__brave_web_search
+  - mcp__plugin_jadlis-search_brave-search__brave_web_search
 argument-hint: "<query — research topic>"
 model: claude-opus-5
 effort: high
@@ -105,7 +105,7 @@ turn only — do not rely on it beyond the first turn.
    matrix — by telemetry (local `full-research-telemetry.py --trends`, `--channels`), not by judgement.
 
    **Gate `yandex`.** The channel needs the key `YC_SEARCH_API_KEY` (env, or the macOS Keychain via `scripts/secret.sh`)
-   (written by the skill `/search:keys` into the Keychain; the plugin userConfig is no
+   (written by the skill `/jadlis-search:keys` into the Keychain; the plugin userConfig is no
    good here — sensitive values do not reach Bash). Key not configured → do not offer `yandex` at all. If there is no key
    but the channel was still chosen: `yandex-search.sh` returns `exit 2`, the channel degrades
    (`sourceQuality=LOW`, empty citations) and the workflow does NOT fail. Paid: ≈0.1-0.15 ₽/topic.
@@ -114,7 +114,7 @@ turn only — do not rely on it beyond the first turn.
    SERP entries appeared in no other engine).
 
    **Gate `youtube`.** With the key `YOUTUBE_API_KEY` (plugin userConfig) the channel uses the
-   MCP `mcp__plugin_search_youtube__*` for search and metadata. Without the key — **skip**
+   MCP `mcp__plugin_jadlis-search_youtube__*` for search and metadata. Without the key — **skip**
    the MCP calls, the channel works through Brave `site:youtube.com` + transcripts
    (`scripts/yt-transcript.py`), a normal degradation.
 
@@ -156,7 +156,7 @@ turn only — do not rely on it beyond the first turn.
    `web, codexweb, reddit, hackernews, substack` = 4 families out of 5 remain, the sufficiency
    gate passes (real run 03.09: channels 5/7, families 4/5, status ok).
 
-3. **Recon.** Make 1-2 calls of `mcp__plugin_search_brave-search__brave_web_search`
+3. **Recon.** Make 1-2 calls of `mcp__plugin_jadlis-search_brave-search__brave_web_search`
    (Search tier: 50 req/s, parallel OK; `count: 5`): a broad overview of the topic + optionally one
    clarifying aspect. The goal is orientation (aspects, sub-topics, controversies), not data
    collection. Read-only — plan mode allows it.

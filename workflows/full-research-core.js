@@ -35,7 +35,7 @@ const CODEX_LABEL = A.codexModel ? `Codex/${A.codexModel}` : 'Codex/GPT-6 Astra'
 // Worker: Opus 5 pinned with effort high through the researcher-opus subagent.
 // The agent registry is cached at session start — if the subagent was created in the current
 // session, the orchestrator may pass workerOpts: { model: 'opus' } as a fallback.
-const WORKER_OPTS = A.workerOpts || { agentType: 'research:researcher-opus' }
+const WORKER_OPTS = A.workerOpts || { agentType: 'jadlis-research:researcher-opus' }
 const w = extra => Object.assign({}, WORKER_OPTS, extra)
 // Orchestrator roles (curator, analyst — heavy logic: claim selection, synthesis).
 // curator ALWAYS goes through orchestrator-opus (Opus 5) — structural claim extraction is
@@ -46,11 +46,11 @@ const w = extra => Object.assign({}, WORKER_OPTS, extra)
 // effort high and the tool allow-list (Read, Write, Glob) — agent() has no allowedTools option.
 // The argument name stays `fableBridge`: one vocabulary across all eight workflows.
 const FABLE_SYNTH = A.fableBridge !== false
-const SYNTH_AGENT = FABLE_SYNTH ? 'research:synth-fable' : 'research:synth-opus'
+const SYNTH_AGENT = FABLE_SYNTH ? 'jadlis-research:synth-fable' : 'jadlis-research:synth-opus'
 // ai_model of the report: printed from what actually ran, not from what the caller guessed.
 const AI_MODEL = FABLE_SYNTH ? 'claude-fable-5-1' : 'claude-opus-5'
 const AI_MODEL_RETRY = 'claude-opus-5'
-const ORCH_OPTS = A.orchOpts || { agentType: 'research:orchestrator-opus' }
+const ORCH_OPTS = A.orchOpts || { agentType: 'jadlis-research:orchestrator-opus' }
 const o = extra => Object.assign({}, ORCH_OPTS, extra)
 
 // ── Language slot (Plan 2, tranche 2). languages[] = languages the channels must search in;
@@ -362,9 +362,9 @@ IN>>>`
 
 // ── Verifier prompt (per claim; two different lenses: refutation via Brave and a cross-type
 //    check through a counter-channel of ANOTHER source family) ──
-const BRAVE_TOOLS = 'mcp__plugin_search_brave-search__brave_web_search,mcp__plugin_search_brave-search__brave_llm_context'
+const BRAVE_TOOLS = 'mcp__plugin_jadlis-search_brave-search__brave_web_search,mcp__plugin_jadlis-search_brave-search__brave_llm_context'
 const HN_CMD = `\`${PLUGIN_ROOT}/scripts/hn-fetch.sh search "<query>" --tags story --limit 10\` and/or \`--tags comment\` (full comment texts right in the output; exit 3 = HN search unavailable → take Reddit)`
-const REDDIT_CMD = `ToolSearch "select:mcp__plugin_search_reddit__execute_operation" → execute_operation(operation_id="discover_subreddits", parameters={query,limit:5,min_confidence:0.4}) → execute_operation(operation_id="search_subreddit", parameters={subreddit_name,query,sort:"relevance",time_filter:"all"}) — do NOT call discover_operations/get_operation_schema`
+const REDDIT_CMD = `ToolSearch "select:mcp__plugin_jadlis-search_reddit__execute_operation" → execute_operation(operation_id="discover_subreddits", parameters={query,limit:5,min_confidence:0.4}) → execute_operation(operation_id="search_subreddit", parameters={subreddit_name,query,sort:"relevance",time_filter:"all"}) — do NOT call discover_operations/get_operation_schema`
 
 function evidenceBlock(claim) {
   const ev = claim.evidence || []
@@ -847,7 +847,7 @@ let synthFellBack = false
 if (!report && FABLE_SYNTH) {
   log('analyst (Fable) вернул null — одна попытка на Opus 5.')
   report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL_RETRY),
-    synthOpts('analyst→opus-retry', 'research:synth-opus'))
+    synthOpts('analyst→opus-retry', 'jadlis-research:synth-opus'))
   synthFellBack = true
 }
 if (!report) {

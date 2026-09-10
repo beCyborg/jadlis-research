@@ -1,9 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
-  "name": "research",
-  "version": "1.0.0",
+  "name": "jadlis-research",
+  "version": "2.0.0",
   "displayName": "Jadlis — полный ресерч темы",
-  "description": "Четырнадцать каналов (web×3, reddit, twitter, hackernews, substack, yandex, youtube, telegram, языковые слои ja/zh/ko/eu) через workflow, ключевые утверждения проверяются перекрёстно, непроверенные помечены. Требует плагин search (ключи Brave и Firecrawl).",
+  "description": "Четырнадцать каналов (web×3, reddit, twitter, hackernews, substack, yandex, youtube, telegram, языковые слои ja/zh/ko/eu) через workflow, ключевые утверждения проверяются перекрёстно, непроверенные помечены. Требует плагин jadlis-search (ключи Brave и Firecrawl).",
   "author": {
     "name": "Be Cyborg"
   },
@@ -18,8 +18,8 @@
   ],
   "dependencies": [
     {
-      "name": "search",
-      "version": "^1"
+      "name": "jadlis-search",
+      "version": "^2"
     }
   ],
   "userConfig": {

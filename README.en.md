@@ -7,13 +7,13 @@ quote has a snapshot of its page underneath, and the report sits as a file in yo
 chat.
 
 ```
-claude plugin marketplace add https://github.com/beCyborg/jadlis-start.git
-claude plugin install search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
-claude plugin install research@jadlis
+claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+claude plugin install jadlis-search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
+claude plugin install jadlis-research@jadlis
 ```
 
-The keys are set up once, here: `search` goes in first and straight away with its keys. Install
-`research` first and `search` comes along in tow, never asks you for keys, and the first run stalls
+The keys are set up once, here: `jadlis-search` goes in first and straight away with its keys.
+Install `jadlis-research` first and `jadlis-search` comes along in tow, never asks you for keys, and the first run stalls
 before it starts.
 
 ![A report with a claim ledger: every claim has its source, and some lines are marked UNCHECKED](docs/img/hero-jadlis-research.webp)
@@ -104,15 +104,15 @@ conclusion but where it came from.
 **a) Text to paste to an agent.** Copy the whole thing into a Claude Code chat:
 
 ```
-You are the installer. Install the plugin research from the jadlis marketplace on this Mac.
+You are the installer. Install the plugin jadlis-research from the jadlis marketplace on this Mac.
 First check that Claude Code is installed and the subscription is active; if not, stop and say so.
 Then run exactly these commands, verbatim, shortening nothing:
-1. claude plugin marketplace add https://github.com/beCyborg/jadlis-start.git
-2. claude plugin install search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
+1. claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+2. claude plugin install jadlis-search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
    I will paste the Brave and Firecrawl keys into the command myself. Never print key values back.
-3. claude plugin install research@jadlis
-4. claude plugin list — show me the lines about search and research with their versions.
-Do not change the order: search goes in first and with its keys. If research pulls it in itself,
+3. claude plugin install jadlis-research@jadlis
+4. claude plugin list — show me the lines about jadlis-search and jadlis-research with their versions.
+Do not change the order: jadlis-search goes in first and with its keys. If jadlis-research pulls it in itself,
 it will not ask for keys, and the first run will stall.
 Before each command show it to me in full and wait for "yes". If I say "no", do not run it.
 If a command returns an error, stop, show me the output, and do not move to the next one.
@@ -121,15 +121,15 @@ If a command returns an error, stop, show me the output, and do not move to the 
 **b) Commands by hand.**
 
 ```
-claude plugin marketplace add https://github.com/beCyborg/jadlis-start.git
-claude plugin install search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
-claude plugin install research@jadlis
+claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+claude plugin install jadlis-search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
+claude plugin install jadlis-research@jadlis
 claude plugin list
 ```
 
-The first command installs nothing — it adds the marketplace. If `search` is already installed
+The first command installs nothing — it adds the marketplace. If `jadlis-search` is already installed
 without keys, remove it and install it again with the `--config` line:
-`claude plugin uninstall search@jadlis --keep-data`.
+`claude plugin uninstall jadlis-search@jadlis --keep-data`.
 
 **c) The short command.** Open Claude Code in the folder you work in and type:
 
@@ -149,7 +149,7 @@ mean "wrong" — it means "not confirmed by cross-checking, re-read it yourself"
 not start.
 
 **What you need.** A Claude Code subscription. The paid Brave and Firecrawl keys — they are set up
-together with the `search` plugin, and without them a run does not go. Brave and Firecrawl are the
+together with the `jadlis-search` plugin, and without them a run does not go. Brave and Firecrawl are the
 ones who bill you, so check their pricing with them: I name no figures of my own. The report is put
 into the notes folder you specify at install time — that is `VAULT_PATH`, `~/Jadlis` by default.
 
@@ -171,12 +171,12 @@ first command you keep the version you installed.
 
 ```
 claude plugin marketplace update jadlis
-claude plugin update research@jadlis
+claude plugin update jadlis-research@jadlis
 claude plugin list
 ```
 
 Reinstall, if something ended up crooked:
 
 ```
-claude plugin uninstall research@jadlis --keep-data && claude plugin install research@jadlis
+claude plugin uninstall jadlis-research@jadlis --keep-data && claude plugin install jadlis-research@jadlis
 ```

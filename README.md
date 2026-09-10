@@ -6,13 +6,13 @@
 под каждой цитатой снимок страницы, а отчёт лежит файлом в твоих заметках, а не в переписке.
 
 ```
-claude plugin marketplace add https://github.com/beCyborg/jadlis-start.git
-claude plugin install search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
-claude plugin install research@jadlis
+claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+claude plugin install jadlis-search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
+claude plugin install jadlis-research@jadlis
 ```
 
-Ключи заводятся один раз, здесь: `search` ставится первым и сразу с ключами. Поставишь `research`
-первым — `search` приедет прицепом, ключей у тебя не спросит, и первый прогон встанет на пустом
+Ключи заводятся один раз, здесь: `jadlis-search` ставится первым и сразу с ключами. Поставишь
+`jadlis-research` первым — `jadlis-search` приедет прицепом, ключей у тебя не спросит, и первый прогон встанет на пустом
 месте.
 
 ![Отчёт с леджером утверждений: у каждого источник, часть строк помечена UNCHECKED](docs/img/hero-jadlis-research.webp)
@@ -101,15 +101,15 @@ claude plugin install research@jadlis
 **а) Текст для вставки агенту.** Скопируй целиком в чат Claude Code:
 
 ```
-Ты — установщик. Поставь на этот Mac плагин research из маркетплейса jadlis.
+Ты — установщик. Поставь на этот Mac плагин jadlis-research из маркетплейса jadlis.
 Сначала проверь, что стоит Claude Code и подписка активна; если нет — остановись и скажи об этом.
 Дальше выполни ровно эти команды, дословно, ничего не сокращая:
-1. claude plugin marketplace add https://github.com/beCyborg/jadlis-start.git
-2. claude plugin install search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
+1. claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+2. claude plugin install jadlis-search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
    Ключи Brave и Firecrawl я вставлю в команду сам. Значения ключей в ответ не печатай.
-3. claude plugin install research@jadlis
-4. claude plugin list — покажи мне строки про search и research с версиями.
-Порядок не меняй: search ставится первым и с ключами. Если research подтянет его сам,
+3. claude plugin install jadlis-research@jadlis
+4. claude plugin list — покажи мне строки про jadlis-search и jadlis-research с версиями.
+Порядок не меняй: jadlis-search ставится первым и с ключами. Если jadlis-research подтянет его сам,
 ключи он не спросит, и первый прогон встанет.
 Перед каждой командой покажи её мне целиком и дождись «да». Сказал «нет» — не выполняй.
 Команда вернула ошибку — остановись, покажи вывод, к следующей не переходи.
@@ -118,14 +118,14 @@ claude plugin install research@jadlis
 **б) Команды руками.**
 
 ```
-claude plugin marketplace add https://github.com/beCyborg/jadlis-start.git
-claude plugin install search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
-claude plugin install research@jadlis
+claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+claude plugin install jadlis-search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
+claude plugin install jadlis-research@jadlis
 claude plugin list
 ```
 
-Первая команда ничего не ставит — она добавляет маркетплейс. Если `search` уже стоит без ключей,
-сними и поставь заново со строкой `--config`: `claude plugin uninstall search@jadlis --keep-data`.
+Первая команда ничего не ставит — она добавляет маркетплейс. Если `jadlis-search` уже стоит без ключей,
+сними и поставь заново со строкой `--config`: `claude plugin uninstall jadlis-search@jadlis --keep-data`.
 
 **в) Короткая команда.** Открой Claude Code в папке, где работаешь, и набери:
 
@@ -144,7 +144,7 @@ claude plugin list
 перечитай сам». Без ключей не запускается.
 
 **Что нужно.** Подписка Claude Code. Платные ключи Brave и Firecrawl — они заводятся вместе с
-плагином `search`, и без них прогон не идёт. Счета выставляют Brave и Firecrawl, тарифы смотри у
+плагином `jadlis-search`, и без них прогон не идёт. Счета выставляют Brave и Firecrawl, тарифы смотри у
 них: своих цифр я не называю. Отчёт кладётся в папку заметок, которую ты указываешь при установке
 — это `VAULT_PATH`, по умолчанию `~/Jadlis`.
 
@@ -166,12 +166,12 @@ claude plugin list
 
 ```
 claude plugin marketplace update jadlis
-claude plugin update research@jadlis
+claude plugin update jadlis-research@jadlis
 claude plugin list
 ```
 
 Переустановка, если что-то встало криво:
 
 ```
-claude plugin uninstall research@jadlis --keep-data && claude plugin install research@jadlis
+claude plugin uninstall jadlis-research@jadlis --keep-data && claude plugin install jadlis-research@jadlis
 ```

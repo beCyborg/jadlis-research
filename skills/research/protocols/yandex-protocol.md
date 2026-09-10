@@ -92,7 +92,7 @@ if Layer 2 already gave counter-arguments, this call can be skipped.
 - Take the nature of the unique layer into account: dzen.ru and corporate blogs are more often C-E (content marketing),
   business media (incrussia.ru, secrets.tbank.ru) — B-C. Do not pass SEO listicles off as expertise.
 - Passages from `--out json` are enough for most citations; the full page text — only
-  when necessary, via `mcp__plugin_search_firecrawl__firecrawl_scrape` (1 req/s), NOT via Yandex.
+  when necessary, via `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape` (1 req/s), NOT via Yandex.
 
 ## Degradation (NO fallback to Brave)
 

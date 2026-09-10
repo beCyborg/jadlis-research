@@ -8,7 +8,7 @@ decision), no Deaddrop (paid). Only public web previews and search dorks.
 
 | Tool | Purpose |
 |---|---|
-| `mcp__plugin_search_brave-search__brave_web_search` with `site:t.me` | Discovery of channels and posts — the main one |
+| `mcp__plugin_jadlis-search_brave-search__brave_web_search` with `site:t.me` | Discovery of channels and posts — the main one |
 | Yandex (`yandex-search.sh`, if the yandex channel is selected for the run) | RU dorks `site:t.me` — the Runet index goes deeper |
 | `{PLUGIN_ROOT}/scripts/tg-preview.sh <handle>` | Reading a public channel: the last ~20 posts in FULL text, pagination `--before <msg_id>` |
 | `{PLUGIN_ROOT}/skills/research/references/telegram-seed-handles.md` | 44 AI / vibe-coding channels (vc.ru/3060557) — seeds for AI topics |
