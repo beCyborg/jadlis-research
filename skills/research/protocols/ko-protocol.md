@@ -11,7 +11,7 @@ Naver (Client ID needs 휴대폰 인증 by the owner) is not connected until reg
 | `python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source velog <user>` | Velog per-user RSS (`v2.velog.io/rss/@user`), full post bodies |
 | `python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source tistory <blog>` | tistory blog RSS (`<blog>.tistory.com/rss`), full or excerpt depending on the blog setting |
 | `python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source disquiet <query>` | Disquiet is a SEARCH TARGET only (no feed, ClaudeBot rule): the script returns the Brave query (exit 3) |
-| `mcp__plugin_search_brave-search__brave_web_search` | discovery in Korean: `site:tistory.com 1인 개발자 수익`, `site:velog.io …`, `site:disquiet.io …` |
+| `mcp__plugin_jadlis-search_brave-search__brave_web_search` | discovery in Korean: `site:tistory.com 1인 개발자 수익`, `site:velog.io …`, `site:disquiet.io …` |
 | Extraction ladder (web-protocol.md, Layer 3) | tistory/velog pages: `defuddle parse "<url>" --md`; Disquiet: quote the search excerpt only |
 
 **MANDATORY first step:** Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md` —

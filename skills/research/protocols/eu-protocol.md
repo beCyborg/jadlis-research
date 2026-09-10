@@ -14,7 +14,7 @@ silent 403; Wykop — after the owner registers at dev.wykop.pl (`WYKOP_API_KEY`
 | `python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source wykop <query>` | needs `WYKOP_API_KEY`; without it returns the Brave query (exit 3) |
 | `python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source stackexchange <site>::<query>` | cross layer: Stack Exchange API v2.3 keyless (300/day, honours `backoff`, ≤30 req/s) |
 | `python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source mastodon <instance>::<tag>` | cross layer: Mastodon public tag timelines (instead of Bluesky) |
-| `mcp__plugin_search_brave-search__brave_web_search` | discovery in the platform language: `site:dou.ua <uk query>`, `site:wykop.pl <pl query>`, `site:golem.de <de query>`, `site:xataka.com <es query>` |
+| `mcp__plugin_jadlis-search_brave-search__brave_web_search` | discovery in the platform language: `site:dou.ua <uk query>`, `site:wykop.pl <pl query>`, `site:golem.de <de query>`, `site:xataka.com <es query>` |
 
 **MANDATORY first step:** Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md`
 (dictionary for uk/de/es/pl + the ClaudeBot rule). Seed = the matching entries of the QUERIES block.

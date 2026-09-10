@@ -6,12 +6,12 @@
 
 ## MCP-инструменты
 
-Namespace: `mcp__plugin_search_reddit__*`
+Namespace: `mcp__plugin_jadlis-search_reddit__*`
 
 Все операции выполняются через 3 инструмента:
-- `mcp__plugin_search_reddit__discover_operations` — список операций
-- `mcp__plugin_search_reddit__get_operation_schema` — схема параметров
-- `mcp__plugin_search_reddit__execute_operation` — выполнение
+- `mcp__plugin_jadlis-search_reddit__discover_operations` — список операций
+- `mcp__plugin_jadlis-search_reddit__get_operation_schema` — схема параметров
+- `mcp__plugin_jadlis-search_reddit__execute_operation` — выполнение
 
 **КРИТИЧНО:** `parameters` в `execute_operation` — ВСЕГДА native JSON object, НЕ строка.
 
@@ -29,7 +29,7 @@ Namespace: `mcp__plugin_search_reddit__*`
 
 ### Layer 1 — Discover (2 вызова: лексический + семантический)
 
-**Шаг 1 (первым, всегда): `mcp__plugin_search_reddit-alt__reddit_search_communities`** (`q`, `limit: 10`) —
+**Шаг 1 (первым, всегда): `mcp__plugin_jadlis-search_reddit-alt__reddit_search_communities`** (`q`, `limit: 10`) —
 лексический поиск официального листинга. Находит точные имена, к которым слеп семантический
 индекс primary (r/mcp первым результатом — замер 3×3 2026-08-15; вердикт совета 2026-08-15:
 reddit-alt = первая линия discovery, свой OAuth-клиент/заявка НЕ нужны, пока reddit-alt жив).
@@ -183,7 +183,7 @@ execute_operation({
 ## Резервный Reddit-MCP — `reddit-alt` (redditapis-mcp, ступень 1.5)
 
 Второй MCP, независимый бэкенд (api.redditapis.com, live-данные, полные метрики).
-Namespace: `mcp__plugin_search_reddit-alt__*` — 32 плоских тула (без execute_operation-обёртки).
+Namespace: `mcp__plugin_jadlis-search_reddit-alt__*` — 32 плоских тула (без execute_operation-обёртки).
 Платный: ~$0.002/read с прикреплённого ключа (в env конфига), т.е. полный протокол ≈ $0.05.
 `reddit_deep_comment_search` — «premium call» с недокументированной ценой, по умолчанию не звать.
 
@@ -242,7 +242,7 @@ CLI-обёртка с троттлингом: `python3 {PLUGIN_ROOT}/scripts/red
 
 ## Фоллбэк (Brave, если и бэкенды недоступны)
 
-При сбое Reddit MCP и бэкендов — `mcp__plugin_search_brave-search__brave_web_search`:
+При сбое Reddit MCP и бэкендов — `mcp__plugin_jadlis-search_brave-search__brave_web_search`:
 ```json
 { "query": "site:reddit.com <ЗАПРОС>", "count": 10, "result_filter": ["web", "discussions"] }
 ```

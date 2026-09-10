@@ -34,7 +34,7 @@ first (native-term dictionary).
 
 1. Main — Brave `site:` (reliable, gives posts right away too):
 ```json
-mcp__plugin_search_brave-search__brave_web_search({
+mcp__plugin_jadlis-search_brave-search__brave_web_search({
   "query": "site:substack.com <keywords of the QUERY>",
   "count": 15, "extra_snippets": true
 })

@@ -9,7 +9,7 @@ source family `ja` — its agreement with the web engines counts as independent 
 | Tool | Purpose |
 |---|---|
 | `python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source <name> <arg>` | one shared fetcher: `qiita <query>` (API v2, 60 req/h per IP — one anchor query), `hatena <query>` (Bookmark search RSS, follows the 301, paginate with `--page N` only), `zenn <topic>` (topic feed), `note <user>` (per-author RSS) |
-| `mcp__plugin_search_brave-search__brave_web_search` | discovery in Japanese: `site:qiita.com 個人開発 収益`, `site:note.com …`, `site:zenn.dev …` — Brave returns Japanese pages only for a Japanese query |
+| `mcp__plugin_jadlis-search_brave-search__brave_web_search` | discovery in Japanese: `site:qiita.com 個人開発 収益`, `site:note.com …`, `site:zenn.dev …` — Brave returns Japanese pages only for a Japanese query |
 | Extraction ladder (web-protocol.md, Layer 3) | full text for HIGH citations: `defuddle parse <url> --md` first (Qiita/Zenn/note allow it), then `r.jina.ai`, then Exa `--full` |
 
 **MANDATORY first step:** Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md` —
