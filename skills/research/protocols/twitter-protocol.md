@@ -1,5 +1,23 @@
 # Twitter/X — search protocol for the agent
 
+## Mode selection (read first)
+
+The orchestrator prompt may carry a `CHANNEL NOTE` block taken from the user's source settings
+(`/jadlis-research:research-settings`). Read it before anything else — it decides which half of this
+protocol applies.
+
+- **The note says `GROK DISABLED` or `GROK DOWN`** → skip everything from "Tool: headless Grok CLI
+  (via Bash)" down to and including "Degradation of the Grok CLI calls", and go straight to
+  "TwitterAPI.io layer" → **Mode B**. In that case never call `~/.grok/bin/grok`, never load
+  `mcp__grok-mcp__*` and never load `mcp__twitterapi-mcp__*` — not for search, not for a thread,
+  not as a retry. The whole channel runs on `twitterapi.sh` (REST), with Brave `site:x.com` as the
+  second fallback.
+- **No CHANNEL NOTE about Grok** → **Mode A**, the default: the Grok CLI sections below run first,
+  and the TwitterAPI.io layer complements them.
+
+A note that arrives mid-run (a Grok call failing at run time) has the same effect as `GROK DOWN`:
+finish in Mode B rather than retrying Grok beyond the one retry allowed below.
+
 ## Tool: headless Grok CLI (via Bash)
 
 Search on X/Twitter runs through the **headless Grok CLI**, launched from **Bash** (NOT MCP, NOT ToolSearch). The CLI is billed against the subscription (OIDC) → marginal cost ≈ $0.
@@ -180,7 +198,8 @@ launch may have hit a rate limit). If that one failed too:
 - citations/counterarguments empty; sourceQuality = LOW;
 - **do NOT switch** to MCP `x_search` or brave (MCP grok-mcp = xAI API, paid credits — forbidden
   by design); the ONLY permitted fallback is the keyword-only mode of the TwitterAPI.io layer
-  below, and only when its key resolves;
+  below, and only when its key resolves; after Mode B, Brave `site:x.com` is the only further
+  fallback;
 - **do NOT crash** the workflow — the other /full-research channels must finish.
 
 Failure causes for diagnostics: an expired OIDC token (needs `grok login`, visible as exit≠0) or a subscription rate limit. stderr warnings `Transport channel closed / AuthorizationRequired` at exit 0 are harmless (grok's internal MCP servers), the result is valid.
@@ -209,7 +228,7 @@ is down. Wrapper: `{PLUGIN_ROOT}/scripts/twitterapi.sh` (REST via curl, key from
   page ≈ 300 credits = $0.003; the 2026-09-06 smoke of 12/12 tools took ~25 calls = 4 458 credits ≈ $0.045,
   latency 1–6 s per call.
 
-### Mode A — complement (Grok probe = `GROK_OK`, the default)
+### Mode A — complement (no CHANNEL NOTE about Grok = Grok enabled, the default)
 
 After BOTH Grok calls are parsed, at most three calls, all in ONE message (parallel Bash):
 
@@ -228,15 +247,21 @@ Citations from this layer use the same `x` prefix and URL scheme (`https://x.com
 they are raw posts (not llm-mediated), so the per-citation snapshot gate treats them like any
 x.com URL.
 
-### Mode B — keyword-only fallback (Grok probe = `GROK_DOWN`)
+### Mode B — keyword-only (CHANNEL NOTE says GROK DISABLED / GROK DOWN, or both Grok calls failed at run time)
 
-The `twitter` channel stays in the run (SKILL.md keeps it when the key resolves). Budget ≤4 calls:
+The `twitter` channel stays in the run (the source resolve keeps the channel when `TWITTERAPI_IO_KEY` resolves). Budget ≤4 calls:
 
 1. `twitterapi.sh search '<keywords + operators> since:YYYY-MM-DD lang:xx' Latest`
 2. `twitterapi.sh search '<same or the semantic angle rephrased as keywords>' Top`
 3. `twitterapi.sh replies <id> Likes` on the top-engagement post from 1-2 (counterarguments).
 4. optional second page of 1 via `next_cursor` (`twitterapi.sh search '<q>' Latest <cursor>`)
    when the first page is on-topic and `has_next_page` is true.
+5. **Second fallback — Brave.** If `twitterapi.sh` exits ≠ 0, or a 429 persists after the `sleep 5`
+   spacing above, fall back to `mcp__plugin_jadlis-search_brave-search__brave_web_search` with
+   `site:x.com <topic keywords>` — 2 queries, `count: 15`. Snippets only: Brave returns no tweet
+   text beyond the SERP snippet, so annotate those citations MEDIUM at most and never claim
+   engagement numbers. Keep the same `x` prefix and the same URL scheme
+   (`https://x.com/<user>/status/<id>`). Never Firecrawl on x.com — the plugin hook denies it.
 
 Operators are the standard Twitter advanced-search set (`from:` `since:` `until:` `lang:`
 `min_faves:` `-filter:retweets` `url:`); one page = ~20 tweets. Native-language queries work

@@ -140,6 +140,22 @@ without keys, remove it and install it again with the `--config` line:
 If it is not found, check the name with `claude plugin list`. Make the first run a question you
 actually need answered: the run is heavy, and it is not kept in the background.
 
+## Source settings
+
+`/jadlis-research:research-settings` — a table of every source: the providers (Grok, Codex), the 14
+channels and the key-gated layers, each with its setting, access, when it was last checked and what is
+lost without it. The same table switches a source off for good.
+
+Two states. `auto` — access is checked before a run (key, binary, balance) and the result is cached.
+`off` — the source is not used and not probed: no call, not a second spent on a probe.
+
+Switch Grok off — the `grokweb` channel is no longer offered, and `twitter` runs keyword-only through
+TwitterAPI.io with Brave `site:x.com` as the fallback.
+
+The setting lives in `~/.claude/plugins/data/jadlis-research-jadlis/source-settings.json` (next to it
+`probe-cache.json` with the probe results) and survives a plugin update, but not removal without
+`--keep-data`. Keys are set up separately — with `/jadlis-search:keys`.
+
 ## Limits, cost, updating
 
 **What it does not do.** It does not decide for you: the report is grounds for a decision, not the

@@ -37,6 +37,12 @@ const channels = {
     citations: [
       { prefix: '[hn1]', url: 'https://news.ycombinator.com/item?id=1', relevance: 'HIGH', context: 'g', quotes: ['eta'], reliability: 'C', reliabilityWhy: 'user' },
     ] },
+  // not part of `base.channels` — only the source-settings checks select it
+  twitter: { source: 'Twitter/X', sourceQuality: 'MEDIUM', fileWritten: '/tmp/smoke/twitter.md', findings: [], counterarguments: [],
+    snapshots: [],
+    citations: [
+      { prefix: '[x1]', url: 'https://x.com/someone/status/2', relevance: 'MEDIUM', context: 'h', quotes: ['theta'], reliability: 'C', reliabilityWhy: 'user' },
+    ] },
 }
 const curator = { claims: [
   { id: 'c1', statement: 'alpha 1', channels: ['web', 'codexweb'], strength: 'STRONG', loadBearing: true, claimType: 'factual', evidencePrefixes: ['w1', 'cx1'] },
@@ -79,7 +85,8 @@ async function run(args) {
 
 let failures = 0
 const check = (cond, msg) => { if (!cond) { failures++; console.log('FAIL', msg) } else console.log('ok  ', msg) }
-const base = { refinedQuery: 'smoke', channels: Object.keys(channels), workDir: '/tmp/smoke', pluginRoot: '/tmp/plugin', date: '2026-09-06', aiModel: 'x', fableBridge: false }
+// twitter is deliberately NOT in the base set — it is selected only by the source-settings checks
+const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'hackernews'], workDir: '/tmp/smoke', pluginRoot: '/tmp/plugin', date: '2026-09-06', aiModel: 'x', fableBridge: false }
 
 {
   const { result: r, logs, prompts } = await run(base)
@@ -128,6 +135,29 @@ const base = { refinedQuery: 'smoke', channels: Object.keys(channels), workDir: 
   // insufficient-sources path keeps schema version
   const { result: r } = await run({ ...base, channels: ['web'] })
   check(r.status === 'ok' || r.ledgerSchemaVersion === 4, 'single-family run returns schema 4')
+}
+{
+  // source settings: a provider switched off drops its channels; a channel note reaches the prompt
+  const { result: r, calls, prompts } = await run({
+    ...base,
+    channels: [...base.channels, 'grokweb'],
+    providersOff: ['grok'],
+    channelNotes: { web: 'NOTE-X {PLUGIN_ROOT}/scripts/twitterapi.sh' },
+  })
+  check(!calls.includes('grokweb'), 'providersOff [grok] → the grokweb channel agent is never called')
+  check(!r.channelsSelected.includes('grokweb'), 'grokweb absent from channelsSelected')
+  check(r.sourceSettings && r.sourceSettings.providersOff[0] === 'grok', 'result.sourceSettings.providersOff = [grok]')
+  const wp = prompts['web'] || ''
+  check(wp.includes('CHANNEL NOTE'), 'channelNotes.web reaches the web channel prompt')
+  check(wp.includes('/tmp/plugin/scripts/twitterapi.sh') && !wp.includes('NOTE-X {PLUGIN_ROOT}'), '{PLUGIN_ROOT} in the note is substituted with pluginRoot')
+  check(!(prompts['codexweb'] || '').includes('CHANNEL NOTE'), 'a channel without a note gets no CHANNEL NOTE block')
+}
+{
+  // no channelNotes at all: the core supplies DEFAULT_GROK_OFF_NOTE for twitter from providersOff
+  const { prompts } = await run({ ...base, channels: ['web', 'twitter'], providersOff: ['grok'] })
+  const tp = prompts['twitter'] || ''
+  check(tp.includes('CHANNEL NOTE') && tp.includes('GROK DISABLED'), 'twitter without a note gets DEFAULT_GROK_OFF_NOTE from providersOff')
+  check(tp.includes('/tmp/plugin/scripts/twitterapi.sh') && !tp.includes('{PLUGIN_ROOT}/scripts/twitterapi.sh'), 'default note has {PLUGIN_ROOT} substituted too')
 }
 console.log(failures ? `\n${failures} FAILED` : '\nALL OK')
 process.exit(failures ? 1 : 0)

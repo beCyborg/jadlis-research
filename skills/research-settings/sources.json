@@ -1,0 +1,384 @@
+{
+  "version": 1,
+  "updated": "2026-09-14",
+  "comment": "Catalogue of research sources: model providers, 14 channels, key layers and binaries. Data only — probes, TTL and the resolve rules live in scripts/research-sources.py. Keys are English identifiers, human-facing strings are Russian.",
+  "probe_ids": [
+    "grok-402",
+    "codex-quota",
+    "twitterapi-balance"
+  ],
+  "providers": {
+    "grok": {
+      "label": "Grok CLI (подписка Grok Build)",
+      "kind": "subscription",
+      "binary": "~/.grok/bin/grok",
+      "probe": "grok-402",
+      "powers": [
+        "grokweb",
+        "twitter"
+      ],
+      "primary_channels": [
+        "grokweb"
+      ],
+      "how_to_get": "grok.com → тариф Grok Build (баланс пополняется отдельно от Claude), затем `grok login`; бинарник ставится в ~/.grok/bin/grok",
+      "degrade": "grokweb выпадает совсем; twitter переходит в Mode B keyword-only через TwitterAPI.io + Brave site:x.com (нужен TWITTERAPI_IO_KEY, иначе выпадает и он)",
+      "cost": "баланс подписки Grok Build; probe бесплатный"
+    },
+    "codex": {
+      "label": "Codex CLI (gpt-6-astra)",
+      "kind": "subscription",
+      "binary": "codex",
+      "probe": "codex-quota",
+      "powers": [
+        "codexweb"
+      ],
+      "primary_channels": [
+        "codexweb"
+      ],
+      "how_to_get": "подписка ChatGPT/Codex → `codex login`; квота общая с /jadlis-verif (verif имеет приоритет)",
+      "degrade": "codexweb выпадает; расхождения верификаторов не эскалируются в третий голос",
+      "cost": "квота подписки Codex (скользящее 5-часовое окно), probe ≈6 с"
+    }
+  },
+  "channels": {
+    "web": {
+      "label": "Веб (Brave Search + Firecrawl)",
+      "family": "web",
+      "default_set": true,
+      "provider": null,
+      "requires": [
+        {
+          "key": "BRAVE_API_KEY",
+          "class": "A",
+          "drop_without_key": true
+        },
+        {
+          "key": "FIRECRAWL_API_KEY",
+          "class": "A",
+          "drop_without_key": false
+        }
+      ],
+      "optional_keys": [],
+      "tools": [
+        "jq",
+        "pdftotext"
+      ],
+      "degrade": "без BRAVE_API_KEY канал выпадает и ресерч считается недостаточным: Brave нужен и верификаторам; без FIRECRAWL_API_KEY остаётся лестница defuddle → r.jina.ai",
+      "cost": "Brave — по тарифу Search; Firecrawl — по кредитам аккаунта"
+    },
+    "codexweb": {
+      "label": "Веб через Codex",
+      "family": "web",
+      "default_set": true,
+      "provider": "codex",
+      "requires": [],
+      "optional_keys": [],
+      "tools": [],
+      "degrade": "выпадает; веб остаётся на Brave (+ Grok, если он жив), третьего голоса в эскалации нет",
+      "cost": "квота подписки Codex"
+    },
+    "grokweb": {
+      "label": "Веб через Grok CLI",
+      "family": "web",
+      "default_set": true,
+      "provider": "grok",
+      "requires": [],
+      "optional_keys": [],
+      "tools": [],
+      "degrade": "выпадает; веб остаётся на Brave и Codex",
+      "cost": "баланс подписки Grok Build"
+    },
+    "reddit": {
+      "label": "Reddit",
+      "family": "reddit",
+      "default_set": true,
+      "provider": null,
+      "requires": [],
+      "optional_keys": [
+        "REDDITAPIS_KEY"
+      ],
+      "tools": [],
+      "degrade": "без REDDITAPIS_KEY остаётся только штатный Reddit MCP: нет резервной рельсы на случай его отказа и нет поиска по комментариям",
+      "cost": "REDDITAPIS_KEY ≈ $0.002 за вызов; штатный MCP бесплатный"
+    },
+    "twitter": {
+      "label": "Twitter/X",
+      "family": "twitter",
+      "default_set": true,
+      "provider": "grok",
+      "keep_without_provider": "if TWITTERAPI_IO_KEY",
+      "alternatives": [
+        {
+          "id": "twitterapi",
+          "key": "TWITTERAPI_IO_KEY",
+          "probe": "twitterapi-balance",
+          "mode": "B",
+          "tool": "{PLUGIN_ROOT}/scripts/twitterapi.sh",
+          "label": "TwitterAPI.io REST — Mode B keyword-only"
+        },
+        {
+          "id": "brave-site",
+          "key": "BRAVE_API_KEY",
+          "mode": "fallback-2",
+          "tool": "brave_web_search site:x.com",
+          "label": "Brave site:x.com — второй фолбэк, только сниппеты"
+        }
+      ],
+      "requires": [],
+      "optional_keys": [
+        "TWITTERAPI_IO_KEY"
+      ],
+      "tools": [],
+      "degrade": "без Grok канал живёт на TwitterAPI.io (Mode B keyword-only, sourceQuality не выше MEDIUM, семантический угол теряется); без TWITTERAPI_IO_KEY выпадает совсем",
+      "cost": "TwitterAPI.io $0.15 за 1K твитов, страница из 20 твитов ≈ $0.003"
+    },
+    "hackernews": {
+      "label": "HackerNews",
+      "family": "hn",
+      "default_set": true,
+      "provider": null,
+      "requires": [],
+      "optional_keys": [],
+      "tools": [
+        "jq"
+      ],
+      "degrade": "без jq hn-fetch.sh не работает — канал остаётся на Brave site:news.ycombinator.com",
+      "cost": "бесплатно (Algolia HN API)"
+    },
+    "substack": {
+      "label": "Substack",
+      "family": "substack",
+      "default_set": true,
+      "provider": null,
+      "requires": [],
+      "optional_keys": [],
+      "tools": [
+        "uv"
+      ],
+      "degrade": "без uv не запускается substack-fetch.py — остаются Brave и RSS вручную",
+      "cost": "бесплатно"
+    },
+    "yandex": {
+      "label": "Веб (Яндекс, Рунет)",
+      "family": "web",
+      "default_set": false,
+      "provider": null,
+      "requires": [
+        {
+          "key": "YC_SEARCH_API_KEY",
+          "class": "B",
+          "drop_without_key": true
+        }
+      ],
+      "optional_keys": [],
+      "tools": [
+        "jq"
+      ],
+      "degrade": "без ключа канал не предлагается; если всё-таки выбран — yandex-search.sh отдаёт exit 2 и канал деградирует (sourceQuality=LOW)",
+      "cost": "платный, ≈0,1–0,15 ₽ за тему"
+    },
+    "youtube": {
+      "label": "YouTube",
+      "family": "youtube",
+      "default_set": false,
+      "provider": null,
+      "requires": [],
+      "optional_keys": [
+        "YOUTUBE_API_KEY"
+      ],
+      "tools": [
+        "uv"
+      ],
+      "degrade": "без YOUTUBE_API_KEY MCP-вызовы пропускаются: канал работает через Brave site:youtube.com + транскрипты (yt-transcript.py) — штатная деградация",
+      "cost": "бесплатно (квота YouTube Data API v3)"
+    },
+    "telegram": {
+      "label": "Telegram (публичные каналы)",
+      "family": "telegram",
+      "default_set": false,
+      "provider": null,
+      "requires": [],
+      "optional_keys": [],
+      "tools": [],
+      "degrade": "ключей не требует: превью t.me + дорки через Brave",
+      "cost": "бесплатно"
+    },
+    "ja": {
+      "label": "Япония (Qiita / Hatena / Zenn / note)",
+      "family": "ja",
+      "default_set": false,
+      "provider": null,
+      "requires": [],
+      "optional_keys": [],
+      "tools": [
+        "uv"
+      ],
+      "degrade": "языковой слой, включается только по триггеру темы; без uv остаётся Brave по японским доменам",
+      "cost": "бесплатно"
+    },
+    "zh": {
+      "label": "Китай (V2EX / Juejin / Zhihu)",
+      "family": "zh",
+      "default_set": false,
+      "provider": null,
+      "requires": [],
+      "optional_keys": [],
+      "tools": [
+        "uv"
+      ],
+      "degrade": "языковой слой, включается только по триггеру темы; Zhihu часто отдаёт 403 — остаются V2EX и Juejin",
+      "cost": "бесплатно"
+    },
+    "ko": {
+      "label": "Корея (tistory / Velog / Disquiet)",
+      "family": "ko",
+      "default_set": false,
+      "provider": null,
+      "requires": [],
+      "optional_keys": [],
+      "tools": [
+        "uv"
+      ],
+      "degrade": "языковой слой, включается только по триггеру темы",
+      "cost": "бесплатно"
+    },
+    "eu": {
+      "label": "ЕС (DOU / Golem / heise / Xataka / Menéame / Wykop)",
+      "family": "eu",
+      "default_set": false,
+      "provider": null,
+      "requires": [],
+      "optional_keys": [
+        "WYKOP_API_KEY"
+      ],
+      "tools": [
+        "uv"
+      ],
+      "degrade": "без WYKOP_API_KEY feed-fetch.py отдаёт exit 3 по Wykop и слой уходит в Brave site:wykop.pl; остальные площадки работают",
+      "cost": "бесплатно"
+    }
+  },
+  "layers": {
+    "exa": {
+      "label": "Exa (семантический веб-слой)",
+      "key": "EXA_API_KEY",
+      "channels": [
+        "web"
+      ],
+      "how_to_get": "https://dashboard.exa.ai → API Keys (≈$0.007 за поиск)",
+      "degrade": "семантический слой websearch.py отключён — остаётся ключевой поиск Brave"
+    },
+    "places": {
+      "label": "Google Places (локальные темы)",
+      "key": "GOOGLE_PLACES_API_KEY",
+      "channels": [
+        "web"
+      ],
+      "how_to_get": "https://console.cloud.google.com → включить Places API (New) → Credentials → API key. СНАЧАЛА бюджет-кап: hard cap у Places нет by design",
+      "degrade": "places-fetch.sh отдаёт exit 3 PLACES_KEY_MISSING и слой сам деградирует в brave_place_search — это штатно"
+    },
+    "tavily": {
+      "label": "Tavily (резервный веб-поиск)",
+      "key": "TAVILY_API_KEY",
+      "channels": [
+        "web"
+      ],
+      "how_to_get": "https://app.tavily.com → API Keys (бесплатный тариф ≈1000 запросов/мес)",
+      "degrade": "нет резервной рельсы поиска, если Brave отдаёт 402/429 — остаётся Exa"
+    },
+    "redditapis": {
+      "label": "redditapis.com (резервный Reddit MCP)",
+      "key": "REDDITAPIS_KEY",
+      "channels": [
+        "reddit"
+      ],
+      "how_to_get": "https://redditapis.com → Dashboard → API key (~$0.002 за вызов)",
+      "degrade": "нет второй рельсы Reddit и поиска по комментариям — остаётся штатный Reddit MCP"
+    },
+    "twitterapi": {
+      "label": "TwitterAPI.io (REST-слой Twitter/X)",
+      "key": "TWITTERAPI_IO_KEY",
+      "probe": "twitterapi-balance",
+      "channels": [
+        "twitter"
+      ],
+      "how_to_get": "https://twitterapi.io → Dashboard → API key ($0.15 за 1K твитов; минимальное пополнение снимает лимит 1 запрос/5 с)",
+      "degrade": "при живом Grok теряются реплаи, био авторов и тренды (Mode A); при выключенном Grok канал twitter выпадает совсем"
+    }
+  },
+  "keys": {
+    "BRAVE_API_KEY": {
+      "class": "A",
+      "how_to_get": "https://api-dashboard.search.brave.com → подписка на тариф Search → Subscriptions → API keys"
+    },
+    "FIRECRAWL_API_KEY": {
+      "class": "A",
+      "how_to_get": "https://firecrawl.dev/app/api-keys (формат fc-…)"
+    },
+    "REDDITAPIS_KEY": {
+      "class": "A",
+      "how_to_get": "https://redditapis.com → Dashboard → API key (~$0.002 за вызов)"
+    },
+    "YOUTUBE_API_KEY": {
+      "class": "A",
+      "how_to_get": "https://console.cloud.google.com → включить YouTube Data API v3 → Credentials → API key"
+    },
+    "YC_SEARCH_API_KEY": {
+      "class": "B",
+      "how_to_get": "https://console.yandex.cloud → сервисный аккаунт с ролью search-api.webSearch.user → создать Api-Key (не IAM-токен)"
+    },
+    "TWITTERAPI_IO_KEY": {
+      "class": "B",
+      "how_to_get": "https://twitterapi.io → Dashboard → API key ($0.15 за 1K твитов)"
+    },
+    "EXA_API_KEY": {
+      "class": "B",
+      "how_to_get": "https://dashboard.exa.ai → API Keys (≈$0.007 за поиск)"
+    },
+    "GOOGLE_PLACES_API_KEY": {
+      "class": "B",
+      "how_to_get": "https://console.cloud.google.com → включить Places API (New) → Credentials → API key; сначала бюджет-кап"
+    },
+    "TAVILY_API_KEY": {
+      "class": "B",
+      "how_to_get": "https://app.tavily.com → API Keys (бесплатный тариф ≈1000 запросов/мес)"
+    },
+    "WYKOP_API_KEY": {
+      "class": "B",
+      "how_to_get": "https://dev.wykop.pl → зарегистрировать приложение → ключ API (бесплатно)"
+    }
+  },
+  "tools": {
+    "jq": {
+      "label": "jq",
+      "channels": [
+        "web",
+        "hackernews",
+        "yandex"
+      ],
+      "how_to_get": "brew install jq",
+      "degrade": "не работают secret.sh, hn-fetch.sh и places-fetch.sh — ключи из Связки не читаются"
+    },
+    "uv": {
+      "label": "uv",
+      "channels": [
+        "substack",
+        "youtube",
+        "ja",
+        "zh",
+        "ko",
+        "eu"
+      ],
+      "how_to_get": "brew install uv",
+      "degrade": "не запускаются substack-fetch.py, yt-transcript.py и feed-fetch.py (шебанг uv)"
+    },
+    "pdftotext": {
+      "label": "pdftotext (poppler)",
+      "channels": [
+        "web"
+      ],
+      "how_to_get": "brew install poppler",
+      "degrade": "pdf-fetch.sh не вынимает текст из PDF — источники-PDF придётся пропускать"
+    }
+  }
+}

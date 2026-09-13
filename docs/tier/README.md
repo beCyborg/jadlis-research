@@ -139,6 +139,9 @@ brew install uv jq poppler yt-dlp   # ставить только то, что M
 | `OPENALEX_API_KEY` + `OPENALEX_MAILTO` | OpenAlex, снежный ком | дневной cost-бюджет режется |
 | `CROSSREF_MAILTO`, `UNPAYWALL_EMAIL` | проверка DOI и отзывов, поиск открытых текстов | вне «вежливого пула», лимиты жёстче |
 | Опциональные: `EXA_API_KEY`, `CORE_API_KEY`, `YC_SEARCH_API_KEY`, `GOOGLE_PLACES_API_KEY` | семантический слой `/search`, доп. источник, канал `yandex`, place-слой | слой или канал просто не включается |
+| `TWITTERAPI_IO_KEY` | канал `twitter` без Grok: keyword-only Mode B через TwitterAPI.io | канал `twitter` выпадает, когда Grok выключен или без баланса |
+
+Что из этого сейчас доступно, показывает `/jadlis-research:research-settings`: одна таблица по всем провайдерам, каналам и слоям — настройка (`auto` или `off`), доступ, что теряется без источника. Там же провайдер или канал выключается насовсем.
 
 Регистрации бесплатные и выдают ключ сразу: PubMed — `ncbi.nlm.nih.gov/account/settings/`, Semantic Scholar — `semanticscholar.org/product/api`, OpenAlex — `openalex.org`, CORE — `core.ac.uk/services/api`. У Crossref и Unpaywall регистрации нет: там нужна только своя контактная почта — по ней API узнают, кто стучится.
 
@@ -197,7 +200,7 @@ brew install uv jq poppler yt-dlp   # ставить только то, что M
 - Нет `YOUTUBE_API_KEY` — канал `youtube` живёт на Brave `site:youtube.com` и локальных транскриптах; сервер `youtube` в `/mcp` горит красным, это ожидаемо.
 - Нет `uv` — ломаются `substack-fetch.py` и `yt-transcript.py`: каналы `substack` и `youtube` падают на Brave и `sourceQuality=LOW`.
 - Нет `jq` — не работают `hn-fetch.sh` и `places-fetch.sh`; нет `pdftotext` — PDF пойдут в Firecrawl, где их режет хук.
-- Нет Codex или Grok CLI — выпадают каналы `codexweb`, `grokweb`, `twitter` и третий голос при расхождении верификаторов.
+- Нет Codex или Grok CLI, или провайдер выключен в `/jadlis-research:research-settings` — выпадают `codexweb`/`grokweb`; `twitter` живёт на TwitterAPI.io + Brave `site:x.com`; без Codex нет третьего голоса при расхождении верификаторов.
 
 Чего инструменты не делают:
 

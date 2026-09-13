@@ -1,5 +1,13 @@
 # Web (Grok) — search protocol for the agent
 
+> [!important] This channel runs only while the Grok provider is enabled
+> `grokweb` is selected only when the provider `grok` is `auto` in the user's source settings
+> (`/jadlis-research:research-settings`) **and** the liveness probe passed. If the orchestrator
+> prompt nevertheless carries a `CHANNEL NOTE` saying `GROK DISABLED`, do **not** run the CLI and
+> do not look for a substitute: return `sourceQuality = LOW`, empty citations, and a findings note
+> "grokweb selected while Grok is disabled upstream". That mismatch is an upstream selection bug,
+> not a channel failure — report it, do not work around it.
+
 ## Tool: headless Grok CLI with web_search (via Bash)
 
 Web search through the **built-in `web_search`/`web_fetch` tools of the Grok CLI** — the same
