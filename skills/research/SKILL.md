@@ -1,11 +1,12 @@
 ---
 name: research
-description: "Full topic research: web (Brave, Codex, Grok) + communities (Reddit, X, HN, Substack, YouTube, Telegram) via workflow, per-claim verification → vault note. Triggers: full research, deep research, what do people think. RU triggers: полный ресерч, глубокий ресерч, все источники, в соцсетях, что говорят люди. Do NOT use for: web search → /search; papers → /search-paper; docs → Context7."
+description: "Full topic research: web (Brave, Codex, Grok) + communities (Reddit, X, HN, Substack, YouTube, Telegram) via workflow, per-claim verification → vault note. Triggers: full research, deep research, what do people think. RU triggers: полный ресерч, глубокий ресерч, все источники, в соцсетях, что говорят люди. Do NOT use for: web search → /search; papers → /search-paper; docs → Context7; settings → /jadlis-research:research-settings."
 allowed-tools:
   - Read
   - Write
   - Glob
   - Bash
+  - Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/research-settings/scripts/research-sources.py *)
   - AskUserQuestion
   - EnterPlanMode
   - ExitPlanMode
@@ -25,6 +26,11 @@ interactive intake (Phase A: channels + recon + interview, in plan mode) and the
 (vault contract: dedup, wikilinks, daily-note entry).
 
 **User query:** `$ARGUMENTS`
+
+**Settings short-circuit.** If `$ARGUMENTS` is exactly `settings` or `настройки` (trimmed, case
+insensitive, nothing else), this is not a research request: answer with the single line
+«Настройки источников: запусти `/jadlis-research:research-settings`» and stop. No plan mode, no
+recon, no workflow.
 
 Language convention (Plan 2, 2026-09): everything the agents read and write inside the workDir
 (channel files, snapshot headers, curator/verifier/escalation output, the claim ledger) is in
@@ -56,14 +62,15 @@ turn only — do not rely on it beyond the first turn.
 
 2. **Channel choice — routing tree.** Sources named explicitly by the user ("в Reddit и HN",
    "only twitter") always override the tree; "соцсети"/"сообщества" →
-   `["reddit","twitter","hackernews","substack"]`; "web" → `web,codexweb,grokweb` (codexweb — after
-   the quota probe, grokweb — after the Grok liveness probe, see the gates below). Otherwise —
+   `["reddit","twitter","hackernews","substack"]`; "web" → `web,codexweb,grokweb`. The tree only
+   PROPOSES channels — availability is decided by the source resolve of step 2a. Otherwise —
    binary questions about the topic, top-down, applied CUMULATIVELY:
 
    1. **RU/CIS topic?** (Cyrillic phrasing about the Russian market/services/prices,
       «в России / Рунете / СНГ», vc.ru/Habr/Дзен/Telegram context) →
-      `yandex` ON **only with the key `YC_SEARCH_API_KEY`** (gate below; no key — do not enable the
-      channel, tell the user the RU layer goes through Brave and Telegram only); `telegram` ON
+      `yandex` ON (step 2a drops it when `YC_SEARCH_API_KEY` is missing and says so — then the RU
+      layer goes through Brave and Telegram only; paid ≈0.1-0.15 ₽/topic, outside the RU branch
+      only on explicit request «с Яндексом», because Brave's Runet layer is weak); `telegram` ON
       (public t.me previews + dorks, free contour; mandatory for custdev topics); `twitter`,
       `substack`, `hackernews` — OFF (English silence on RU topics is structural — a platform
       bias, not absence of demand; in the Phase C summary this is NOT counted as a channel
@@ -76,12 +83,10 @@ turn only — do not rely on it beyond the first turn.
    2. **Technical / AI topic?** → `hackernews` ON (for RU topics branch 1 has priority);
       `youtube` — offer as opt-in (strong clusters: tech/AI tutorials and reviews, marketing/sales;
       transcripts are free from the home IP).
-      `codexweb` — in ALL topics (default set). **Codex quota probe (always before enabling):** the
-      Codex subscription quota is a shared pool with the verifier `/verif` (verif has
-      priority). Probe: `codex exec -m gpt-6-astra
-      -s read-only --skip-git-repo-check -c service_tier="default" 'ok' < /dev/null` (≈6 s); a
-      usage-limit error → channel OFF, tell the user («codexweb пропущен: квота Codex
-      зарезервирована/исчерпана»). No `codex` binary → channel OFF without an error message.
+      `codexweb` — in ALL topics (default set). Do NOT probe Codex here: the Codex subscription
+      quota is a shared pool with the verifier `/verif` (verif has priority), and step 2a decides
+      availability — a missing binary, an exhausted quota or the provider switched off in the
+      settings drops the channel there, with the reason.
    3. **Academic topic?** → suggest `/science-research` (instead of or next to
       full-research).
    4. **Local / everyday topic (places)?** («найди/выбери заведение, клинику, сервис, секцию в
@@ -98,63 +103,73 @@ turn only — do not rely on it beyond the first turn.
       criterion (≥1 CONFIRMED claim per run attributable to it).
 
    **Default set** (no branch fired, or the cluster is mixed/undetermined):
-   `["web","codexweb","grokweb","reddit","twitter","hackernews","substack"]` — codexweb is in by
-   default (after the quota probe of branch 2; probe failed → drop it from the set with a message);
-   `grokweb` and `twitter` — after the Grok liveness probe (gate below; `GROK_DOWN` → drop both
-   from this run's set, do not change the set itself). Refinement of the "cluster → channels"
+   `["web","codexweb","grokweb","reddit","twitter","hackernews","substack"]` — this is the
+   PROPOSAL of the tree; which of them actually run is decided by the source resolve of step 2a
+   (user settings + live access). The proposed set itself is never edited
+   here. Refinement of the "cluster → channels"
    matrix — by telemetry (local `full-research-telemetry.py --trends`, `--channels`), not by judgement.
 
-   **Gate `yandex`.** The channel needs the key `YC_SEARCH_API_KEY` (env, or the macOS Keychain via `scripts/secret.sh`)
-   (written by the skill `/jadlis-search:keys` into the Keychain; the plugin userConfig is no
-   good here — sensitive values do not reach Bash). Key not configured → do not offer `yandex` at all. If there is no key
-   but the channel was still chosen: `yandex-search.sh` returns `exit 2`, the channel degrades
-   (`sourceQuality=LOW`, empty citations) and the workflow does NOT fail. Paid: ≈0.1-0.15 ₽/topic.
-   Outside the RU branch — only on explicit request («с Яндексом»). Brave's Runet layer is weak
-   (measured 01.2026: Yandex has the highest domain diversity of results, 164 domains out of 1630
-   SERP entries appeared in no other engine).
-
-   **Gate `youtube`.** With the key `YOUTUBE_API_KEY` (plugin userConfig) the channel uses the
-   MCP `mcp__plugin_jadlis-search_youtube__*` for search and metadata. Without the key — **skip**
-   the MCP calls, the channel works through Brave `site:youtube.com` + transcripts
-   (`scripts/yt-transcript.py`), a normal degradation.
-
-   **Gate `grokweb` / `twitter` (Grok liveness probe).** Both channels go through the Grok CLI,
-   whose Grok Build subscription balance runs out independently of Claude (03-04.09.2026 —
-   468 refusals `API error (status 402 Payment Required): Grok Build usage balance exhausted`,
-   05.09 balance topped up). Probe before enabling (cost $0; a 402 arrives in ~0.6 s, a live
-   answer in 5-10 s):
+2a. **Source resolve (ONE Bash call).** The tree only proposes channels; the user's source
+   settings (`/jadlis-research:research-settings`) and live access decide what runs. Make exactly
+   one call — no key checks, no liveness probes of your own. Bash `timeout: 120000` (the script
+   holds its own 90 s deadline and always answers with JSON):
 
    ```bash
-   GROK_ISO_HOME="$HOME/.cache/grok-iso-home"; mkdir -p "$GROK_ISO_HOME"
-   GROK_PROBE=$(HOME="$GROK_ISO_HOME" GROK_HOME="$HOME/.grok" ~/.grok/bin/grok \
-     -p 'ok' -m grok-4.6 --effort low --max-turns 1 2>&1 | head -20)
-   echo "$GROK_PROBE" | grep -qiE '402|balance exhausted|Payment Required|unauthenticated' \
-     && echo GROK_DOWN || echo GROK_OK
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/research-settings/scripts/research-sources.py" \
+     --data-dir "${CLAUDE_PLUGIN_DATA}" \
+     resolve --channels web,codexweb,grokweb,reddit,twitter,hackernews,substack --json
    ```
 
-   `HOME="$GROK_ISO_HOME"` is mandatory — otherwise Grok reads the `permissions.deny` of the main
-   profile and mutes its own `web_fetch` (see `protocols/grok-web-protocol.md`). A non-zero exit
-   and `Error: max turns reached` are NOT signs of death: the probe judges ONLY by the grep,
-   `--max-turns 1` legitimately cuts a live answer at the first tool call.
+   `--channels` = the list the tree produced, comma-separated, no spaces. From the JSON take:
 
-   `GROK_DOWN` → drop `grokweb` from this run's `SELECTED_CHANNELS`; for `twitter` first check
-   the TwitterAPI.io key (`bash ${CLAUDE_PLUGIN_ROOT}/scripts/twitterapi.sh balance` → JSON = key
-   ok, `exit 2` = no key): with the key the channel STAYS in the set in keyword-only mode
-   (protocol section "TwitterAPI.io layer", Mode B); without it drop `twitter` too. Tell the
-   user: «Grok недоступен (402 usage balance exhausted) — grokweb пропущен; twitter идёт
-   keyword-only через TwitterAPI.io» (or «…grokweb/twitter пропущены; вернутся сами после
-   пополнения баланса» when there is no key). The default channel set is NOT changed — the
-   probe gates the run, not the config, and after a top-up the channels return by themselves,
-   without edits or a render. `GROK_OK` → both channels work as usual; with the key the
-   `twitter` channel additionally runs Mode A of the same section (replies, author profile,
-   trends — ≤3 cheap REST calls).
+   - `SELECTED_CHANNELS` = `.channels` — what actually runs;
+   - `CHANNEL_NOTES` = `.notes` — `{channel: text}`, per-channel instructions that take precedence
+     over the protocol where they conflict (degradations: `youtube` without `YOUTUBE_API_KEY` runs
+     on Brave `site:youtube.com` + transcripts, `reddit` without `REDDITAPIS_KEY`, `twitter` in
+     Mode B …). Pass them on verbatim — `{PLUGIN_ROOT}` is substituted inside the workflow;
+   - `PROVIDERS_OFF` = `.providers_off` — providers switched off (`grok`, `codex`);
+   - `SOURCE_DROPPED` = `.dropped` — `[{channel, reason, detail}]`, reason is
+     `disabled-by-settings` or `no-access`.
 
-   **Edge case.** The explicit "web" mode = `web,codexweb,grokweb`: if Grok is dead AND the
-   codexweb quota probe failed, one channel remains → the workflow returns
-   `insufficient-sources`. Then offer to add `reddit`/`hackernews` or to fall back to
-   `/search`. The default set has no such hole: without Grok
-   `web, codexweb, reddit, hackernews, substack` = 4 families out of 5 remain, the sufficiency
-   gate passes (real run 03.09: channels 5/7, families 4/5, status ok).
+   Also in the JSON, for your own reading: `.state` (per-channel status), `.families`,
+   `.insufficient`, `.warnings`, `.summary_ru`.
+
+   **What to tell the user:** `.summary_ru` **verbatim** (it is already Russian and formatted),
+   then every line of `.warnings`. A drop with `reason: disabled-by-settings` gets exactly ONE
+   line («grokweb выключен в настройках источников») and NEVER a suggestion to switch it back on
+   — that is the user's deliberate choice. A drop with `reason: no-access` is reported with its
+   reason (no key, no binary, quota, balance) from `detail`.
+
+   **`.insufficient == true` → do NOT launch the workflow.** Say what is left and offer: add
+   `reddit`/`hackernews`, fall back to `/search`, or review the sources in
+   `/jadlis-research:research-settings`.
+
+   **Script failure (no JSON, exit ≠ 0, timeout) — FAIL-CLOSED on Grok.** Never fall back to the
+   old behaviour: the old default was Grok-first, and Grok must not be touched when its state is
+   unknown. Do exactly this:
+   - warn the user: «настройки источников недоступны, Grok считаю выключенным»;
+   - drop `grokweb` from the tree's list;
+   - keep `twitter`, with `CHANNEL_NOTES = {twitter: GROK_DISABLED_NOTE}` (the constant below);
+   - `PROVIDERS_OFF = ['grok']`;
+     `SOURCE_DROPPED = [{channel: 'grokweb', reason: 'no-access', detail: 'source resolve unavailable'}]`;
+   - keep `codexweb` only if `command -v codex` succeeds — otherwise drop it too;
+   - the remaining channels go as the tree proposed them.
+
+   **`GROK_DISABLED_NOTE`** — the constant, pass it verbatim:
+
+   ```
+   GROK DISABLED by user source settings. Do NOT run ~/.grok/bin/grok, do NOT load
+   mcp__grok-mcp__* or mcp__twitterapi-mcp__*. Skip every Grok section of the protocol; run ONLY
+   the section 'TwitterAPI.io layer → Mode B keyword-only' via bash
+   {PLUGIN_ROOT}/scripts/twitterapi.sh; if the REST layer fails (exit≠0, persistent 429) use
+   brave_web_search with site:x.com as the second fallback. sourceQuality no higher than MEDIUM;
+   say in findings that the semantic angle is missing.
+   ```
+
+   **Edge case.** Explicit "web" mode = `web,codexweb,grokweb`: with Grok off and the Codex quota
+   failed only one channel is left → `.insufficient == true`, do not launch. The default set has
+   no such hole: without Grok `web, codexweb, reddit, hackernews, substack` = 4 families out of 5
+   and the sufficiency gate passes.
 
 3. **Recon.** Make 1-2 calls of `mcp__plugin_jadlis-search_brave-search__brave_web_search`
    (Search tier: 50 req/s, parallel OK; `count: 5`): a broad overview of the topic + optionally one
@@ -189,6 +204,10 @@ turn only — do not rely on it beyond the first turn.
    when the skill loads, no Bash needed); `VAULT_PATH = ${user_config.VAULT_PATH}` — **if the value
    is empty or is left as the literal `${user_config.VAULT_PATH}` (e.g. during a local trial with
    `--plugin-dir`), use `~/Jadlis`**;
+   `DATA_DIR = ${CLAUDE_PLUGIN_DATA}` (the same value step 2a passes as `--data-dir`) — **if it is
+   empty or is left as the literal `${CLAUDE_PLUGIN_DATA}` (e.g. during a local trial with
+   `--plugin-dir`), pass it anyway: the script ignores an empty/literal value and falls back to
+   the computed path**;
    `WORK_DIR = {VAULT_PATH}/.full-research/{SESSION_ID}_{QUERY_SLUG}` — **always an ABSOLUTE path**
    (a relative one resolves from the cwd at the moment the agents are spawned: a `cd` of the main
    session before a resume "lost" files at status ok; this also concerns `resumeFromRunId` calls —
@@ -202,7 +221,10 @@ turn only — do not rely on it beyond the first turn.
    ## full-research brief
    REFINED_QUERY: …
    DECISION_CONTEXT: …
-   SELECTED_CHANNELS: [web, codexweb, …]      # after the probes; dropped: … (reason)
+   SELECTED_CHANNELS: [web, codexweb, …]      # = resolve.channels; dropped: … (reason)
+   CHANNEL_NOTES: {}                           # = resolve.notes — {channel: text}, verbatim
+   PROVIDERS_OFF: []                           # = resolve.providers_off, e.g. [grok]
+   SOURCE_DROPPED: []                          # = resolve.dropped — [{channel, reason, detail}]
    LANGUAGES: [ru]                             # + QUERIES per language if not ru/en
    QUERIES: {}
    SUBSTACK_HANDLES: []
@@ -223,6 +245,9 @@ Workflow({
     refinedQuery: REFINED_QUERY,
     decisionContext: DECISION_CONTEXT,  // from the interview: which decision the user makes
     channels: SELECTED_CHANNELS,        // keys: web/codexweb/grokweb/reddit/twitter/hackernews/substack (+opt-in: yandex, youtube, telegram, ja, zh, ko, eu)
+    channelNotes: CHANNEL_NOTES,        // resolve.notes — {channel: text}; the core injects them into the channel prompt
+    providersOff: PROVIDERS_OFF,        // resolve.providers_off — e.g. ["grok"]: the core filters the channels and skips Codex escalation
+    sourceDropped: SOURCE_DROPPED,      // resolve.dropped — [{channel, reason, detail}], returned back in sourceSettings
     languages: LANGUAGES,               // e.g. ["ru"] or ["ja","en"]; omitted → detected from the query
     queries: QUERIES,                   // {lang: native phrasing}; may be {}
     substackHandles: SUBSTACK_HANDLES,  // may be empty
@@ -253,7 +278,8 @@ an unconfirmed exclusion → `DISPUTED` (disputed, not part of the conclusions).
 `{WORK_DIR}/report.md` (in Russian). Wait for the `<task-notification>`, then use the object:
 `{workDir, status, ledgerSchemaVersion, languages, channelsAnswered, channelStatus, failedChannels,
 aiModelActual, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, reportPath, queryRu,
-relatedCandidates, claimLedger, synthMeta}`; `synthMeta.ledgerSummary` = `{total, confirmed,
+relatedCandidates, claimLedger, synthMeta, sourceSettings}`; `sourceSettings` =
+`{providersOff, notes, dropped}` — what the source resolve decided, echoed back for Phase C; `synthMeta.ledgerSummary` = `{total, confirmed,
 confirmedSplit, challenged, outdated, unchecked, disputed, escalated, escalationSkipped,
 weakEvidence, evidenceless, ceilingCapped, credibilityMedian, claimsDroppedByCap}`; `snapshotGate` =
 `{minChars, llmMediatedChannels, demotedTotal, byReason: {noSnapshot, shortSnapshot, llmMediated,
@@ -333,6 +359,11 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      list explicitly which SELECTED channels failed/degraded (LOW or no citations) and what that
      means for completeness (a run without part of the selected channels is not a full one).
      All channels ok → one line «все N каналов отработали».
+     Then, from `sourceSettings.dropped`, the channels that never started — these are NOT
+     failures of the run: `reason: disabled-by-settings` → one line «выключено в настройках:
+     grokweb (Grok off)», with no suggestion to switch it back on; `reason: no-access` → «нет
+     доступа: yandex (нет ключа YC_SEARCH_API_KEY)» with the reason from `detail` and a pointer:
+     «источники и доступ — `/jadlis-research:research-settings`».
    - What verification dropped: from `claimLedger`/`synthMeta.droppedClaims` — which claims are
      CHALLENGED/OUTDATED and why. They **did not enter** the report (filtering, not appended criticism).
    - **Verification in one line** from `ledgerSummary`/`escalationStats`/`snapshotGate`: «проверено
@@ -353,6 +384,13 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
 - The workflow returned `synthesis-failed` — the analyst returned null on both Fable and the Opus
   retry. The material is in `{WORK_DIR}` but there is no report: show the working directory, do not
   write to the vault. A re-run of Phase B synthesises from the same material.
+- The source-resolve script of step 2a failed (no JSON, exit ≠ 0, timeout) — fail-closed on Grok:
+  warn «настройки источников недоступны, Grok считаю выключенным», drop `grokweb`, keep `twitter`
+  with `GROK_DISABLED_NOTE`, `providersOff: ['grok']`, `codexweb` only if `command -v codex`
+  succeeds. Never the old Grok-first behaviour.
+- Channel `twitter` in Mode B (Grok off) returns `sourceQuality` ≤ MEDIUM **by design** — this is
+  not a failure and is not reported as a degraded channel; the missing part is the semantic angle,
+  which the channel itself states in its findings.
 - Channel agents have built-in fallbacks (Brave `site:` instead of MCP) inside the protocols.
 - Channel `yandex`: `exit 2` — no `YC_SEARCH_API_KEY`; `exit 3` — API error; `exit 4` — polling
   timeout. In all three cases the channel returns `sourceQuality=LOW` without retries and without a

@@ -5,6 +5,38 @@
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-09-14
+
+### Для человека
+
+- Новая команда `/jadlis-research:research-settings`: одна таблица по всем источникам — провайдеры,
+  14 каналов и слои с ключами, у каждого настройка, доступ и что теряется без него.
+- Источник можно выключить насовсем: два состояния, `auto` (доступ проверяется перед прогоном) и
+  `off` (не используется и не проверяется — ни вызова, ни секунды на пробу). Выключается и провайдер
+  целиком (Grok, Codex), и отдельный канал.
+- Настройки переживают обновление плагина — они лежат рядом с плагином, а не в его папке; пропадают
+  только при удалении без `--keep-data`, после переустановки хватает одной команды.
+- Grok выключен — канал `grokweb` больше не предлагается, а `twitter` идёт по ключевым словам через
+  TwitterAPI.io с фолбэком на Brave `site:x.com`: семантического угла в выдаче нет, это ожидаемо.
+- Обзор тира (`docs/tier/README.md`, `docs/tier/README.en.md`) переписан: списки вместо mermaid-схем,
+  Codex назван обязательным, в таблице ключей появился `TWITTERAPI_IO_KEY`.
+
+### For agents
+
+- New script `skills/research-settings/scripts/research-sources.py` (stdlib, py3.9-compatible):
+  `status`, `resolve`, `set`, `reset`, `catalogue`. Exit codes: 0 ok · 1 usage/unknown key ·
+  2 data dir not writable · 3 catalogue unreadable · 4 settings file corrupt.
+- `resolve --channels … --json` is consumed by the research skill and replaces the four inline gates
+  (Grok probe, Codex quota probe, Yandex and YouTube key gates) with one Bash call.
+- `workflows/full-research-core.js` takes three new args: `channelNotes`, `providersOff`,
+  `sourceDropped`; the run result carries `sourceSettings`.
+- Codex off → escalation is skipped with `escalationSkipped: 'provider-off'`.
+- Channel-state vocabulary grows by two values: `disabled-by-settings` and `no-access`.
+- The Grok probe grep is extended with `usage limit|SuperGrok|free Grok Build` — the old
+  `402|balance exhausted|Payment Required|unauthenticated` pattern missed the current refusal text.
+- Fail-closed for Grok: if the resolve script fails (no JSON, exit≠0, timeout), `grokweb` is dropped
+  and `twitter` gets the constant GROK DISABLED note — never a fallback to the Grok-first path.
+
 ## [2.0.0] — 2026-09-10
 
 ### Для человека

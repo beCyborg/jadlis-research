@@ -114,10 +114,25 @@ const LLM_MEDIATED_CHANNELS = new Set(['codexweb', 'grokweb', 'yandex'])
 // x.com/twitter.com: Firecrawl returns AI-processed text, there is no verbatim page body.
 const LLM_MEDIATED_HOSTS = /(^|\.)(x\.com|twitter\.com|mobile\.twitter\.com)$/i
 const CHANNEL_CEILING = (A.channelCeiling && typeof A.channelCeiling === 'object') ? A.channelCeiling : {}
+// ── Source settings (plugin 2.1.0): the skill resolves them before Phase B and passes them down.
+// channelNotes: { <channel>: '<text>' } — per-channel instructions from the user's source settings;
+// they are pasted into the channel prompt and OVERRIDE the protocol where the two conflict.
+// providersOff: providers switched off for good (the channels they power never run).
+// sourceDropped: what the resolve step already dropped (telemetry only — the core does not re-derive it).
+const CHANNEL_NOTES = (A.channelNotes && typeof A.channelNotes === 'object') ? A.channelNotes : {}
+const PROVIDERS_OFF = new Set(Array.isArray(A.providersOff) ? A.providersOff.map(String) : [])
+const PROVIDER_OF = { grokweb: 'grok', codexweb: 'codex' }
+const SOURCE_DROPPED = Array.isArray(A.sourceDropped) ? A.sourceDropped : []
+const CODEX_OFF = PROVIDERS_OFF.has('codex')
+// Second-level safety: the twitter channel mode is derived from providersOff, not only from a note —
+// if the caller forgot the note, the core supplies the same text itself (see channelPrompt).
+const DEFAULT_GROK_OFF_NOTE = `GROK DISABLED by user source settings. Do NOT run ~/.grok/bin/grok, do NOT load mcp__grok-mcp__* or mcp__twitterapi-mcp__*. Skip every Grok section of the protocol; run ONLY the section 'TwitterAPI.io layer → Mode B keyword-only' via bash {PLUGIN_ROOT}/scripts/twitterapi.sh; if the REST layer fails (exit≠0, persistent 429) use brave_web_search with site:x.com as the second fallback. sourceQuality no higher than MEDIUM; say in findings that the semantic angle is missing.`
 const hostOf = u => { try { return String(new URL(String(u || '')).hostname || '').toLowerCase() } catch (e) { return '' } }
+// A channel whose provider is off never runs — a safety net in case the caller forgot to drop it.
+const providerOn = c => !PROVIDERS_OFF.has(PROVIDER_OF[c])
 const SELECTED = (Array.isArray(A.channels) && A.channels.length)
-  ? A.channels.filter(c => ALL_CHANNELS[c])
-  : ['web', 'codexweb', 'grokweb', 'reddit', 'twitter', 'hackernews', 'substack']
+  ? A.channels.filter(c => ALL_CHANNELS[c] && providerOn(c))
+  : ['web', 'codexweb', 'grokweb', 'reddit', 'twitter', 'hackernews', 'substack'].filter(c => ALL_CHANNELS[c] && providerOn(c))
 
 // ── Schemas ──
 const CHANNEL_SCHEMA = {
@@ -271,6 +286,12 @@ function channelPrompt(key) {
     ? `\nSUBSTACK_HANDLES: ${SUBSTACK_HANDLES.join(', ')}\n(handles are provided — skip Layer 0 and use them)`
     : ''
   const decisionLine = DECISION ? `\nRESEARCH FOR A DECISION: ${DECISION}\n(priority — material that helps make exactly this decision)` : ''
+  // CHANNEL NOTE: text from the user's source settings. No note for twitter while Grok is off →
+  // the core substitutes its own constant (the mode must not depend on the caller remembering it).
+  const rawNote = CHANNEL_NOTES[key] || ((key === 'twitter' && PROVIDERS_OFF.has('grok')) ? DEFAULT_GROK_OFF_NOTE : '')
+  const noteBlock = rawNote
+    ? `\nCHANNEL NOTE (from the user's source settings — takes precedence over the protocol where they conflict):\n${String(rawNote).split('{PLUGIN_ROOT}').join(PLUGIN_ROOT)}\n`
+    : ''
   return `You are the ${c.source} researcher. Find as much information on the topic as possible.
 
 QUERY: ${QUERY}${decisionLine}
@@ -282,7 +303,7 @@ Read the file ${c.protocol} (Read tool) and follow it step by step, including th
 
 PLUGIN_ROOT = ${PLUGIN_ROOT}
 Inside the protocol, paths are written as {PLUGIN_ROOT}/… — substitute the value above for the placeholder. Never send a literal \`{PLUGIN_ROOT}\` to a command.
-
+${noteBlock}
 ${TOOL_NOTE}
 
 RULES:
@@ -558,7 +579,7 @@ Do NOT spawn sub-agents, do NOT call skills, read only the channel files in ${WO
 
 // ═══ Phase 1 — Fan-out ═══
 phase('Fan-out')
-log(`Запускаю ${SELECTED.length} канальных исследователей: ${SELECTED.join(', ')}; языки: ${LANGUAGES.join(', ')}`)
+log(`Запускаю ${SELECTED.length} канальных исследователей: ${SELECTED.join(', ')}; языки: ${LANGUAGES.join(', ')}; providers off: ${[...PROVIDERS_OFF].join(', ') || 'нет'}`)
 
 const channelResults = (await parallel(SELECTED.map(key => () =>
   agent(channelPrompt(key), w({ label: key, phase: 'Fan-out', schema: CHANNEL_SCHEMA }))
@@ -635,7 +656,7 @@ log(`Каналов успешно: ${okResults.length}/${SELECTED.length} (уп
 // one succeeded, there will be no triangulation. A deliberate web-only run (1 family) is fine.
 if (okResults.length < 2 || (selectedFamilies.length >= 2 && answeredFamilies.length < 2)) {
   log(`Недостаточно независимых источников (успешных каналов: ${okResults.length}, семей: ${answeredFamilies.length}) — отдаю что есть, без синтеза.`)
-  return { workDir: WORK_DIR, status: 'insufficient-sources', ledgerSchemaVersion: 4, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [] }
+  return { workDir: WORK_DIR, status: 'insufficient-sources', ledgerSchemaVersion: 4, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED } }
 }
 
 // ═══ Phase 2 — Verify (per-claim live counter-search) ═══
@@ -773,11 +794,13 @@ let claimLedger = voted.map(({ claim, votes }) => aggregate(claim, votes))
 
 const escalationCandidates = claimLedger.filter(c => c.needsEscalation)
 escalationCandidates.sort((a, b) => Number(b.loadBearing) - Number(a.loadBearing))
-const toEscalate = escalationCandidates.slice(0, ESCALATION_CAP)
-escalationCandidates.slice(ESCALATION_CAP).forEach(c => { c.escalationSkipped = 'cap' })
-log(`Расхождений голосов: ${escalationCandidates.length}; эскалирую в Codex: ${toEscalate.length} (кап ${ESCALATION_CAP})`)
+// Codex switched off in the source settings → no third vote at all: every split claim keeps the
+// exclusion on a single vote, flagged 'provider-off' instead of 'cap'.
+const toEscalate = CODEX_OFF ? [] : escalationCandidates.slice(0, ESCALATION_CAP)
+escalationCandidates.slice(toEscalate.length).forEach(c => { c.escalationSkipped = CODEX_OFF ? 'provider-off' : 'cap' })
+log(`Расхождений голосов: ${escalationCandidates.length}; эскалирую в Codex: ${toEscalate.length}${CODEX_OFF ? ' (Codex выключен в настройках источников)' : ` (кап ${ESCALATION_CAP})`}`)
 
-const escalationStats = { candidates: escalationCandidates.length, escalated: 0, confirmedExclusion: 0, disputed: 0, skipped: {}, cap: ESCALATION_CAP }
+const escalationStats = { candidates: escalationCandidates.length, escalated: 0, confirmedExclusion: 0, disputed: 0, skipped: {}, cap: ESCALATION_CAP, providerOff: CODEX_OFF }
 if (toEscalate.length) {
   const results = await parallel(toEscalate.map(c => async () => {
     try {
@@ -870,6 +893,8 @@ return {
   languages: LANGUAGES,
   channelsAnswered: channelResults.length,
   channelsSelected: SELECTED,
+  // What the user's source settings did to this run (Phase C reports it; telemetry segments by it).
+  sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED },
   channelStatus,
   failedChannels,
   aiModelActual,

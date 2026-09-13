@@ -141,6 +141,9 @@ Then `/jadlis-search:keys`: the skill takes values one at a time, stores them in
 | `OPENALEX_API_KEY` + `OPENALEX_MAILTO` | OpenAlex, snowballing | a tighter daily cost budget |
 | `CROSSREF_MAILTO`, `UNPAYWALL_EMAIL` | DOI and retraction checks, open-access lookup | outside the polite pool, harsher limits |
 | Optional: `EXA_API_KEY`, `CORE_API_KEY`, `YC_SEARCH_API_KEY`, `GOOGLE_PLACES_API_KEY` | semantic layer of `/search`, extra source, the `yandex` channel, the place layer | that layer or channel simply stays off |
+| `TWITTERAPI_IO_KEY` | the `twitter` channel without Grok: keyword-only Mode B through TwitterAPI.io | the `twitter` channel drops out whenever Grok is off or out of balance |
+
+What of this is available right now is shown by `/jadlis-research:research-settings`: one table over every provider, channel and layer — the setting (`auto` or `off`), the access, what is lost without that source. The same table switches a provider or a channel off for good.
 
 Sign-ups are free and hand you a key immediately: PubMed at `ncbi.nlm.nih.gov/account/settings/`, Semantic Scholar at `semanticscholar.org/product/api`, OpenAlex at `openalex.org`, CORE at `core.ac.uk/services/api`. Crossref and Unpaywall have no sign-up at all: they only need your own contact address, which is how those APIs know who is knocking.
 
@@ -199,7 +202,7 @@ What degrades without keys and binaries:
 - No `YOUTUBE_API_KEY` — the `youtube` channel lives on Brave `site:youtube.com` plus local transcripts; the `youtube` server shows red in `/mcp`, which is expected.
 - No `uv` — `substack-fetch.py` and `yt-transcript.py` break: the `substack` and `youtube` channels fall back to Brave with `sourceQuality=LOW`.
 - No `jq` — `hn-fetch.sh` and `places-fetch.sh` stop working; no `pdftotext` — PDFs would go to Firecrawl, where a hook blocks them.
-- No Codex or Grok CLI — the `codexweb`, `grokweb` and `twitter` channels drop out, along with the third vote on a verifier split.
+- No Codex or Grok CLI, or the provider is switched off in `/jadlis-research:research-settings` — `codexweb`/`grokweb` drop out; `twitter` lives on TwitterAPI.io + Brave `site:x.com`; without Codex there is no third vote on a verifier split.
 
 What these tools do not do:
 
