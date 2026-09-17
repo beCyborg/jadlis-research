@@ -27,13 +27,13 @@ Read the pipeline: collection by channels first, then a separate verification ph
 3. **Sufficiency gate** — 2+ channels and 2+ source families answered. No → `insufficient-sources`, nothing is written to the vault.
 4. **Curator** — up to 16 claims with evidence prefixes.
 5. **urlhealth + snapshot gate** — MEDIUM ceiling on a weak citation.
-6. **Two verifiers per claim** — refutation lens + another source type. Votes split → third vote by Codex (no more than 8 escalations per run).
+6. **Two verifiers per claim, one per source family** — the first challenges the claim where it was found (from Reddit → on Reddit, from the web → via Brave), the second takes the other family. Web and communities disagree → a "family split": both stories go into the report, priority by claim type (fact → web, experience → communities). A lone exclusion → third vote by Codex (no more than 8 escalations per run).
 7. **Synthesis** — survivors only; dropped = one line with the reason.
 8. **Note in `Знания/Ресерчи/`** — `verified: false` until you read it.
 
 ![Two magnifiers over one card: through one it is intact, through the other it is cracked](https://github.com/beCyborg/jadlis-hub/blob/main/docs/img/05-full-research-01.webp?raw=1)
 
-That is the verification phase: one lens hunts for a refutation, the other takes a source of a different type. A disagreement is never averaged — it goes to a third vote.
+That is the verification phase: one lens hunts for a refutation in the same family the claim came from, the other takes a source of a different type. A web-vs-community disagreement is never averaged and never settled by a third web vote — the reader sees both stories and which one has priority.
 
 ![A shelf with five containers; three identical sheets are clipped into one container](https://github.com/beCyborg/jadlis-hub/blob/main/docs/img/05-full-research-02.webp?raw=1)
 
@@ -52,8 +52,9 @@ ai_model: "claude-fable-5-1"
 query: "Стоит ли переносить командную вики на статический генератор"
 decision: "Решить, мигрировать ли вики команды в этом квартале"
 channels: [web, codexweb, reddit, hackernews, substack]
-ledger_schema: 4
+ledger_schema: 5
 claims_confirmed: 6
+claims_family_split: 1
 claims_disputed: 1
 claims_dropped: 3
 escalations: 2
@@ -63,16 +64,20 @@ escalations: 2
 > Migrate — yes, but not the whole wiki at once: move one section and live on it for a month.
 
 ### Confirmed facts
-- Search over a static site is solved by an external index, not by the generator (2 votes) [w2·B2]
-- The pain threshold is editors without git, not the number of pages (2 votes) [r5·C2]
-- Images and attachments are the main source of manual work in a migration (1 vote — split) [hn3·B2]
+- Search over a static site is solved by an external index, not by the generator (2 votes: web + communities) [w2·B2]
+- The pain threshold is editors without git, not the number of pages (2 votes: web + communities) [r5·C2]
+- Images and attachments are the main source of manual work in a migration (1 vote — communities only) [hn3·B2]
+
+### Web and communities disagree
+- "Incremental builds hold 10,000 pages without slowing down" — Web: the vendor page and a benchmark [w4·B3]. Communities: three threads about 20-minute builds on real wikis [r7·C3]. Priority: communities — an experiential claim.
 
 ### Disputed facts
-- "The move takes one evening" — votes split, the third vote did not confirm exclusion
+- "The move takes one evening" — a lone vote against, the third vote did not confirm exclusion
 
 > [!note]- Methodology and verification
-> Channels: 5, source families: 4. Checked 10 claims: 6 confirmed (1 on a single vote),
-> 1 disputed, 3 dropped (2 challenged, 1 outdated), Codex escalations: 2.
+> Channels: 5, source families: 4. Checked 11 claims (one web vote + one community vote each):
+> 6 confirmed (1 on a single vote), 1 web-vs-community split, 1 disputed, 3 dropped
+> (2 challenged, 1 outdated), Codex escalations: 2.
 > MEDIUM ceiling from the snapshot gate: 2 citations (llm-mediated).
 ```
 
