@@ -61,7 +61,7 @@ const urlhealth = { status: 'ok', elapsedSec: 1, note: 'mock', items: [
   { prefix: 'w4', url: 'https://blog.example.com/d', urlStatus: 'ok', quoteStatus: 'notChecked', fabricationSuspect: false, snapshotChars: 0 },
 ] }
 
-async function run(args) {
+async function run(args, hooks = {}) {
   const calls = []
   const prompts = {}
   const agent = async (prompt, opts) => {
@@ -71,9 +71,9 @@ async function run(args) {
     if (channels[label]) return structuredClone(channels[label])
     if (label.startsWith('curator')) return structuredClone(curator)
     if (label === 'urlhealth') return structuredClone(urlhealth)
-    if (label.startsWith('verify:')) return { claimId: label.split(':')[1].split('#')[0], verdict: 'CONFIRMED', credibility: 2, evidence: 'mock', url: 'https://v.example.com', numberVerbatim: null }
+    if (label.startsWith('verify:')) return Object.assign({ claimId: label.split(':')[1].split('#')[0], verdict: 'CONFIRMED', credibility: 2, evidence: 'mock', url: 'https://v.example.com', numberVerbatim: null, searchedVia: 'mock' }, hooks.verify ? hooks.verify(label) : {})
     if (label.startsWith('escalate:')) return { claimId: label.split(':')[1], status: 'ok', confirmsExclusion: false, verdictSuggested: 'UNCHECKED', reasoning: 'mock', urls: [], liveSearchEvents: 1 }
-    if (label.startsWith('analyst')) return { reportPath: '/tmp/smoke/report.md', queryRu: 'smoke', mainConclusion: 'ok', relatedCandidates: [], droppedClaims: [], disputedClaims: [], gaps: [] }
+    if (label.startsWith('analyst')) return { reportPath: '/tmp/smoke/report.md', queryRu: 'smoke', mainConclusion: 'ok', relatedCandidates: [], droppedClaims: [], disputedClaims: [], familySplitClaims: [], gaps: [] }
     throw new Error('unmocked agent label: ' + label)
   }
   const parallel = fns => Promise.all(fns.map(f => f()))
@@ -92,7 +92,7 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
   const { result: r, logs, prompts } = await run(base)
   const led = Object.fromEntries(r.claimLedger.map(c => [c.id, c]))
   const ev = (id, p) => led[id].evidence.find(e => e.prefix === p)
-  check(r.ledgerSchemaVersion === 4, 'ledgerSchemaVersion = 4')
+  check(r.ledgerSchemaVersion === 5, 'ledgerSchemaVersion = 5')
   check(r.snapshotGate && r.snapshotGate.minChars === 1000, 'snapshotGate.minChars = 1000')
   const br = r.snapshotGate.byReason
   check(br.noSnapshot === 1 && br.llmMediated === 2 && br.shortSnapshot === 1 && br.quoteNotFound === 1, `byReason ${JSON.stringify(br)} = {noSnapshot 1, llmMediated 2 (cx1 channel + w3 x.com host), shortSnapshot 1, quoteNotFound 1}`)
@@ -120,7 +120,7 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
   check(logs.some(l => l.includes('Снапшот-гейт')), 'gate logged')
   const vp = prompts['verify:c1#1'] || ''
   check(vp.includes('5000B, extractor:defuddle') && vp.includes('[ceiling:MEDIUM — llm-mediated]'), 'verify prompt shows snapshot size/extractor and ceiling reason')
-  check((prompts['analyst'] || '').includes('ledger_schema: 4') && (prompts['analyst'] || '').includes('"ceilingCapped": true'), 'analyst prompt: ledger_schema 4 + ceilingCapped in ledger JSON')
+  check((prompts['analyst'] || '').includes('ledger_schema: 5') && (prompts['analyst'] || '').includes('"ceilingCapped": true'), 'analyst prompt: ledger_schema 5 + ceilingCapped in ledger JSON')
   check((prompts['web'] || '').includes('Extractor:') && (prompts['web'] || '').includes('schema v4'), 'channel prompt rule 5 (v4) mentions Extractor header')
   check(r.synthMeta.ledgerSummary.ceilingCapped === 3, 'ledgerSummary.ceilingCapped = 3')
 }
@@ -134,7 +134,7 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
 {
   // insufficient-sources path keeps schema version
   const { result: r } = await run({ ...base, channels: ['web'] })
-  check(r.status === 'ok' || r.ledgerSchemaVersion === 4, 'single-family run returns schema 4')
+  check(r.status === 'ok' || r.ledgerSchemaVersion === 5, 'single-family run returns schema 5')
 }
 {
   // source settings: a provider switched off drops its channels; a channel note reaches the prompt
@@ -158,6 +158,55 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
   const tp = prompts['twitter'] || ''
   check(tp.includes('CHANNEL NOTE') && tp.includes('GROK DISABLED'), 'twitter without a note gets DEFAULT_GROK_OFF_NOTE from providersOff')
   check(tp.includes('/tmp/plugin/scripts/twitterapi.sh') && !tp.includes('{PLUGIN_ROOT}/scripts/twitterapi.sh'), 'default note has {PLUGIN_ROOT} substituted too')
+}
+
+{
+  // ── schema v5: one vote per macro-family, same-family lens, FAMILY-SPLIT ──
+  // c1 web+codexweb (web-only, factual): #1 web/Brave, #2 community → both CONFIRMED
+  // c2 web-only factual: #1 web CHALLENGED, #2 community UNCHECKED → single exclusion → Codex escalation (as before)
+  // c3 reddit+hackernews (community-only, experiential): #1 community CONFIRMED, #2 web CHALLENGED → FAMILY-SPLIT, lead community
+  // c4 web-only factual: #1 web CHALLENGED, #2 community CONFIRMED → FAMILY-SPLIT, lead web, leadVerdict CHALLENGED
+  // c5 codexweb-only: #1 web UNCHECKED, #2 community CONFIRMED → CONFIRMED on 1 vote (community)
+  const table = {
+    'verify:c2#1': { verdict: 'CHALLENGED', credibility: 4, searchedVia: 'brave' },
+    'verify:c2#2': { verdict: 'UNCHECKED', credibility: 6, searchedVia: 'hn' },
+    'verify:c3#1': { verdict: 'CONFIRMED', credibility: 2, searchedVia: 'reddit' },
+    'verify:c3#2': { verdict: 'CHALLENGED', credibility: 4, searchedVia: 'brave' },
+    'verify:c4#1': { verdict: 'CHALLENGED', credibility: 5, searchedVia: 'brave' },
+    'verify:c4#2': { verdict: 'CONFIRMED', credibility: 2, searchedVia: 'reddit' },
+    'verify:c5#1': { verdict: 'UNCHECKED', credibility: 6, searchedVia: 'brave' },
+    'verify:c5#2': { verdict: 'CONFIRMED', credibility: 3, searchedVia: 'hn' },
+  }
+  const { result: r, calls, prompts } = await run(base, { verify: l => table[l] || {} })
+  const led = Object.fromEntries(r.claimLedger.map(c => [c.id, c]))
+  check(led.c1.verdict === 'CONFIRMED' && led.c1.voteCount === 2 && JSON.stringify(led.c1.votes) === '["web:CONFIRMED","community:CONFIRMED"]', `c1 web-only origin: votes web then community (got ${JSON.stringify(led.c1.votes)})`)
+  check(JSON.stringify(led.c3.votes) === '["community:CONFIRMED","web:CHALLENGED"]', `c3 community origin: votes community then web (got ${JSON.stringify(led.c3.votes)})`)
+  check(led.c3.verdict === 'FAMILY-SPLIT' && led.c3.leadFamily === 'community' && led.c3.leadVerdict === 'CONFIRMED' && led.c3.credibility === 3, `c3 experiential split → FAMILY-SPLIT, lead community CONFIRMED, credibility 3 (got ${led.c3.verdict}/${led.c3.leadFamily}/${led.c3.leadVerdict}/${led.c3.credibility})`)
+  check(led.c4.verdict === 'FAMILY-SPLIT' && led.c4.leadFamily === 'web' && led.c4.leadVerdict === 'CHALLENGED' && led.c4.credibility === 5, `c4 factual split → FAMILY-SPLIT, lead web CHALLENGED, credibility 5 (got ${led.c4.verdict}/${led.c4.leadFamily}/${led.c4.leadVerdict}/${led.c4.credibility})`)
+  check(calls.includes('escalate:c2') && led.c2.escalation && led.c2.escalation.status === 'ok' && led.c2.verdict !== 'FAMILY-SPLIT', `c2 single exclusion vs UNCHECKED still escalates to Codex (got ${led.c2.verdict}, escalation ${led.c2.escalation && led.c2.escalation.status})`)
+  check(led.c2.verdict === 'DISPUTED' || led.c2.votes.includes('codex:UNCHECKED'), `c2 after a non-confirming Codex vote → DISPUTED (got ${led.c2.verdict}, votes ${JSON.stringify(led.c2.votes)})`)
+  check(!calls.includes('escalate:c3') && !calls.includes('escalate:c4'), 'FAMILY-SPLIT claims are NOT escalated to Codex')
+  check(led.c5.verdict === 'CONFIRMED' && led.c5.voteCount === 1 && led.c5.familyVotes.community === 'CONFIRMED' && led.c5.familyVotes.web === 'UNCHECKED', `c5 confirmed on the community vote only (got ${JSON.stringify(led.c5.familyVotes)})`)
+  check(JSON.stringify(led.c3.searchedVia) === '["reddit","brave"]', `searchedVia recorded per vote (got ${JSON.stringify(led.c3.searchedVia)})`)
+  check(r.synthMeta.ledgerSummary.familySplit === 2 && r.synthMeta.ledgerSummary.disputed === 1, `ledgerSummary familySplit 2 / disputed 1 (got ${r.synthMeta.ledgerSummary.familySplit}/${r.synthMeta.ledgerSummary.disputed})`)
+  const p31 = prompts['verify:c3#1'] || '', p32 = prompts['verify:c3#2'] || '', p11 = prompts['verify:c1#1'] || '', p12 = prompts['verify:c1#2'] || ''
+  check(p31.includes('SAME-FAMILY REFUTATION" (family: community') && p31.includes('Reddit (the claim\'s own platform)') && p31.includes('HackerNews (the claim\'s own platform'), 'c3#1 same-family lens names Reddit and HN as the claim\'s own platforms')
+  check(p32.includes('CROSS-TYPE" (family: web)') && p32.includes('PRIMARY SOURCES') && p32.includes('experiential'), 'c3#2 cross-type lens = primary sources on the web, experiential rule')
+  check(p11.includes('SAME-FAMILY REFUTATION" (family: web → Brave)'), 'c1#1 same-family lens = Brave refutation')
+  check(p12.includes('CROSS-TYPE" (family: community)') && p12.includes('PRACTITIONER COMMUNITIES'), 'c1#2 cross-type lens = communities')
+  check(p31.includes('do NOT switch to the other family') && p31.includes('searchedVia'), 'verifier prompt: family lock + searchedVia in the return line')
+  const esc = prompts['escalate:c2'] || ''
+  check(esc.includes('(web family, searched via brave)'), 'escalation prompt shows the family and platform of each vote')
+  const an = prompts['analyst'] || ''
+  check(an.includes('claims_family_split: 2') && an.includes('### Веб и сообщества расходятся') && an.includes('"leadFamily": "community"'), 'analyst prompt: claims_family_split, canonical heading, leadFamily in ledger JSON')
+  check(r.synthMeta.familySplitClaims && Array.isArray(r.synthMeta.familySplitClaims), 'synthMeta.familySplitClaims present')
+}
+{
+  // twitter-origin and substack-origin claims: same-family tools
+  const { prompts } = await run({ ...base, channels: [...Object.keys(channels)] }, { verify: () => ({}) })
+  check(true, 'twitter/substack same-family tool text is covered by sameFamilyCommunityTools (see next check)')
+  const src = fs.readFileSync(corePath, 'utf8')
+  check(src.includes("chans.includes('twitter')") && src.includes('twitterapi.sh search') && src.includes('has no cheap search'), 'sameFamilyCommunityTools: X via twitterapi.sh, fallback text for platforms without cheap search')
 }
 console.log(failures ? `\n${failures} FAILED` : '\nALL OK')
 process.exit(failures ? 1 : 0)

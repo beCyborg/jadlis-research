@@ -271,16 +271,24 @@ claims with evidence prefixes (the code substitutes the spans); the snapshot gat
 MEDIUM per citation (`no-snapshot` · `llm-mediated` — codexweb/grokweb/yandex and x.com by
 constant · `short-snapshot` < 1 000 chars · `quote-not-found`); `urlhealth` checks the evidence
 URLs and the quotes against the snapshots (`snapshotChars` in evidence); two verifiers vote
-(CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED); on a vote split the third vote comes from Codex
-(GPT-6 Astra, live search; cap 8 escalations; `codexModel: "gpt-5.6-sol"` in args — rollback);
-an unconfirmed exclusion → `DISPUTED` (disputed, not part of the conclusions). Dropped claims are
+(CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), **one per macro-family** (schema v5, 2026-09-17):
+verifier #1 challenges the claim in the SAME family it came from (a Reddit claim on Reddit, an HN
+claim on HN, an X claim via TwitterAPI.io, a web claim via Brave), verifier #2 takes the other
+family (web ↔ communities); each vote is recorded as `family:verdict` plus `searchedVia` (the
+platform actually searched). Web and communities disagree (CONFIRMED vs CHALLENGED/OUTDATED) →
+`FAMILY-SPLIT`: no Codex (a web tie-breaker would only side with the web), the lead family
+follows the claim type (factual → web, experiential → communities), credibility no better than 3,
+BOTH stories go to the report. A single exclusion against UNCHECKED → the third vote comes from
+Codex (GPT-6 Astra, live search; cap 8 escalations; `codexModel: "gpt-5.6-sol"` in args —
+rollback); an unconfirmed exclusion → `DISPUTED` (disputed, not part of the conclusions). Dropped claims are
 **filtered** (not merely annotated with criticism), then the analyst writes the draft report to
 `{WORK_DIR}/report.md` (in Russian). Wait for the `<task-notification>`, then use the object:
 `{workDir, status, ledgerSchemaVersion, languages, channelsAnswered, channelStatus, failedChannels,
 aiModelActual, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, reportPath, queryRu,
 relatedCandidates, claimLedger, synthMeta, sourceSettings}`; `sourceSettings` =
-`{providersOff, notes, dropped}` — what the source resolve decided, echoed back for Phase C; `synthMeta.ledgerSummary` = `{total, confirmed,
-confirmedSplit, challenged, outdated, unchecked, disputed, escalated, escalationSkipped,
+`{providersOff, notes, dropped}` — what the source resolve decided, echoed back for Phase C; `ledgerSchemaVersion` = 5; every
+ledger claim carries `votes` (`family:verdict`), `familyVotes`, `leadFamily`/`leadVerdict` (FAMILY-SPLIT only), `searchedVia`; `synthMeta.ledgerSummary` = `{total, confirmed,
+confirmedSplit, challenged, outdated, unchecked, disputed, familySplit, escalated, escalationSkipped,
 weakEvidence, evidenceless, ceilingCapped, credibilityMedian, claimsDroppedByCap}`; `snapshotGate` =
 `{minChars, llmMediatedChannels, demotedTotal, byReason: {noSnapshot, shortSnapshot, llmMediated,
 quoteNotFound}, byChannel, ceilingCapped}` — how many HIGH citations were lowered to MEDIUM and why
@@ -311,10 +319,12 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      `claimLedger` (claims with verdict=CONFIRMED: statement translated into Russian + «(N голосов)»
      + credibility badge + the first evidence URL) and insert it as a subsection at the end of
      «## 📚 Контекст и находки». The same for `disputed > 0` and `### Спорные факты` (claims with
-     verdict=DISPUTED: statement + votes + `escalation.reasoning`).
+     verdict=DISPUTED: statement + votes + `escalation.reasoning`), and for `familySplit > 0` and
+     `### Веб и сообщества расходятся` (claims with verdict=FAMILY-SPLIT: statement + «Веб: …» /
+     «Сообщества: …» from `evidence`/`urls` per vote + «Приоритет: {leadFamily} — claim {claimType}»).
    - **Ledger metrics in the frontmatter (H8).** Compare with `synthMeta.ledgerSummary` and fix
-     deterministically (numbers, not strings): `ledger_schema: 4`,
-     `claims_confirmed`, `claims_disputed`, `claims_dropped` (= challenged + outdated),
+     deterministically (numbers, not strings): `ledger_schema: 5`,
+     `claims_confirmed`, `claims_disputed`, `claims_family_split` (= familySplit), `claims_dropped` (= challenged + outdated),
      `claims_unchecked`, `votes_confirmed_2` (= confirmed − confirmedSplit),
      `votes_confirmed_1` (= confirmedSplit), `escalations` (= escalated),
      `credibility_median`; `languages` (= `languages` from the object). A missing field — add it
@@ -367,7 +377,8 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
    - What verification dropped: from `claimLedger`/`synthMeta.droppedClaims` — which claims are
      CHALLENGED/OUTDATED and why. They **did not enter** the report (filtering, not appended criticism).
    - **Verification in one line** from `ledgerSummary`/`escalationStats`/`snapshotGate`: «проверено
-     N claims: X подтверждено (Y одним голосом), Z спорных (эскалаций в Codex: E, пропущено: S —
+     N claims (по голосу от веба и от сообществ): X подтверждено (Y одним голосом), F расхождений
+     веб/сообщества (приоритет по типу claim), Z спорных (эскалаций в Codex: E, пропущено: S —
      причины), W отсеяно, U не проверено; evidence: weak K, без evidence L, потолок MEDIUM по
      снапшот-гейту M (причины из byReason); urlhealth: dead/fabrication».
      `evidenceHealth: "skipped"` → say the URL health was not checked.

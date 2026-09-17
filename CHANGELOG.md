@@ -5,6 +5,40 @@
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-09-17
+
+### Для человека
+
+- Проверка утверждений теперь идёт по двум семьям источников отдельно: первый верификатор
+  оспаривает утверждение там, где оно найдено (с Reddit → на Reddit, с HN → на HN, из X → через
+  TwitterAPI.io, из веба → через Brave), второй берёт другую семью. У каждого утверждения ровно
+  один голос от веба и один от сообществ — раньше оба голоса могли оказаться «вебом».
+- Веб и сообщества разошлись → новый статус «расхождение семей» (`FAMILY-SPLIT`): его больше не
+  добивает третий веб-голос Codex. В отчёте появляется подраздел «Веб и сообщества расходятся» с
+  обеими версиями и строкой «Приоритет: веб | сообщества» по типу утверждения (факт → веб, опыт →
+  сообщества). В выводы такое утверждение попадает только с пометкой о расхождении.
+- В «Проверенных фактах» видно, какая семья подтвердила: «(2 голоса: веб + сообщества)» или
+  «(1 голос — только сообщества)».
+
+### For agents
+
+- `workflows/full-research-core.js`: ledger schema v5. `voteFamilies()` assigns verifier #1 the
+  claim's own macro-family (`community` for any community origin, else `web`) and verifier #2 the
+  other one; `verifyPrompt` gets a SAME-FAMILY lens with platform tools (`sameFamilyCommunityTools`:
+  Reddit / HN / `twitterapi.sh` / regional layers via Brave `site:`; Substack/YouTube/Telegram fall
+  back to Reddit+HN) and a family lock (silence → UNCHECKED, never switch family).
+- `VERIFY_SCHEMA` + required `searchedVia`; ledger claims carry `votes` as `family:verdict`,
+  `familyVotes`, `leadFamily`, `leadVerdict`, `searchedVia[]`.
+- `aggregate()`: CONFIRMED vs CHALLENGED/OUTDATED across families → `FAMILY-SPLIT` (credibility
+  ≥ 3, lead family by `claimType`), no Codex; Codex escalation remains for a single exclusion
+  against UNCHECKED. `ledgerSummary.familySplit`, frontmatter `claims_family_split`,
+  `ANALYST_SCHEMA.familySplitClaims`, canonical heading `### Веб и сообщества расходятся`.
+- `tools/smoke-core.mjs`: `run(args, hooks)` with a `verify` hook; new block covers vote order by
+  origin, FAMILY-SPLIT for both lead families, Codex still called for a lone exclusion,
+  `searchedVia`, prompt lens texts.
+- Docs: SKILL.md Phase B/C (ledger v5, `claims_family_split`, canonical section),
+  `docs/tier/README*.md` step 6 and the example, `codex-web-protocol.md` escalation rule.
+
 ## [2.1.0] — 2026-09-14
 
 ### Для человека

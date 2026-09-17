@@ -1,9 +1,9 @@
 export const meta = {
   name: 'full-research-core',
-  description: 'Ядро full-research: N канальных исследователей → curator (evidence-префиксы) → urlhealth → per-claim верификация (2 линзы) → эскалация расхождений в Codex → analyst пишет отчёт в workDir. Vault-контракт — в скилле.',
+  description: 'Ядро full-research: N канальных исследователей → curator (evidence-префиксы) → urlhealth → per-claim верификация (2 линзы: та же семья + другая семья, по голосу от веба и от сообществ) → веб и сообщества разошлись = FAMILY-SPLIT (без Codex) → одиночное исключение → третий голос Codex → analyst пишет отчёт в workDir. Vault-контракт — в скилле.',
   phases: [
     { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты' },
-    { title: 'Verify', detail: 'curator (Opus 5) выделяет claims с evidence-префиксами → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: линза-опровержение (Brave) + кросс-тип линза → расхождение голосов → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED (schema v4)' },
+    { title: 'Verify', detail: 'curator (Opus 5) выделяет claims с evidence-префиксами → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5)' },
     { title: 'Synthesize', detail: 'analyst (Fable 5.1, agentType) пишет отчёт (verified:false): три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
@@ -103,6 +103,19 @@ const ALL_CHANNELS = {
 // families (regional communities), one per language.
 const FAMILY = { web: 'web', codexweb: 'web', grokweb: 'web', yandex: 'web', reddit: 'reddit', twitter: 'twitter', hackernews: 'hn', substack: 'substack', youtube: 'youtube', telegram: 'telegram', ja: 'ja', zh: 'zh', ko: 'ko', eu: 'eu' }
 const COMMUNITY = ['reddit', 'twitter', 'hackernews', 'substack', 'youtube', 'telegram', 'ja', 'zh', 'ko', 'eu']
+// ── Vote families (schema v5, 2026-09-17). Two MACRO-families: 'web' (the open web, any engine)
+//    and 'community' (people talking: Reddit/HN/X/Substack/YouTube/Telegram/language layers).
+//    Every claim gets EXACTLY ONE vote per macro-family: verifier #1 = SAME-FAMILY refutation
+//    (a Reddit claim is challenged on Reddit, a web claim on Brave), verifier #2 = CROSS-TYPE
+//    (the other family). The origin decides which lens is which: community-only or mixed origin →
+//    #1 community, #2 web; web-only origin → #1 web, #2 community. A CONFIRMED-vs-excluded split is
+//    therefore always a web-vs-community split (FAMILY-SPLIT) — a web tie-breaker would only side
+//    with the web, so it is rendered as two stories instead (see aggregate()).
+const LANGUAGE_LAYER_KEYS = ['ja', 'zh', 'ko', 'eu']
+const macroFamily = ch => (FAMILY[ch] === 'web' ? 'web' : 'community')
+const originFamilies = claim => { const s = new Set((claim.channels || []).map(macroFamily)); return { webOrigin: s.has('web'), communityOrigin: s.has('community') } }
+const voteFamilies = claim => (originFamilies(claim).communityOrigin ? ['community', 'web'] : ['web', 'community'])
+const leadFamilyOf = claim => (claim.claimType === 'experiential' ? 'community' : 'web')
 // ── Snapshot gate (schema v4, 2026-09-05): per-citation relevance ceiling ──
 // A snapshot shorter than MIN_SNAPSHOT_CHARS does not close the gate (stub/truncation, not content).
 const MIN_SNAPSHOT_CHARS = 1000
@@ -232,8 +245,9 @@ const VERIFY_SCHEMA = {
     evidence: { type: 'string', description: 'what the counter-search found' },
     url: { type: 'string' },
     numberVerbatim: { type: ['string', 'null'], description: 'for numeric claims — the number/date/version VERBATIM from the source found (as written, no normalisation); null — claim not numeric or number not found' },
+    searchedVia: { type: 'string', description: 'the platform you ACTUALLY searched (honest telemetry): brave | reddit | hn | x | <site or layer>; "none" when no search ran' },
   },
-  required: ['claimId', 'verdict', 'credibility', 'evidence', 'url', 'numberVerbatim'],
+  required: ['claimId', 'verdict', 'credibility', 'evidence', 'url', 'numberVerbatim', 'searchedVia'],
 }
 
 const ESCALATION_SCHEMA = {
@@ -261,9 +275,10 @@ const ANALYST_SCHEMA = {
     relatedCandidates: { type: 'array', items: { type: 'string' }, description: 'keywords/topics for the obsidian search of related notes (the skill runs it)' },
     droppedClaims: { type: 'array', items: { type: 'string' }, description: 'claims filtered out as CHALLENGED/OUTDATED' },
     disputedClaims: { type: 'array', items: { type: 'string' }, description: 'DISPUTED claims — moved to «Спорные факты», not part of the conclusions' },
+    familySplitClaims: { type: 'array', items: { type: 'string' }, description: 'FAMILY-SPLIT claims — the web and the communities tell different stories; rendered in «Веб и сообщества расходятся»' },
     gaps: { type: 'array', items: { type: 'string' }, description: 'what the research did not cover (frontmatter + methodology callout)' },
   },
-  required: ['reportPath', 'queryRu', 'mainConclusion', 'relatedCandidates', 'droppedClaims', 'disputedClaims', 'gaps'],
+  required: ['reportPath', 'queryRu', 'mainConclusion', 'relatedCandidates', 'droppedClaims', 'disputedClaims', 'familySplitClaims', 'gaps'],
 }
 
 const TOOL_NOTE = 'IMPORTANT: do NOT use the built-in WebSearch/WebFetch (banned). Load the MCP tools you need through ToolSearch before calling them. Brave (Search tier): 50 req/s — parallel calls are fine. Firecrawl scrape: 1 req/s.'
@@ -381,8 +396,9 @@ ${JSON.stringify(items)}
 IN>>>`
 }
 
-// ── Verifier prompt (per claim; two different lenses: refutation via Brave and a cross-type
-//    check through a counter-channel of ANOTHER source family) ──
+// ── Verifier prompt (per claim; two lenses = two macro-families: #1 SAME-FAMILY refutation on
+//    the claim's own platform (Reddit → Reddit, HN → HN, web → Brave), #2 CROSS-TYPE through the
+//    other family; every claim ends with one web vote and one community vote) ──
 const BRAVE_TOOLS = 'mcp__plugin_jadlis-search_brave-search__brave_web_search,mcp__plugin_jadlis-search_brave-search__brave_llm_context'
 const HN_CMD = `\`${PLUGIN_ROOT}/scripts/hn-fetch.sh search "<query>" --tags story --limit 10\` and/or \`--tags comment\` (full comment texts right in the output; exit 3 = HN search unavailable → take Reddit)`
 const REDDIT_CMD = `ToolSearch "select:mcp__plugin_jadlis-search_reddit__execute_operation" → execute_operation(operation_id="discover_subreddits", parameters={query,limit:5,min_confidence:0.4}) → execute_operation(operation_id="search_subreddit", parameters={subreddit_name,query,sort:"relevance",time_filter:"all"}) — do NOT call discover_operations/get_operation_schema`
@@ -399,29 +415,47 @@ FABRICATION-SUSPECT / url:dead / quote:notFound = the span is not confirmed by t
 [ceiling:MEDIUM — <reason>] = the citation was lowered by the gate from HIGH to MEDIUM: no-snapshot (no full text), llm-mediated (channel codexweb/grokweb/yandex or x.com — model output/AI retelling, not the page body), short-snapshot (file < ${MIN_SNAPSHOT_CHARS} chars), quote-not-found (span not found in the snapshot). llm-mediated and short-snapshot are NOT fabrication but a channel limitation: the span may be true, yet it cannot be confirmed against the snapshot — find the primary source yourself.`
 }
 
+// Same-family tools for a community claim: the origin platform where a cheap search exists,
+// the nearest community platform otherwise (Substack/YouTube/Telegram have no cheap search).
+function sameFamilyCommunityTools(chans) {
+  const t = []
+  if (chans.includes('reddit')) t.push(`Reddit (the claim's own platform): ${REDDIT_CMD} — search OTHER subreddits/threads than the evidence`)
+  if (chans.includes('hackernews')) t.push(`HackerNews (the claim's own platform; Bash, no ToolSearch): ${HN_CMD}`)
+  if (chans.includes('twitter')) t.push(`Twitter/X (the claim's own platform; Bash): \`bash ${PLUGIN_ROOT}/scripts/twitterapi.sh search "<query>" Top\` — exit≠0 or 429 → ToolSearch "select:${BRAVE_TOOLS}" → brave_web_search with site:x.com`)
+  const layers = chans.filter(ch => LANGUAGE_LAYER_KEYS.includes(ch))
+  if (layers.length) t.push(`Regional layer ${layers.join('/')} (the claim's own communities): ToolSearch "select:${BRAVE_TOOLS}" → brave_web_search with site: filters of the layer's platforms, in the platform's language (platform map: ${LANGUAGE_LAYERS})`)
+  if (!t.length) t.push(`the origin platform (${chans.join(', ') || '—'}) has no cheap search — take the nearest community platform: Reddit ${REDDIT_CMD}; alternative HackerNews (Bash): ${HN_CMD}`)
+  return t
+}
+
 function verifyPrompt(claim, idx) {
   const chans = claim.channels || []
-  const communityOrigin = chans.some(ch => COMMUNITY.includes(ch))
-  const webOrigin = chans.some(ch => FAMILY[ch] === 'web')
+  const family = voteFamilies(claim)[idx] || 'web'
+  const sameFamily = idx === 0
   const experiential = claim.claimType === 'experiential'
-  // Cross-community: a different community family than the claim's source channels.
-  const fromHN = chans.includes('hackernews')
-  const crossCommunity = fromHN
-    ? `Reddit (a different family than HN): ${REDDIT_CMD}`
-    : `HackerNews (Bash, no ToolSearch): ${HN_CMD}${chans.includes('reddit') ? '' : `; alternative — Reddit: ${REDDIT_CMD}`}`
-  const lens = idx === 0
-    ? `LENS "REFUTATION" (Brave): look for REFUTING evidence — counterarguments, contradictions, debunks. Queries like "<topic> problems", "<claim> debunked", "<topic> criticism".
-TOOLS: ToolSearch "select:${BRAVE_TOOLS}" → 1-2 queries (llm_context for page content, web_search for coverage; parallel calls are fine).`
-    : `LENS "CROSS-TYPE" — confirm or refute the claim with a source of ANOTHER TYPE (another family) than the claim's source channels:
-${webOrigin && !communityOrigin
-  ? `- The claim came from web engines → check it against PRACTITIONER COMMUNITIES. Preferably HackerNews (Bash, no ToolSearch): ${HN_CMD}. Alternative — Reddit via execute_operation DIRECTLY: ${REDDIT_CMD}.`
-  : communityOrigin && !webOrigin
-    ? `- The claim came from communities (W2, the order is MANDATORY): (1) FIRST cross-community — ${crossCommunity}: you look for INDEPENDENT testimony of other people (other accounts, another platform, another time); (2) THEN primary sources: ToolSearch "select:${BRAVE_TOOLS}" → 1 query like "<claim> official docs" / "<topic> changelog". ${experiential ? 'The claim is experiential: first person with specifics (Admiralty C — "X broke on my prod under Y") is FULL independent testimony; absence of a mention in the official docs does NOT refute people\'s experience.' : 'The claim is factual: people\'s experience supports, but the primary source decides.'}`
-    : `- The claim is supported by both web and communities → check its CURRENCY against primary sources (official docs/changelog, "<topic> 2026") via ToolSearch "select:${BRAVE_TOOLS}".`}
-BUDGET: ≤3 tool calls, load EXACTLY ONE tool set. FORBIDDEN: Grok CLI (~/.grok/bin/grok) and mcp__grok-mcp__x_search — too slow/expensive for verification; Yandex (yandex-search.sh) — paid, not used in verification; Reddit discover_operations/get_operation_schema — call execute_operation directly.`
+  const { webOrigin, communityOrigin } = originFamilies(claim)
+  const braveTools = `ToolSearch "select:${BRAVE_TOOLS}"`
+  let lens
+  if (sameFamily && family === 'web') {
+    lens = `LENS "SAME-FAMILY REFUTATION" (family: web → Brave): the claim came from the open web — look for REFUTING evidence on the open web: counterarguments, contradictions, debunks, a newer primary source. Queries like "<topic> problems", "<claim> debunked", "<topic> criticism".
+TOOLS: ${braveTools} → 1-2 queries (llm_context for page content, web_search for coverage; parallel calls are fine).`
+  } else if (sameFamily) {
+    lens = `LENS "SAME-FAMILY REFUTATION" (family: community → the claim's OWN platform): the claim came from ${chans.filter(ch => macroFamily(ch) === 'community').join(', ') || 'communities'}. Challenge it WHERE IT WAS FOUND: look for people on the SAME platform who report the OPPOSITE or a different picture — OTHER threads, OTHER accounts, OTHER time than the evidence spans (the same thread is not independent). Queries like "<topic> didn't work", "<claim> wrong", "<topic> regret", "<topic> vs <alternative>".
+TOOLS (the origin platform; ONE tool set):
+${sameFamilyCommunityTools(chans).map(t => `- ${t}`).join('\n')}
+Judge by the platform's OWN picture: several independent people agree with the claim → CONFIRMED; the platform's consensus contradicts it → CHALLENGED; found only the original thread or nothing → UNCHECKED.`
+  } else if (family === 'community') {
+    lens = `LENS "CROSS-TYPE" (family: community): the claim came from web engines → confirm or refute it against PRACTITIONER COMMUNITIES (people who tried it, not the docs). Preferably HackerNews (Bash, no ToolSearch): ${HN_CMD}. Alternative — Reddit via execute_operation DIRECTLY: ${REDDIT_CMD}.${experiential ? ' The claim is experiential: first person with specifics (Admiralty C — "X broke on my prod under Y") is FULL independent testimony.' : ' The claim is factual: people\'s experience supports or contradicts, the primary source decides — report what the practitioners say.'}`
+  } else {
+    lens = (webOrigin && communityOrigin)
+      ? `LENS "CROSS-TYPE" (family: web): the claim is supported by both web and communities → check its CURRENCY and the PRIMARY SOURCE (official docs/changelog, "<topic> 2026") via ${braveTools} → 1-2 queries.`
+      : `LENS "CROSS-TYPE" (family: web): the claim came from communities → check it against PRIMARY SOURCES on the open web: ${braveTools} → 1-2 queries like "<claim> official docs" / "<topic> changelog" / "<topic> benchmark". ${experiential ? 'The claim is experiential: absence of a mention in the official docs does NOT refute people\'s experience — CHALLENGED only if a primary source DIRECTLY contradicts it, otherwise UNCHECKED.' : 'The claim is factual: the primary source decides.'}`
+  }
+  lens += `
+BUDGET: ≤3 tool calls, load EXACTLY ONE tool set. You are the "${family}" family vote — do NOT switch to the other family when yours is silent (silence → UNCHECKED; the other verifier covers the other family). FORBIDDEN: Grok CLI (~/.grok/bin/grok) and mcp__grok-mcp__x_search — too slow/expensive for verification; Yandex (yandex-search.sh) — paid, not used in verification; Reddit discover_operations/get_operation_schema — call execute_operation directly.`
   const numericBlock = claim.numeric ? `
 NUMERIC CLAIM — normalisation rules (a difference in notation is NOT a substantive difference): "1 000" = "1000" = "1k"; "10 %" = "10%"; "$1.2B" = "1.2 billion USD"; rounding within ±2% — a match; different units — convert before comparing; a date in another format — the same date. CHALLENGED on a number ONLY if the number found differs IN SUBSTANCE (another order of magnitude, another year, another version). Return the number found VERBATIM in numberVerbatim (as written in the source).` : ''
-  return `You are adversarial verifier #${idx + 1}. Check the claim through an INDEPENDENT live search. Do not trust the original research.
+  return `You are adversarial verifier #${idx + 1} — the "${family}" family vote (${sameFamily ? 'same family as the claim\'s origin' : 'the other family'}). Check the claim through an INDEPENDENT live search. Do not trust the original research.
 
 CLAIM: "${claim.statement}"
 (source channels: ${chans.join(', ') || '—'}; declared strength: ${claim.strength}; type: ${claim.claimType || 'factual'}${claim.loadBearing ? '; LOAD-BEARING for the conclusions' : ''})
@@ -442,7 +476,7 @@ Judge:
 - Confirmed independently, no refutations? → CONFIRMED.
 - credibility (1-6): 1 — confirmed by an independent source of another type; 2 — probably true (logical, consistent, no direct independent confirmation); 3 — possibly true; 4 — doubtful; 5 — improbable; 6 — cannot be judged.
 
-Return by the schema: claimId="${claim.id}", verdict (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), credibility (1-6), evidence (what you found, in English; for UNCHECKED — what exactly failed and why), url (key verification source; for UNCHECKED — the unreachable URL or an empty string), numberVerbatim (the number verbatim or null).
+Return by the schema: claimId="${claim.id}", verdict (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), credibility (1-6), evidence (what you found, in English; for UNCHECKED — what exactly failed and why), url (key verification source; for UNCHECKED — the unreachable URL or an empty string), numberVerbatim (the number verbatim or null), searchedVia (the platform you ACTUALLY searched: brave | reddit | hn | x | <site or layer>; "none" if no search ran).
 Do NOT spawn sub-agents.`
 }
 
@@ -461,7 +495,7 @@ EVIDENCE SPANS from the original sources (verbatim, original language):
 ${(claim.evidence || []).map(e => `- [${e.prefix}] ${e.url}\n${(e.quotes || []).map(q => `  "${q}"`).join('\n') || '  (no verbatim span)'}`).join('\n') || '- (none)'}
 
 VERIFIER VOTES:
-${votes.map((v, i) => `- verifier ${i + 1}: ${v.verdict} (credibility ${v.credibility}) — ${String(v.evidence || '').slice(0, 600)}${v.url ? ` [${v.url}]` : ''}`).join('\n')}
+${votes.map((v, i) => `- verifier ${i + 1} (${v.family || '?'} family, searched via ${v.searchedVia || '?'}): ${v.verdict} (credibility ${v.credibility}) — ${String(v.evidence || '').slice(0, 600)}${v.url ? ` [${v.url}]` : ''}`).join('\n')}
 
 ARGUMENT FOR EXCLUSION (from the ${exclusionVote ? exclusionVote.verdict : 'dissenting'} vote): ${exclusionVote ? String(exclusionVote.evidence || '').slice(0, 800) : '(none given)'}
 
@@ -493,7 +527,7 @@ ROLE_PROMPT>>>`
 // ── Analyst prompt (decision-first report: conclusions and actions for the reader; process → callout/frontmatter).
 //    Instructions are in English; the REPORT ITSELF is written in Russian — it becomes the vault note as is. ──
 function analystPrompt(files, ledger, stats, aiModel) {
-  return `You are the analyst. Read the channel results, cross-validate them and write the final report IN RUSSIAN in the DECISION-FIRST + CONTEXT format: on top — conclusions and advice for the decision (what the reader sees first); below — a separate section «📚 Контекст и находки» with the researched substance of the topic. The collapsed callout «Методология» takes ONLY the meta-process (how you searched, what was dropped), NOT the substantive context of the subject. IMPORTANT: claims with verdict CHALLENGED/OUTDATED go neither into the conclusions nor into the context — filter, do not append criticism. DISPUTED claims go into a separate subsection «Спорные факты» and are not part of the conclusions.
+  return `You are the analyst. Read the channel results, cross-validate them and write the final report IN RUSSIAN in the DECISION-FIRST + CONTEXT format: on top — conclusions and advice for the decision (what the reader sees first); below — a separate section «📚 Контекст и находки» with the researched substance of the topic. The collapsed callout «Методология» takes ONLY the meta-process (how you searched, what was dropped), NOT the substantive context of the subject. IMPORTANT: claims with verdict CHALLENGED/OUTDATED go neither into the conclusions nor into the context — filter, do not append criticism. DISPUTED claims go into a separate subsection «Спорные факты» and are not part of the conclusions. FAMILY-SPLIT claims (the web and the communities tell DIFFERENT stories) go into a separate subsection «Веб и сообщества расходятся» with BOTH stories rendered; they may support a conclusion only with an explicit divergence marker (rules below) — never silently pick a side.
 
 QUERY: ${QUERY}
 ${DECISION ? `USER'S DECISION (the whole report is built around it): ${DECISION}` : 'USER\'S DECISION: not given — deliver the verdict for the most likely decision behind the query.'}
@@ -505,8 +539,8 @@ ${files.map(f => `- ${f}`).join('\n')}
 STYLE EXAMPLE (Read): ${PLUGIN_ROOT}/skills/research/examples/sample-report.md —
 shows tone, density and layout. The binding contract is the format spec below; adapt structure and length to the topic, do not copy the example's skeleton literally.
 
-CROSS-VERIFICATION LEDGER (live checking of claims; each has verdict, credibility 1-6, vote vector votes[], claimType, loadBearing, evidence spans, ceilingCapped — all evidence of the claim was lowered to MEDIUM by the snapshot gate, escalation when escalated). Statements are in English — translate them into Russian in the report, numbers verbatim:
-${JSON.stringify(ledger.map(c => ({ id: c.id, statement: c.statement, channels: c.channels, strength: c.strength, claimType: c.claimType, loadBearing: c.loadBearing, verdict: c.verdict, votes: c.votes, voteCount: c.voteCount, credibility: c.credibility, evidence: c.verifierEvidence, urls: c.urls, evidenceRefs: (c.evidence || []).map(e => e.prefix), weakEvidence: !!c.weakEvidence, evidenceless: !!c.evidenceless, ceilingCapped: !!c.ceilingCapped, escalation: c.escalation ? { status: c.escalation.status, confirmsExclusion: c.escalation.confirmsExclusion, reasoning: c.escalation.reasoning } : null, escalationSkipped: c.escalationSkipped || null })), null, 2)}
+CROSS-VERIFICATION LEDGER (live checking of claims; each has verdict, credibility 1-6, vote vector votes[] as "family:verdict" (one vote from the web family, one from the community family), familyVotes, leadFamily/leadVerdict for FAMILY-SPLIT, searchedVia (the platforms the verifiers actually searched), claimType, loadBearing, evidence spans, ceilingCapped — all evidence of the claim was lowered to MEDIUM by the snapshot gate, escalation when escalated). Statements are in English — translate them into Russian in the report, numbers verbatim:
+${JSON.stringify(ledger.map(c => ({ id: c.id, statement: c.statement, channels: c.channels, strength: c.strength, claimType: c.claimType, loadBearing: c.loadBearing, verdict: c.verdict, votes: c.votes, voteCount: c.voteCount, familyVotes: c.familyVotes || null, leadFamily: c.leadFamily || null, leadVerdict: c.leadVerdict || null, searchedVia: c.searchedVia || [], credibility: c.credibility, evidence: c.verifierEvidence, urls: c.urls, evidenceRefs: (c.evidence || []).map(e => e.prefix), weakEvidence: !!c.weakEvidence, evidenceless: !!c.evidenceless, ceilingCapped: !!c.ceilingCapped, escalation: c.escalation ? { status: c.escalation.status, confirmsExclusion: c.escalation.confirmsExclusion, reasoning: c.escalation.reasoning } : null, escalationSkipped: c.escalationSkipped || null })), null, 2)}
 
 LEDGER SUMMARY: ${JSON.stringify(stats)}
 
@@ -515,7 +549,7 @@ CROSS-VALIDATION (for selecting material; the process itself is NOT written into
 - WEB FAMILY: the files web.md/web-codex.md/web-grok.md/web-yandex.md are ENGINES (Brave [w], Codex [cx], Grok [gw], Yandex [y]) over ONE open web. Deduplicate their findings by URL. Engine agreement = reinforcement WITHIN the web type, NOT independent triangulation (independence = web+community). A finding given by only ONE engine and confirmed by nobody else — reduced credibility (badge digit no better than 3) + a short note "только {движок}".
 - Community consensus = strong ONLY when independent (different accounts/time, no incentives).
 - WEIGHTS (schema v3): the weight of a statement is made of four axes — (1) independence: number of DIFFERENT source families (web, reddit, hn, twitter, substack, youtube, telegram, ja, zh, ko, eu); (2) source reliability: Admiralty A-F from the channel files; (3) claim type: for factual the primary source decides (web/docs is the priority family), for experiential the communities decide (first person with specifics, Admiralty C, is full testimony; the web only complements); (4) confirmation: credibility 1-6 from the ledger. Do not apply a global priority "social over web" or vice versa — the family priority follows the claim TYPE.
-- Claims from the ledger: CONFIRMED → not only license verdicts in the conclusions but are RENDERED EXPLICITLY in the subsection «Проверенные факты» of the section «📚 Контекст и находки» (with evidence and a credibility badge) — this is the confirmed foundation, it must not be "dissolved" into the conclusions. The VOTE VECTOR is visible to the reader: every confirmed fact carries «(2 голоса)» when voteCount=2 or «(1 голос — split: второй верификатор не смог проверить)» when voteCount=1 — the reader must distinguish double from single confirmation. DISPUTED → subsection «Спорные факты» (votes split, the third vote did not confirm exclusion): statement + what the disagreement is + badge; not part of conclusions and advice. CHALLENGED/OUTDATED → NOT in conclusions and NOT in context, only a line in the methodology callout with the reason. UNCHECKED → NOT in the report; one line in the methodology callout: «не удалось проверить: N claims (причины кратко)». weakEvidence/evidenceless → badge no better than 3 even when CONFIRMED. ceilingCapped → badge no better than 3 even when CONFIRMED (all evidence of the claim is llm-mediated/short-snapshot/no-snapshot/quote-not-found: not fabrication but a channel limitation — the span is not confirmed against the page body); one line in the methodology callout: «потолок MEDIUM по снапшот-гейту: N claims».
+- Claims from the ledger: CONFIRMED → not only license verdicts in the conclusions but are RENDERED EXPLICITLY in the subsection «Проверенные факты» of the section «📚 Контекст и находки» (with evidence and a credibility badge) — this is the confirmed foundation, it must not be "dissolved" into the conclusions. The VOTE VECTOR is visible to the reader: every confirmed fact carries «(2 голоса: веб + сообщества)» when voteCount=2 or «(1 голос — только {веб|сообщества}: второй верификатор не смог проверить)» when voteCount=1 (the family from votes[]) — the reader must distinguish double from single confirmation and see which family confirmed. FAMILY-SPLIT → subsection «Веб и сообщества расходятся» (heading EXACTLY \`### Веб и сообщества расходятся\`): per claim — the statement, a line «Веб: …» (what the web vote found, with its url) and a line «Сообщества: …» (what the community vote found, with its url), then «Приоритет: {веб|сообщества} — claim {фактический|опытный}» (leadFamily follows claimType: factual → web, experiential → communities) and one line WHY the two stories differ if visible (different versions, different use cases, marketing vs practice). Badge no better than 3. The claim may support a conclusion or advice ONLY when leadVerdict=CONFIRMED and ONLY with the marker «(расхождение веб/сообщества, приоритет {семья})» next to it; leadVerdict=CHALLENGED/OUTDATED → not in conclusions and not in advice, only in the subsection. Never average the two stories into one and never drop the divergence silently. DISPUTED → subsection «Спорные факты» (votes split, the third vote did not confirm exclusion): statement + what the disagreement is + badge; not part of conclusions and advice. CHALLENGED/OUTDATED → NOT in conclusions and NOT in context, only a line in the methodology callout with the reason. UNCHECKED → NOT in the report; one line in the methodology callout: «не удалось проверить: N claims (причины кратко)». weakEvidence/evidenceless → badge no better than 3 even when CONFIRMED. ceilingCapped → badge no better than 3 even when CONFIRMED (all evidence of the claim is llm-mediated/short-snapshot/no-snapshot/quote-not-found: not fabrication but a channel limitation — the span is not confirmed against the page body); one line in the methodology callout: «потолок MEDIUM по снапшот-гейту: N claims».
 
 CREDIBILITY BADGES: every link in the advice and in «Источники» has the form [w1·B2](URL): the letter A-F — source reliability (from the channel files, the Admiralty field), the digit 1-6 — how well the information is confirmed. YOU assign the digit by these rules: 1-2 ONLY with independent confirmation (CONFIRMED in the ledger or 2+ sources of different types); 3 — a single plausible source; 4-5 — doubtful/improbable; 6 — cannot be judged. The scales are independent: A6 and E1 both happen.
 
@@ -531,9 +565,10 @@ query: "{the original query; replace inner double quotes with «»}"
 decision: "{the user's decision or empty}"
 channels: [{keys of the selected channels; collapse the web engines (web/codexweb/grokweb) into a single "web"; yandex (if selected) — its own key}]
 languages: [${LANGUAGES.map(l => `"${l}"`).join(', ')}]
-ledger_schema: 4
+ledger_schema: 5
 claims_confirmed: ${stats.confirmed}
 claims_disputed: ${stats.disputed}
+claims_family_split: ${stats.familySplit}
 claims_dropped: ${stats.challenged + stats.outdated}
 claims_unchecked: ${stats.unchecked}
 votes_confirmed_2: ${stats.confirmed - stats.confirmedSplit}
@@ -558,12 +593,13 @@ Sections as in the reference (all headings and text IN RUSSIAN):
    - **Факты и цифры**: concrete numbers, ranges, verbatim source quotes (TRANSLATED into Russian) — each with a badge link [pref·Badge](URL).
    - **Проверенные факты**: ledger claims with verdict=CONFIRMED — list them explicitly, with evidence and a credibility badge; this is the confirmed foundation of the conclusions. The subsection heading is EXACTLY \`### Проверенные факты\` (canonical, the post-check greps it; do NOT merge with «Факты и цифры»). No confirmed claims — skip the subsection.
    - **Спорные факты**: claims with verdict=DISPUTED — heading EXACTLY \`### Спорные факты\` (canonical); each line: statement, who found what (votes), why unresolved; badge no better than 4. No DISPUTED — skip the subsection.
+   - **Веб и сообщества расходятся**: claims with verdict=FAMILY-SPLIT — heading EXACTLY \`### Веб и сообщества расходятся\` (canonical); per claim: statement, «Веб: …» and «Сообщества: …» lines with urls, «Приоритет: …» line; badge no better than 3. No FAMILY-SPLIT — skip the subsection.
    - **Разногласия и нюансы**: where sources/communities disagree, which camps, what is in question — do NOT average into a false consensus.
    Only material that passed cross-validation goes into this section; CHALLENGED/OUTDATED claims do NOT (they are a single line in the methodology callout).
 9. ## Кому доверять в этой теме — a table: Источник | Надёжность (A-F) | Почему.
 10. ## Источники — subsections per channel; the web engines — ONE subsection "### Web" (the engine is distinguishable by the prefix w/cx/gw/y, do not repeat URL duplicates between engines); each line: [префикс·Бейдж](URL) Title — one line in Russian about what it is.
 11. ## Связанные заметки — an EMPTY placeholder section (the orchestrator adds the wikilinks).
-12. > [!note]- Методология и проверка — ONE COLLAPSED callout ≤25 lines at the very end: channels and number of sources; checked K claims: X confirmed (Y of them by a single vote), Z disputed (escalated to the third vote: N), W dropped (the dropped list + reason: оспорено/устарело), could not check: U; the block **«Веса»** — 2-4 lines: the formula (families → independence; Admiralty A-F → source reliability; claimType → priority family; credibility 1-6 → confirmation) and which families contributed to each key conclusion (e.g. «вывод 1: web A + reddit C, factual → приоритет web»); gaps; sampling bias; data date; «полный процесс — в work_dir из frontmatter».
+12. > [!note]- Методология и проверка — ONE COLLAPSED callout ≤25 lines at the very end: channels and number of sources; checked K claims (one web vote + one community vote each): X confirmed (Y of them by a single vote), F web-vs-community splits (priority by claim type), Z disputed (escalated to the third vote: N), W dropped (the dropped list + reason: оспорено/устарело), could not check: U; the block **«Веса»** — 2-4 lines: the formula (families → independence; Admiralty A-F → source reliability; claimType → priority family, also the tie rule when web and communities split; credibility 1-6 → confirmation) and which families contributed to each key conclusion (e.g. «вывод 1: web A + reddit C, factual → приоритет web»); gaps; sampling bias; data date; «полный процесс — в work_dir из frontmatter».
 
 TEXT RULES:
 - Sections 4-7: every piece of advice is a callout > [!tip] (делать/принимать/относиться/учитывать) or > [!failure] (не делать/не принимать/игнорировать). The callout title is a concrete action; the body is one line of "why" + badge links. 2-4 pieces of advice per section; nothing to say for a section — skip it entirely, do not invent.
@@ -573,7 +609,7 @@ TEXT RULES:
 - Links ONLY in single brackets: [w1·B2](URL). ❌ NOT [[w1]](URL). Do NOT use wikilinks.
 
 SAVING: with Write save the draft report to ${WORK_DIR}/report.md (NOT to the vault — the orchestrator writes to the vault).
-After writing, return by the schema: reportPath="${WORK_DIR}/report.md", queryRu (a short Russian phrasing ≤25 chars for the file name), mainConclusion, relatedCandidates (3-6 keywords/topics for the obsidian search of related notes), droppedClaims (what was filtered as CHALLENGED/OUTDATED), disputedClaims (what was moved to «Спорные факты»), gaps (the same as in the frontmatter).
+After writing, return by the schema: reportPath="${WORK_DIR}/report.md", queryRu (a short Russian phrasing ≤25 chars for the file name), mainConclusion, relatedCandidates (3-6 keywords/topics for the obsidian search of related notes), droppedClaims (what was filtered as CHALLENGED/OUTDATED), disputedClaims (what was moved to «Спорные факты»), familySplitClaims (what was rendered in «Веб и сообщества расходятся»), gaps (the same as in the frontmatter).
 Do NOT spawn sub-agents, do NOT call skills, read only the channel files in ${WORK_DIR}, the snapshots and the reference.`
 }
 
@@ -656,7 +692,7 @@ log(`Каналов успешно: ${okResults.length}/${SELECTED.length} (уп
 // one succeeded, there will be no triangulation. A deliberate web-only run (1 family) is fine.
 if (okResults.length < 2 || (selectedFamilies.length >= 2 && answeredFamilies.length < 2)) {
   log(`Недостаточно независимых источников (успешных каналов: ${okResults.length}, семей: ${answeredFamilies.length}) — отдаю что есть, без синтеза.`)
-  return { workDir: WORK_DIR, status: 'insufficient-sources', ledgerSchemaVersion: 4, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED } }
+  return { workDir: WORK_DIR, status: 'insufficient-sources', ledgerSchemaVersion: 5, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED } }
 }
 
 // ═══ Phase 2 — Verify (per-claim live counter-search) ═══
@@ -766,29 +802,45 @@ try {
 const voted = (await parallel(claims.map(c => () =>
   parallel(Array.from({ length: VERIFIERS }, (_, i) => () =>
     agent(verifyPrompt(c, i), w({ label: `verify:${c.id}#${i + 1}`, phase: 'Verify', schema: VERIFY_SCHEMA }))
+      .then(v => (v ? Object.assign({ family: voteFamilies(c)[i] || 'web', lens: i === 0 ? 'same-family' : 'cross-type' }, v) : null))
   )).then(votes => ({ claim: c, votes: votes.filter(Boolean) }))
 ))).filter(Boolean)
 
-// ── Vote aggregation (schema v3) — truth table ──
+// ── Vote aggregation (schema v5) — truth table ──
+//   Every claim has ONE vote per macro-family (web / community), see voteFamilies().
 //   CONFIRMED+CONFIRMED → CONFIRMED; CONFIRMED+UNCHECKED → CONFIRMED (1 vote, split);
 //   agreed exclusion (CHALLENGED/OUTDATED × CHALLENGED/OUTDATED) → exclusion without Codex;
-//   UNCHECKED+UNCHECKED → UNCHECKED; a split (CONFIRMED vs CHALLENGED/OUTDATED,
-//   CHALLENGED/OUTDATED vs UNCHECKED) → third vote from Codex (cap ESCALATION_CAP).
+//   UNCHECKED+UNCHECKED → UNCHECKED;
+//   CONFIRMED vs CHALLENGED/OUTDATED across families = the web and the communities tell different
+//   stories → FAMILY-SPLIT: NO third vote (a web tie-breaker would only side with the web), the lead
+//   family follows the claim type (factual → web, experiential → community), credibility no better
+//   than 3, the analyst renders BOTH sides; a single CHALLENGED/OUTDATED vs UNCHECKED → third vote
+//   from Codex (cap ESCALATION_CAP).
 const EXCL = v => v === 'CHALLENGED' || v === 'OUTDATED'
 const pickExclusion = verdicts => verdicts.includes('OUTDATED') ? 'OUTDATED' : 'CHALLENGED'
 function aggregate(c, v) {
-  const all = v.map(x => x.verdict)
+  const all = v.map(x => `${x.family || '?'}:${x.verdict}`)
   const real = v.filter(x => x.verdict !== 'UNCHECKED')
   const verdicts = real.map(x => x.verdict)
-  let verdict, needsEscalation = false
+  const familyVotes = {}
+  for (const x of v) familyVotes[x.family || '?'] = x.verdict
+  const confirmedFams = real.filter(x => x.verdict === 'CONFIRMED').map(x => x.family)
+  const exclFams = real.filter(x => EXCL(x.verdict)).map(x => x.family)
+  const familySplit = confirmedFams.length > 0 && exclFams.length > 0 && confirmedFams.some(f => !exclFams.includes(f))
+  let verdict, needsEscalation = false, leadFamily = null, leadVerdict = null
   if (!v.length) verdict = 'UNVERIFIED'
   else if (!real.length) verdict = 'UNCHECKED'
   else if (verdicts.every(x => x === 'CONFIRMED')) verdict = 'CONFIRMED'
   else if (verdicts.every(EXCL) && real.length >= 2) verdict = pickExclusion(verdicts)
-  else { verdict = pickExclusion(verdicts); needsEscalation = true } // CONFIRMED vs EXCL, or a single EXCL with UNCHECKED
+  else if (familySplit) { verdict = 'FAMILY-SPLIT'; leadFamily = leadFamilyOf(c); leadVerdict = familyVotes[leadFamily] || null }
+  else { verdict = pickExclusion(verdicts); needsEscalation = true } // a single EXCL against UNCHECKED
   // confirmation — conservatively over the SUBSTANTIVE votes (UNCHECKED does not pull towards 6)
-  const credibility = real.length ? Math.max(...real.map(x => x.credibility || 6)) : 6
-  return { ...c, verdict, votes: all, voteCount: real.length, credibility, verifierEvidence: v.map(x => x.evidence), urls: v.map(x => x.url), numbersVerbatim: v.map(x => x.numberVerbatim || null), rawVotes: v, needsEscalation }
+  let credibility = real.length ? Math.max(...real.map(x => x.credibility || 6)) : 6
+  if (verdict === 'FAMILY-SPLIT') {
+    const lead = v.find(x => x.family === leadFamily)
+    credibility = Math.max(3, (lead && lead.credibility) || 3) // the other family disagrees → never better than 3
+  }
+  return { ...c, verdict, votes: all, voteCount: real.length, familyVotes, leadFamily, leadVerdict, searchedVia: v.map(x => x.searchedVia || null), credibility, verifierEvidence: v.map(x => x.evidence), urls: v.map(x => x.url), numbersVerbatim: v.map(x => x.numberVerbatim || null), rawVotes: v, needsEscalation }
 }
 let claimLedger = voted.map(({ claim, votes }) => aggregate(claim, votes))
 
@@ -842,14 +894,15 @@ const challenged = count('CHALLENGED')
 const outdated = count('OUTDATED')
 const unchecked = count('UNCHECKED')
 const disputed = count('DISPUTED')
+const familySplit = count('FAMILY-SPLIT')
 const confirmedSplit = claimLedger.filter(c => c.verdict === 'CONFIRMED' && c.voteCount === 1).length
 const weakEvidence = claimLedger.filter(c => c.weakEvidence).length
 const evidencelessN = claimLedger.filter(c => c.evidenceless).length
 const credVals = claimLedger.filter(c => c.verdict !== 'UNCHECKED' && c.verdict !== 'UNVERIFIED').map(c => c.credibility).sort((a, b) => a - b)
 const credibilityMedian = credVals.length ? (credVals.length % 2 ? credVals[(credVals.length - 1) / 2] : (credVals[credVals.length / 2 - 1] + credVals[credVals.length / 2]) / 2) : null
 const ceilingCappedN = claimLedger.filter(c => c.ceilingCapped).length
-const ledgerSummary = { total: claimLedger.length, confirmed, confirmedSplit, challenged, outdated, unchecked, disputed, escalated: escalationStats.escalated, escalationSkipped: Object.values(escalationStats.skipped).reduce((a, b) => a + b, 0), weakEvidence, evidenceless: evidencelessN, ceilingCapped: ceilingCappedN, credibilityMedian, claimsDroppedByCap }
-log(`Ledger v4: CONFIRMED=${confirmed} (split: ${confirmedSplit}), DISPUTED=${disputed}, CHALLENGED=${challenged}, OUTDATED=${outdated}, UNCHECKED=${unchecked}; эскалаций ${escalationStats.escalated}, пропущено ${ledgerSummary.escalationSkipped}; weakEvidence=${weakEvidence}; ceilingCapped=${ceilingCappedN}; медиана credibility=${credibilityMedian}`)
+const ledgerSummary = { total: claimLedger.length, confirmed, confirmedSplit, challenged, outdated, unchecked, disputed, familySplit, escalated: escalationStats.escalated, escalationSkipped: Object.values(escalationStats.skipped).reduce((a, b) => a + b, 0), weakEvidence, evidenceless: evidencelessN, ceilingCapped: ceilingCappedN, credibilityMedian, claimsDroppedByCap }
+log(`Ledger v5: CONFIRMED=${confirmed} (split: ${confirmedSplit}), FAMILY-SPLIT=${familySplit}, DISPUTED=${disputed}, CHALLENGED=${challenged}, OUTDATED=${outdated}, UNCHECKED=${unchecked}; эскалаций ${escalationStats.escalated}, пропущено ${ledgerSummary.escalationSkipped}; weakEvidence=${weakEvidence}; ceilingCapped=${ceilingCappedN}; медиана credibility=${credibilityMedian}`)
 
 // ═══ Phase 3 — Synthesize ═══
 phase('Synthesize')
@@ -889,7 +942,11 @@ return {
   //   DISPUTED + numberVerbatim + 16-claim cap + snapshot gate in code.
   // v4 (2026-09-05): per-citation snapshot gate (no-snapshot / llm-mediated / short-snapshot /
   //   quote-not-found → MEDIUM ceiling), ceilingCapped, snapshotChars in evidence, snapshotGate.
-  ledgerSchemaVersion: 4,
+  // v5 (2026-09-17): one vote per macro-family (web / community) — verifier #1 same-family
+  //   refutation on the claim's own platform, #2 cross-type; votes[] as "family:verdict",
+  //   familyVotes/leadFamily/leadVerdict/searchedVia; CONFIRMED-vs-excluded across families →
+  //   FAMILY-SPLIT (no Codex), Codex only for a single exclusion against UNCHECKED.
+  ledgerSchemaVersion: 5,
   languages: LANGUAGES,
   channelsAnswered: channelResults.length,
   channelsSelected: SELECTED,
@@ -920,6 +977,7 @@ return {
     mainConclusion: report.mainConclusion,
     droppedClaims: report.droppedClaims || [],
     disputedClaims: report.disputedClaims || [],
+    familySplitClaims: report.familySplitClaims || [],
     gaps: report.gaps || [],
     ledgerSummary,
   },

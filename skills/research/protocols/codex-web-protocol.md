@@ -91,9 +91,9 @@ Diagnostics:
 - Messages in stderr about web search being disabled — the `tools.web_search` config key has been renamed
   (check `codex exec --help` and `~/.codex/config.toml`).
 
-## Verification escalation (third voice, schema v3)
+## Verification escalation (third voice, schema v5)
 
-Besides serving as a channel, Codex is used by the `full-research-core` workflow as a **third, heterogeneous voice** when the two verifiers disagree (`CONFIRMED` vs `CHALLENGED/OUTDATED`, or `CHALLENGED/OUTDATED` vs `UNCHECKED`). Agreeing voices do not go to Codex: `CONFIRMED×2` → confirmed, an agreeing exclusion → dropped, `UNCHECKED×2` → unchecked. The cap is 8 escalations per run (`args.escalationCap`); beyond the cap — exclusion on a single voice + the `escalationSkipped: 'cap'` flag.
+Besides serving as a channel, Codex is used by the `full-research-core` workflow as a **third, heterogeneous voice** — since schema v5 (2026-09-17) ONLY when a single `CHALLENGED/OUTDATED` vote stands against `UNCHECKED`. Every claim gets one vote from the web family and one from the community family, so `CONFIRMED` vs `CHALLENGED/OUTDATED` is by construction a web-vs-community split → `FAMILY-SPLIT` in the ledger, never escalated: a web tie-breaker would only side with the web; the analyst renders both stories with the lead family by claim type. Agreeing voices do not go to Codex either: `CONFIRMED×2` → confirmed, an agreeing exclusion → dropped, `UNCHECKED×2` → unchecked. The cap is 8 escalations per run (`args.escalationCap`); beyond the cap — exclusion on a single voice + the `escalationSkipped: 'cap'` flag.
 
 The call (made by a lightweight subagent bridge, the `escalationPrompt` prompt in core.js):
 
