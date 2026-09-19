@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+## [2.4.0] — 2026-09-19
+
+### Для человека
+
+- Когда бесплатные глобальные поиски в Telegram на сегодня кончились, ресёрч платит Stars — по
+  разрешению владельца. Не больше 3 фраз за прогон и не дороже 20 Stars за фразу (сейчас 10), то
+  есть максимум 60 Stars за прогон. Резерв «2 бесплатных поиска владельцу» снят.
+- Верификаторы по-прежнему ищут в Telegram только бесплатными командами.
+
+### For agents
+
+- `protocols/telegram-protocol.md`: slot budget — ≤3 paid phrases per run, free slots first, then
+  `--pay-stars=20` (price ceiling), standing permission 2026-09-19; payment failure → free commands;
+  channel file records slot vs Stars phrases and Stars spent.
+- `sources.json`: telegram cost text.
+
 ## [2.3.0] — 2026-09-19
 
 ### Для человека
