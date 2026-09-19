@@ -73,7 +73,7 @@ async function run(args, hooks = {}) {
     if (label === 'urlhealth') return structuredClone(urlhealth)
     if (label.startsWith('verify:')) return Object.assign({ claimId: label.split(':')[1].split('#')[0], verdict: 'CONFIRMED', credibility: 2, evidence: 'mock', url: 'https://v.example.com', numberVerbatim: null, searchedVia: 'mock' }, hooks.verify ? hooks.verify(label) : {})
     if (label.startsWith('escalate:')) return { claimId: label.split(':')[1], status: 'ok', confirmsExclusion: false, verdictSuggested: 'UNCHECKED', reasoning: 'mock', urls: [], liveSearchEvents: 1 }
-    if (label.startsWith('analyst')) return { reportPath: '/tmp/smoke/report.md', queryRu: 'smoke', mainConclusion: 'ok', relatedCandidates: [], droppedClaims: [], disputedClaims: [], familySplitClaims: [], gaps: [] }
+    if (label.startsWith('analyst')) return { reportPath: '/tmp/smoke/draft.md', queryRu: 'smoke', mainConclusion: 'ok', relatedCandidates: [], droppedClaims: [], disputedClaims: [], familySplitClaims: [], gaps: [] }
     throw new Error('unmocked agent label: ' + label)
   }
   const parallel = fns => Promise.all(fns.map(f => f()))
