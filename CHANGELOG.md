@@ -5,6 +5,27 @@
 
 ## [Unreleased]
 
+## [2.5.0] — 2026-09-19
+
+### Для человека
+
+- Ресёрч запоминает Telegram-каналы, которые дали цитаты: копилка `~/.claude/jadlis/telegram-search/channels.jsonl`
+  (только хэндлы, теги темы и счётчики цитат, без текстов). Следующий прогон по похожей теме начинает с них и
+  не тратит Stars на повторный поиск тех же каналов. Копилка заполнена из 11 прошлых прогонов.
+- Правило платных фраз: 2-4 слова на языке постов, предметный термин или формулировка боли; без жаргона и
+  однословных англ. терминов; если первая фраза принесла мусор — следующая уже, а не шире.
+
+### For agents
+
+- New `scripts/tg-channels.py` (stdlib, py3.9): `list --tags`, `add --handle … --cited N --run`,
+  `import-workdir`; append-only JSONL via one `O_APPEND` write, handle validation `^[A-Za-z0-9_]{4,32}$`,
+  `$TG_CHANNELS_FILE` override.
+- `protocols/telegram-protocol.md`: native Layer 0 order = registry `list` → `similar` → `chats -q` (chats only)
+  → paid `posts -q` with the phrase rule; free mode also starts from the registry; new «Registry write-back»
+  step (`add` per cited peer, `registry: +N` line in the channel file).
+- `references/telegram-seed-handles.md` points to the dynamic registry.
+- `tools/smoke-core.mjs` checks the registry and phrase rule in the protocol; `tests/test_tg_channels.py`.
+
 ## [2.4.0] — 2026-09-19
 
 ### Для человека
