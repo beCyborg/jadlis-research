@@ -36,7 +36,7 @@ Language convention (Plan 2, 2026-09): everything the agents read and write insi
 (channel files, snapshot headers, curator/verifier/escalation output, the claim ledger) is in
 English — the curator, 2×16 verifiers and the analyst read those files and Cyrillic tokenises
 ~1.5-2× dearer. Russian stays where a human reads it: the questions to the user, the report
-`report.md` (it becomes the vault note as is), `queryRu`, the summary of Phase C, Russian example
+`draft.md` (it becomes the vault note as is), `queryRu`, the summary of Phase C, Russian example
 queries in the Yandex/Telegram protocols, and `quotes[]` in the language of the original.
 
 ## Architecture
@@ -284,7 +284,7 @@ BOTH stories go to the report. A single exclusion against UNCHECKED → the thir
 Codex (GPT-6 Astra, live search; cap 8 escalations; `codexModel: "gpt-5.6-sol"` in args —
 rollback); an unconfirmed exclusion → `DISPUTED` (disputed, not part of the conclusions). Dropped claims are
 **filtered** (not merely annotated with criticism), then the analyst writes the draft report to
-`{WORK_DIR}/report.md` (in Russian). Wait for the `<task-notification>`, then use the object:
+`{WORK_DIR}/draft.md` (in Russian). Wait for the `<task-notification>`, then use the object:
 `{workDir, status, ledgerSchemaVersion, languages, channelsAnswered, channelStatus, failedChannels,
 aiModelActual, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, reportPath, queryRu,
 relatedCandidates, claimLedger, synthMeta, sourceSettings}`; `sourceSettings` =
@@ -308,7 +308,7 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
    Otherwise continue.
 
 2. **Read the draft:** the path from the workflow object's `reportPath` — normally
-   `{WORK_DIR}/report.md`, but the synthesiser occasionally saves under another name
+   `{WORK_DIR}/draft.md`, but the synthesiser occasionally saves under another name
    (a live run produced `synthesis.md`). Use `reportPath`, never the hardcoded name.
 
 2a. **Draft post-check (deterministic).**

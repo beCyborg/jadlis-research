@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+## [2.5.1] — 2026-09-19
+
+### Для человека
+
+- Ресёрч снова сам сохраняет отчёт. Claude Code с версии 2.1.276 запрещает субагентам писать файлы с именем
+  `report*.md`, и аналитик терял черновик. Теперь черновик называется `draft.md`, ручное восстановление из транскрипта не нужно.
+
+### For agents
+
+- Analyst draft `${WORK_DIR}/report.md` → `${WORK_DIR}/draft.md` (CC 2.1.276+ blocks subagent Write to
+  `^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$`, errorCode 5); `reportPath` contract unchanged.
+- `tests/test_workdir_names.py` guards every `${WORK_DIR}/…` name in `workflows/*.js`; gotcha added.
+
 ## [2.5.0] — 2026-09-19
 
 ### Для человека
