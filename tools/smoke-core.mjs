@@ -207,6 +207,7 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
   check(true, 'twitter/substack same-family tool text is covered by sameFamilyCommunityTools (see next check)')
   const src = fs.readFileSync(corePath, 'utf8')
   check(src.includes("chans.includes('twitter')") && src.includes('twitterapi.sh search') && src.includes('has no cheap search'), 'sameFamilyCommunityTools: X via twitterapi.sh, fallback text for platforms without cheap search')
+  check(src.includes("chans.includes('telegram')") && src.includes('tgsearch.py') && src.includes('NEVER `posts -q`'), 'sameFamilyCommunityTools: Telegram via free tgsearch commands, no paid slots')
 }
 console.log(failures ? `\n${failures} FAILED` : '\nALL OK')
 process.exit(failures ? 1 : 0)

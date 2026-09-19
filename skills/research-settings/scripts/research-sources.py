@@ -630,6 +630,16 @@ def needed_keys(catalogue, channel_keys=None):
     return names
 
 
+def telegram_mode():
+    """Native mode needs the tgsearch.py script and its session file; no network call here."""
+    script = Path(os.environ.get("TGSEARCH_PY") or
+                  Path.home() / ".claude/skills/telegram-search/scripts/tgsearch.py").expanduser()
+    session = Path.home() / ".claude/jadlis/telegram-search/session/tgsearch.session"
+    if script.is_file() and session.is_file():
+        return "нативный поиск (Premium-аккаунт, tgsearch.py)"
+    return "превью t.me + Brave (нет сессии tgsearch.py)"
+
+
 def channel_access(key, cdef, settings, keys, providers):
     """→ (access, detail). Channel-level view used by both status and resolve."""
     if settings["channels"].get(key, "auto") == "off":
@@ -645,6 +655,8 @@ def channel_access(key, cdef, settings, keys, providers):
         if pinfo is not None and pinfo["setting"] == "off":
             return "n/a", "Grok выключен, нет TWITTERAPI_IO_KEY"
         return "no-key", "нет TWITTERAPI_IO_KEY, Grok недоступен"
+    if key == "telegram":
+        return "ok", telegram_mode()
     if pinfo is not None:
         if pinfo["setting"] == "off":
             return "n/a", "провайдер %s выключен" % pname

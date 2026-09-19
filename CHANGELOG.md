@@ -5,6 +5,36 @@
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-09-19
+
+### Для человека
+
+- Канал Telegram ищет через отдельный Premium-аккаунт (скрипт `tgsearch.py` из скилла
+  `/telegram-search`), если на машине есть его сессия: глобальный поиск по всем публичным
+  каналам, поиск чатов по названию, поиск внутри каналов и чатов за окно дат, комментарии в
+  обсуждениях, похожие каналы. Раньше были только превью t.me и дорки через Brave — теперь это
+  запасной режим, когда сессии нет.
+- Платных глобальных поисков ресёрч берёт не больше трёх за прогон и оставляет два на день
+  владельцу; Stars не тратит никогда.
+- Утверждение, найденное в Telegram, первый верификатор теперь перепроверяет в самом Telegram
+  (бесплатные команды), а не на Reddit/HN.
+- `/jadlis-research:research-settings` показывает, в каком режиме работает Telegram.
+
+### For agents
+
+- `protocols/telegram-protocol.md`: Step 0 mode pick (`whoami` + `limits`), NATIVE mode (command
+  table with costs, slot budget ≤ min(3, remains − 2), no `--pay-stars`, exit-code handling, layers,
+  citations `?comment=`, snapshot `Extractor: tgsearch`), the old contour kept as "Free mode".
+  Script path: `$TGSEARCH_PY`, default `~/.claude/skills/telegram-search/scripts/tgsearch.py`.
+- `workflows/full-research-core.js`: `TG_CMD` + a Telegram branch in `sameFamilyCommunityTools`
+  (free `csearch`/`comments`/`similar`/`chats` only, Brave `site:t.me` fallback); `tgsearch` in the
+  snapshot Extractor enum.
+- `research-sources.py`: `telegram_mode()` — channel detail reports native vs free mode (file checks,
+  no network). `sources.json` telegram degrade/cost texts.
+- `tools/smoke-core.mjs`: check for the Telegram same-family tool.
+- Requires `tgsearch.py` with the session lock (parallel verifier calls queue instead of hitting
+  `database is locked`).
+
 ## [2.2.0] — 2026-09-17
 
 ### Для человека
