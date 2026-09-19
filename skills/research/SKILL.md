@@ -71,12 +71,14 @@ turn only — do not rely on it beyond the first turn.
       `yandex` ON (step 2a drops it when `YC_SEARCH_API_KEY` is missing and says so — then the RU
       layer goes through Brave and Telegram only; paid ≈0.1-0.15 ₽/topic, outside the RU branch
       only on explicit request «с Яндексом», because Brave's Runet layer is weak); `telegram` ON
-      (public t.me previews + dorks, free contour; mandatory for custdev topics); `twitter`,
+      (native search from the owner's Premium account via `tgsearch.py` — all public posts, chats,
+      comments; falls back to public t.me previews + dorks when there is no session; mandatory for
+      custdev topics); `twitter`,
       `substack`, `hackernews` — OFF (English silence on RU topics is structural — a platform
       bias, not absence of demand; in the Phase C summary this is NOT counted as a channel
       failure). Add RU inputs for the agents to the brief: anchor domains for `site:` queries
       (vc.ru, habr.com, pikabu.ru, dtf.ru, t-j.ru, secrets.tbank.ru, incrussia.ru, rb.ru),
-      `site:t.me` dorks for the Telegram layer; grey forums are reached through Yandex (their
+      `site:t.me` dorks for the Telegram free mode; grey forums are reached through Yandex (their
       threads are in its index). Complementary local channel skills outside the workflow (if the
       user has them installed): the CIS forum index (`/cis-forums`), zelenka/lolz
       (`/zelenka-research`) — suggest them for custdev / grey-market topics.
