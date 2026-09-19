@@ -209,5 +209,12 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
   check(src.includes("chans.includes('twitter')") && src.includes('twitterapi.sh search') && src.includes('has no cheap search'), 'sameFamilyCommunityTools: X via twitterapi.sh, fallback text for platforms without cheap search')
   check(src.includes("chans.includes('telegram')") && src.includes('tgsearch.py') && src.includes('NEVER `posts -q`'), 'sameFamilyCommunityTools: Telegram via free tgsearch commands, no paid slots')
 }
+{
+  // Telegram channel registry: protocol reads it before discovery and writes back cited handles
+  const tp = fs.readFileSync(path.join(here, '..', 'skills/research/protocols/telegram-protocol.md'), 'utf8')
+  check(tp.includes('tg-channels.py" list --tags') && tp.includes('tg-channels.py" add --handle'), 'telegram protocol: registry list before discovery + add after citations')
+  check(tp.includes('Phrase rule:') && tp.includes('NARROWER, never broader'), 'telegram protocol: paid phrase rule')
+  check(fs.existsSync(path.join(here, '..', 'scripts/tg-channels.py')), 'scripts/tg-channels.py shipped')
+}
 console.log(failures ? `\n${failures} FAILED` : '\nALL OK')
 process.exit(failures ? 1 : 0)
