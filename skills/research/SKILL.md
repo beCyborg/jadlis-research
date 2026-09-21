@@ -332,6 +332,13 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      `credibility_median`; `languages` (= `languages` from the object). A missing field — add it
      before `gaps:`. This way the report can be re-evaluated without the wf log.
 
+2b. **Short publish address.** Add `permalink: <slug>` to the draft frontmatter (before `gaps:`) unless
+   it is already there: 2–4 lowercase English words joined by hyphens that name the topic
+   (`spain-tie-name-change`), ASCII only, no date, no `research` prefix. Must be unique in the vault —
+   `command grep -rIl "^permalink: <slug>$" "$VAULT_PATH"`; taken → add one distinguishing word. Obsidian
+   Publish uses this property as the page URL, so a Cyrillic file name no longer turns into a long
+   percent-encoded link.
+
 3. **Pre-write dedup.** Order from the shared contract: (1) MCP `qmd` `query` by payload
    (lex+vec over `relatedCandidates`, if the server is connected) → (2) deterministic
    `command grep -rIl "{key}" "{VAULT_RESEARCH_DIR}"` → (3) `obsidian search` only as a fallback
