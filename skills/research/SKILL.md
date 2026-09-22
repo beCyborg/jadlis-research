@@ -262,11 +262,13 @@ Workflow({
 ```
 
 Models inside the workflow: channels, verifiers and curator — Opus 5.5
-(`research:researcher-opus` / `research:orchestrator-opus`);
-analyst — **Fable 5.1 as an ordinary subagent** (`research:synth-fable`, effort high).
-`fableBridge: false` → analyst on `research:synth-opus` instead. Do NOT pass `aiModel`:
-the workflow derives the frontmatter value itself and reports the model that actually ran in
-`aiModelActual` (a Fable analyst that returns null is retried once on Opus 5.5).
+(`jadlis-research:researcher-opus` / `jadlis-research:orchestrator-opus`; urlhealth runs at effort low);
+analyst — **Opus 5.5 at effort xhigh** (`jadlis-research:synth-opus`) by default.
+`fableBridge: true` in args → analyst on Fable 5.1 instead (`jadlis-research:synth-fable`,
+effort high) — the opt-in while long-context retrieval of Opus 5.5 is unmeasured. Either way, an
+analyst that returns null is retried ONCE on the other family (Opus → Fable, Fable → Opus).
+Do NOT pass `aiModel`: the workflow derives the frontmatter value itself and reports the model
+that actually wrote the report in `aiModelActual`.
 
 The workflow (ledger schema v4) reads the channel protocols itself: the curator selects up to 16
 claims with evidence prefixes (the code substitutes the spans); the snapshot gate lowers HIGH to
@@ -313,9 +315,9 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
 
 2a. **Draft post-check (deterministic).**
    - **Honest `ai_model`.** Compare the frontmatter `ai_model` with `aiModelActual` from the
-     workflow object. They normally agree; a mismatch means the Fable analyst fell back to the
-     Opus retry — fix the frontmatter line to `ai_model: "{aiModelActual}"` before writing to the
-     vault.
+     workflow object. They normally agree; a mismatch means the first analyst returned null and
+     the retry on the other family wrote the report — fix the frontmatter line to
+     `ai_model: "{aiModelActual}"` before writing to the vault.
    - **Canonical sections.** If `synthMeta.ledgerSummary.confirmed > 0`, check
      `grep -c '^### Проверенные факты$' draft`. No section → render it programmatically from
      `claimLedger` (claims with verdict=CONFIRMED: statement translated into Russian + «(N голосов)»
@@ -392,7 +394,8 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      снапшот-гейту M (причины из byReason); urlhealth: dead/fabrication».
      `evidenceHealth: "skipped"` → say the URL health was not checked.
    - Gaps (`synthMeta.gaps`): what the research did not cover.
-   - Synthesis model: `aiModelActual` — the one that actually ran (Fable, or Opus 5.5 on the retry).
+   - Synthesis model: `aiModelActual` — the one that actually wrote the report (Opus 5.5 by
+     default, Fable 5.1 with `fableBridge: true`, or the other family on the retry).
    - Report path: `REPORT_PATH` (vault, `Знания/Ресерчи`).
    - Working directory: `{WORK_DIR}/` (per-source files + draft — the full process).
    - Reminder: the report frontmatter has `verified: false` — an AI draft. After review the user
@@ -401,9 +404,10 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
 ## Error handling
 
 - The workflow returned `insufficient-sources` — show what was collected, do not write to the vault.
-- The workflow returned `synthesis-failed` — the analyst returned null on both Fable and the Opus
-  retry. The material is in `{WORK_DIR}` but there is no report: show the working directory, do not
-  write to the vault. A re-run of Phase B synthesises from the same material.
+- The workflow returned `synthesis-failed` — the analyst returned null on both families (the first
+  model and the retry on the other one). The material is in `{WORK_DIR}` but there is no report:
+  show the working directory, do not write to the vault. A re-run of Phase B synthesises from the
+  same material.
 - The source-resolve script of step 2a failed (no JSON, exit ≠ 0, timeout) — fail-closed on Grok:
   warn «настройки источников недоступны, Grok считаю выключенным», drop `grokweb`, keep `twitter`
   with `GROK_DISABLED_NOTE`, `providersOff: ['grok']`, `codexweb` only if `command -v codex`

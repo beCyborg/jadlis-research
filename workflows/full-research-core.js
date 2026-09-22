@@ -4,7 +4,7 @@ export const meta = {
   phases: [
     { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты' },
     { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims с evidence-префиксами → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5)' },
-    { title: 'Synthesize', detail: 'analyst (Fable 5.1, agentType) пишет отчёт (verified:false): три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
+    { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию, Fable 5.1 при fableBridge:true; null → один повтор на другой семье) пишет отчёт (verified:false): три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
 
@@ -37,19 +37,28 @@ const CODEX_LABEL = A.codexModel ? `Codex/${A.codexModel}` : 'Codex/GPT-6 Astra'
 // session, the orchestrator may pass workerOpts: { model: 'claude-opus-5-5' } as a fallback.
 const WORKER_OPTS = A.workerOpts || { agentType: 'jadlis-research:researcher-opus' }
 const w = extra => Object.assign({}, WORKER_OPTS, extra)
-// Orchestrator roles (curator, analyst — heavy logic: claim selection, synthesis).
+// Heavy-logic roles: curator (claim selection) and analyst (synthesis).
 // curator ALWAYS goes through orchestrator-opus (Opus 5.5) — structural claim extraction is
-// not intelligence-sensitive, there is no Fable edge here.
-// analyst is the only place with a real Fable advantage (synthesis over 400–600K of context).
-// It runs as an ordinary subagent: the headless bridge existed only to dodge our own
+// not intelligence-sensitive. orchestrator-opus serves the curator only; the analyst runs on synth-*.
+// analyst: Opus 5.5 at effort xhigh by default (synth-opus) since 2.6.0 — AA GDPval xhigh 1820
+// vs Fable 5.1 high 1617, fewer guesses, cheaper per task, no separate Fable weekly cap.
+// Fable 5.1 (synth-fable, effort high) only when the caller passes fableBridge:true — the escape
+// hatch while long-context retrieval of Opus 5.5 (400–600K of channel files) is not measured.
+// If the first analyst returns null, ONE retry runs on the other family (Opus → Fable,
+// Fable → Opus): a refusal or a quota hit of one family does not cost the report.
+// Both run as ordinary subagents: the headless bridge existed only to dodge our own
 // CLAUDE_CODE_SUBAGENT_MODEL_FORCE, removed 2026-09-07. The two synth-* agents pin the model,
-// effort high and the tool allow-list (Read, Write, Glob) — agent() has no allowedTools option.
+// the effort and the tool allow-list (Read, Write, Glob) — agent() has no allowedTools option.
 // The argument name stays `fableBridge`: one vocabulary across all eight workflows.
-const FABLE_SYNTH = A.fableBridge !== false
-const SYNTH_AGENT = FABLE_SYNTH ? 'jadlis-research:synth-fable' : 'jadlis-research:synth-opus'
+const FABLE_SYNTH = A.fableBridge === true
+const SYNTH_OPUS = { agentType: 'jadlis-research:synth-opus', model: 'claude-opus-5-5', name: 'Opus 5.5' }
+const SYNTH_FABLE = { agentType: 'jadlis-research:synth-fable', model: 'claude-fable-5-1', name: 'Fable 5.1' }
+const SYNTH_FIRST = FABLE_SYNTH ? SYNTH_FABLE : SYNTH_OPUS
+const SYNTH_RETRY = FABLE_SYNTH ? SYNTH_OPUS : SYNTH_FABLE
+const SYNTH_AGENT = SYNTH_FIRST.agentType
 // ai_model of the report: printed from what actually ran, not from what the caller guessed.
-const AI_MODEL = FABLE_SYNTH ? 'claude-fable-5-1' : 'claude-opus-5-5'
-const AI_MODEL_RETRY = 'claude-opus-5-5'
+const AI_MODEL = SYNTH_FIRST.model
+const AI_MODEL_RETRY = SYNTH_RETRY.model
 const ORCH_OPTS = A.orchOpts || { agentType: 'jadlis-research:orchestrator-opus' }
 const o = extra => Object.assign({}, ORCH_OPTS, extra)
 
@@ -743,7 +752,8 @@ try {
     items.push({ prefix: e.prefix, url: e.url, quote: (e.quotes || [])[0] || '', snapshotPath: e.snapshotPath })
   }
   if (items.length) {
-    const uh = await agent(urlhealthPrompt(items), w({ label: 'urlhealth', phase: 'Verify', schema: URLHEALTH_SCHEMA }))
+    // Mechanical check (fetch + string match): effort low overrides researcher-opus's frontmatter high.
+    const uh = await agent(urlhealthPrompt(items), w({ label: 'urlhealth', phase: 'Verify', schema: URLHEALTH_SCHEMA, effort: 'low' }))
     if (uh && Array.isArray(uh.items) && uh.status !== 'failed') {
       const byPrefix = {}
       for (const it of uh.items) byPrefix[normPrefix(it.prefix)] = it
@@ -920,20 +930,23 @@ const ledgerOut = claimLedger.map(({ rawVotes, ...c }) => c)
 let report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL),
   synthOpts(FABLE_SYNTH ? 'analyst→fable' : 'analyst', SYNTH_AGENT))
 
-// One retry on Opus 5.5 — only on the Fable branch: with fableBridge:false the first call was already
-// Opus, and a repeat would just re-run what a human may have skipped on purpose.
+// One retry on the OTHER model family, both branches (Opus → synth-fable, Fable → synth-opus):
+// a null from one family (safety-classifier stop on a grey/OSINT topic, a Fable weekly-cap hit,
+// a session limit) should not leave the run without a report. Same prompt, the retry's ai_model.
+// synthFellBack = the retry ran AND produced the report.
 let synthFellBack = false
-if (!report && FABLE_SYNTH) {
-  log('analyst (Fable) вернул null — одна попытка на Opus 5.5.')
+if (!report) {
+  log(`analyst (${SYNTH_FIRST.name}) вернул null — одна попытка на ${SYNTH_RETRY.name}.`)
   report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL_RETRY),
-    synthOpts('analyst→opus-retry', 'jadlis-research:synth-opus'))
-  synthFellBack = true
+    synthOpts(FABLE_SYNTH ? 'analyst→opus-retry' : 'analyst→fable-retry', SYNTH_RETRY.agentType))
+  synthFellBack = !!report
 }
 if (!report) {
-  log('Синтез не удался дважды. Материалы собраны, отчёт не написан.')
+  log(`Синтез не удался дважды (${SYNTH_FIRST.name}, затем ${SYNTH_RETRY.name}). Материалы собраны, отчёт не написан.`)
   return { workDir: WORK_DIR, status: 'synthesis-failed', claimLedger: ledgerOut, synthMeta: { ledgerSummary } }
 }
-const aiModelActual = (FABLE_SYNTH && !synthFellBack) ? 'claude-fable-5-1' : 'claude-opus-5-5'
+// The model that actually wrote the report: the first family, or the other one if the retry did.
+const aiModelActual = synthFellBack ? AI_MODEL_RETRY : AI_MODEL
 
 return {
   workDir: WORK_DIR,
