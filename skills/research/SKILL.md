@@ -13,7 +13,7 @@ allowed-tools:
   - Workflow
   - mcp__plugin_jadlis-search_brave-search__brave_web_search
 argument-hint: "<query — research topic>"
-model: claude-opus-5
+model: claude-opus-5-5
 effort: high
 ---
 
@@ -46,7 +46,7 @@ Phase A (INTAKE in plan mode: channels + recon + interview → brief in the plan
   → Phase B (Workflow full-research-core, exec) → Phase C (WRITE: vault contract)
 ```
 
-Under `opusplan` the main session is Fable 5.1 while in plan mode and Opus 5 in exec: the intake
+Under `opusplan` the main session is Fable 5.1 while in plan mode and Opus 5.5 in exec: the intake
 (judgement: channel choice, refined query, decision context) runs on Fable, the mechanical part
 (launching the workflow, writing the vault) on Opus. The frontmatter `model:` above holds for one
 turn only — do not rely on it beyond the first turn.
@@ -261,12 +261,12 @@ Workflow({
 })
 ```
 
-Models inside the workflow: channels, verifiers and curator — Opus 5
+Models inside the workflow: channels, verifiers and curator — Opus 5.5
 (`research:researcher-opus` / `research:orchestrator-opus`);
 analyst — **Fable 5.1 as an ordinary subagent** (`research:synth-fable`, effort high).
 `fableBridge: false` → analyst on `research:synth-opus` instead. Do NOT pass `aiModel`:
 the workflow derives the frontmatter value itself and reports the model that actually ran in
-`aiModelActual` (a Fable analyst that returns null is retried once on Opus 5).
+`aiModelActual` (a Fable analyst that returns null is retried once on Opus 5.5).
 
 The workflow (ledger schema v4) reads the channel protocols itself: the curator selects up to 16
 claims with evidence prefixes (the code substitutes the spans); the snapshot gate lowers HIGH to
@@ -392,7 +392,7 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      снапшот-гейту M (причины из byReason); urlhealth: dead/fabrication».
      `evidenceHealth: "skipped"` → say the URL health was not checked.
    - Gaps (`synthMeta.gaps`): what the research did not cover.
-   - Synthesis model: `aiModelActual` — the one that actually ran (Fable, or Opus 5 on the retry).
+   - Synthesis model: `aiModelActual` — the one that actually ran (Fable, or Opus 5.5 on the retry).
    - Report path: `REPORT_PATH` (vault, `Знания/Ресерчи`).
    - Working directory: `{WORK_DIR}/` (per-source files + draft — the full process).
    - Reminder: the report frontmatter has `verified: false` — an AI draft. After review the user

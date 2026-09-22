@@ -3,7 +3,7 @@ export const meta = {
   description: 'Ядро full-research: N канальных исследователей → curator (evidence-префиксы) → urlhealth → per-claim верификация (2 линзы: та же семья + другая семья, по голосу от веба и от сообществ) → веб и сообщества разошлись = FAMILY-SPLIT (без Codex) → одиночное исключение → третий голос Codex → analyst пишет отчёт в workDir. Vault-контракт — в скилле.',
   phases: [
     { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты' },
-    { title: 'Verify', detail: 'curator (Opus 5) выделяет claims с evidence-префиксами → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5)' },
+    { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims с evidence-префиксами → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5)' },
     { title: 'Synthesize', detail: 'analyst (Fable 5.1, agentType) пишет отчёт (verified:false): три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
@@ -32,13 +32,13 @@ const ESCALATION_CAP = Number.isFinite(A.escalationCap) ? A.escalationCap : 8
 // the agent reads that file itself.
 const CODEX_MODEL = A.codexModel || 'gpt-6-astra'
 const CODEX_LABEL = A.codexModel ? `Codex/${A.codexModel}` : 'Codex/GPT-6 Astra'
-// Worker: Opus 5 pinned with effort high through the researcher-opus subagent.
+// Worker: Opus 5.5 pinned with effort high through the researcher-opus subagent.
 // The agent registry is cached at session start — if the subagent was created in the current
-// session, the orchestrator may pass workerOpts: { model: 'opus' } as a fallback.
+// session, the orchestrator may pass workerOpts: { model: 'claude-opus-5-5' } as a fallback.
 const WORKER_OPTS = A.workerOpts || { agentType: 'jadlis-research:researcher-opus' }
 const w = extra => Object.assign({}, WORKER_OPTS, extra)
 // Orchestrator roles (curator, analyst — heavy logic: claim selection, synthesis).
-// curator ALWAYS goes through orchestrator-opus (Opus 5) — structural claim extraction is
+// curator ALWAYS goes through orchestrator-opus (Opus 5.5) — structural claim extraction is
 // not intelligence-sensitive, there is no Fable edge here.
 // analyst is the only place with a real Fable advantage (synthesis over 400–600K of context).
 // It runs as an ordinary subagent: the headless bridge existed only to dodge our own
@@ -48,8 +48,8 @@ const w = extra => Object.assign({}, WORKER_OPTS, extra)
 const FABLE_SYNTH = A.fableBridge !== false
 const SYNTH_AGENT = FABLE_SYNTH ? 'jadlis-research:synth-fable' : 'jadlis-research:synth-opus'
 // ai_model of the report: printed from what actually ran, not from what the caller guessed.
-const AI_MODEL = FABLE_SYNTH ? 'claude-fable-5-1' : 'claude-opus-5'
-const AI_MODEL_RETRY = 'claude-opus-5'
+const AI_MODEL = FABLE_SYNTH ? 'claude-fable-5-1' : 'claude-opus-5-5'
+const AI_MODEL_RETRY = 'claude-opus-5-5'
 const ORCH_OPTS = A.orchOpts || { agentType: 'jadlis-research:orchestrator-opus' }
 const o = extra => Object.assign({}, ORCH_OPTS, extra)
 
@@ -920,11 +920,11 @@ const ledgerOut = claimLedger.map(({ rawVotes, ...c }) => c)
 let report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL),
   synthOpts(FABLE_SYNTH ? 'analyst→fable' : 'analyst', SYNTH_AGENT))
 
-// One retry on Opus 5 — only on the Fable branch: with fableBridge:false the first call was already
+// One retry on Opus 5.5 — only on the Fable branch: with fableBridge:false the first call was already
 // Opus, and a repeat would just re-run what a human may have skipped on purpose.
 let synthFellBack = false
 if (!report && FABLE_SYNTH) {
-  log('analyst (Fable) вернул null — одна попытка на Opus 5.')
+  log('analyst (Fable) вернул null — одна попытка на Opus 5.5.')
   report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL_RETRY),
     synthOpts('analyst→opus-retry', 'jadlis-research:synth-opus'))
   synthFellBack = true
@@ -933,7 +933,7 @@ if (!report) {
   log('Синтез не удался дважды. Материалы собраны, отчёт не написан.')
   return { workDir: WORK_DIR, status: 'synthesis-failed', claimLedger: ledgerOut, synthMeta: { ledgerSummary } }
 }
-const aiModelActual = (FABLE_SYNTH && !synthFellBack) ? 'claude-fable-5-1' : 'claude-opus-5'
+const aiModelActual = (FABLE_SYNTH && !synthFellBack) ? 'claude-fable-5-1' : 'claude-opus-5-5'
 
 return {
   workDir: WORK_DIR,
