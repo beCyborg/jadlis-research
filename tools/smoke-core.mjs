@@ -2,6 +2,8 @@
 // smoke-core.mjs — functional smoke of full-research-core.js with mocked agents (no network, no LLM).
 // Exercises the schema v4 snapshot gate end-to-end: no-snapshot / llm-mediated / short-snapshot /
 // quote-not-found demotions, ceilingCapped, channelStatus patching, snapshotGate in the result.
+// Also the analyst model choice (2.6.0): Opus default, fableBridge:true → Fable, a null analyst →
+// one retry on the other family (hooks.analystNull), aiModelActual; urlhealth effort low.
 // Usage: node tools/smoke-core.mjs [path/to/full-research-core.js]
 import fs from 'node:fs'
 import path from 'node:path'
@@ -64,28 +66,32 @@ const urlhealth = { status: 'ok', elapsedSec: 1, note: 'mock', items: [
 async function run(args, hooks = {}) {
   const calls = []
   const prompts = {}
+  const optsBy = {}
   const agent = async (prompt, opts) => {
     const label = (opts && opts.label) || '?'
-    calls.push(label); prompts[label] = String(prompt)
+    calls.push(label); prompts[label] = String(prompt); optsBy[label] = opts || {}
     // fixtures are mutated by the core (relevance demotion) → fresh copy per run
     if (channels[label]) return structuredClone(channels[label])
     if (label.startsWith('curator')) return structuredClone(curator)
     if (label === 'urlhealth') return structuredClone(urlhealth)
     if (label.startsWith('verify:')) return Object.assign({ claimId: label.split(':')[1].split('#')[0], verdict: 'CONFIRMED', credibility: 2, evidence: 'mock', url: 'https://v.example.com', numberVerbatim: null, searchedVia: 'mock' }, hooks.verify ? hooks.verify(label) : {})
     if (label.startsWith('escalate:')) return { claimId: label.split(':')[1], status: 'ok', confirmsExclusion: false, verdictSuggested: 'UNCHECKED', reasoning: 'mock', urls: [], liveSearchEvents: 1 }
-    if (label.startsWith('analyst')) return { reportPath: '/tmp/smoke/draft.md', queryRu: 'smoke', mainConclusion: 'ok', relatedCandidates: [], droppedClaims: [], disputedClaims: [], familySplitClaims: [], gaps: [] }
+    // hooks.analystNull(label) → true simulates an analyst that returned null (refusal / limit)
+    if (label.startsWith('analyst')) return hooks.analystNull && hooks.analystNull(label) ? null : { reportPath: '/tmp/smoke/draft.md', queryRu: 'smoke', mainConclusion: 'ok', relatedCandidates: [], droppedClaims: [], disputedClaims: [], familySplitClaims: [], gaps: [] }
     throw new Error('unmocked agent label: ' + label)
   }
   const parallel = fns => Promise.all(fns.map(f => f()))
   const logs = []
   const fn = new AsyncFunction('args', 'agent', 'parallel', 'phase', 'log', src)
   const result = await fn(args, agent, parallel, () => {}, m => logs.push(String(m)))
-  return { result, calls, logs, prompts }
+  return { result, calls, logs, prompts, optsBy }
 }
 
 let failures = 0
 const check = (cond, msg) => { if (!cond) { failures++; console.log('FAIL', msg) } else console.log('ok  ', msg) }
 // twitter is deliberately NOT in the base set — it is selected only by the source-settings checks
+// fableBridge:false is explicit here; since 2.6.0 it equals the default (Opus analyst) — the analyst
+// branch checks below also run without it and with fableBridge:true.
 const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'hackernews'], workDir: '/tmp/smoke', pluginRoot: '/tmp/plugin', date: '2026-09-06', aiModel: 'x', fableBridge: false }
 
 {
@@ -208,6 +214,56 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
   const src = fs.readFileSync(corePath, 'utf8')
   check(src.includes("chans.includes('twitter')") && src.includes('twitterapi.sh search') && src.includes('has no cheap search'), 'sameFamilyCommunityTools: X via twitterapi.sh, fallback text for platforms without cheap search')
   check(src.includes("chans.includes('telegram')") && src.includes('tgsearch.py') && src.includes('NEVER `posts -q`'), 'sameFamilyCommunityTools: Telegram via free tgsearch commands, no paid slots')
+}
+{
+  // ── analyst model choice (2.6.0): Opus 5.5 by default, Fable 5.1 with fableBridge:true,
+  //    null → ONE retry on the other family, aiModelActual = what actually wrote the report ──
+  const OPUS = 'jadlis-research:synth-opus', FABLE = 'jadlis-research:synth-fable'
+  const aiIn = p => ((p || '').match(/ai_model: "([^"]+)"/) || [])[1]
+  const { fableBridge: _fb, ...noBridge } = base
+  const analystCalls = calls => calls.filter(l => l.startsWith('analyst'))
+  {
+    // default: no fableBridge in args
+    const { result: r, calls, prompts, optsBy } = await run(noBridge)
+    check(JSON.stringify(analystCalls(calls)) === '["analyst"]', `default: one analyst call, no retry (got ${JSON.stringify(analystCalls(calls))})`)
+    check(optsBy['analyst'].agentType === OPUS && !optsBy['analyst'].model, `default: analyst agentType = synth-opus, no model override (got ${optsBy['analyst'].agentType}/${optsBy['analyst'].model})`)
+    check(aiIn(prompts['analyst']) === 'claude-opus-5-5' && r.aiModelActual === 'claude-opus-5-5' && r.status === 'ok', `default: ai_model in prompt + aiModelActual = claude-opus-5-5 (got ${aiIn(prompts['analyst'])}/${r.aiModelActual})`)
+    check(optsBy['urlhealth'].effort === 'low' && optsBy['urlhealth'].agentType === 'jadlis-research:researcher-opus', `urlhealth: effort low on researcher-opus (got ${optsBy['urlhealth'].effort}/${optsBy['urlhealth'].agentType})`)
+    check(!optsBy['verify:c1#1'].effort && !optsBy['curator'].effort, 'verifiers and curator carry no effort override (agent frontmatter high)')
+  }
+  {
+    // default, first analyst null → retry on Fable
+    const { result: r, calls, prompts, optsBy, logs } = await run(noBridge, { analystNull: l => l === 'analyst' })
+    check(JSON.stringify(analystCalls(calls)) === '["analyst","analyst→fable-retry"]', `default + null: retry on Fable (got ${JSON.stringify(analystCalls(calls))})`)
+    check(optsBy['analyst→fable-retry'].agentType === FABLE && aiIn(prompts['analyst→fable-retry']) === 'claude-fable-5-1', 'default + null: retry agentType synth-fable, prompt ai_model claude-fable-5-1')
+    check(r.status === 'ok' && r.aiModelActual === 'claude-fable-5-1', `default + null: aiModelActual = claude-fable-5-1 (got ${r.aiModelActual})`)
+    check(logs.some(l => l.includes('analyst (Opus 5.5) вернул null') && l.includes('Fable 5.1')), 'default + null: retry logged Opus → Fable')
+  }
+  {
+    // fableBridge:true → Fable first
+    const { result: r, calls, prompts, optsBy } = await run({ ...base, fableBridge: true })
+    check(JSON.stringify(analystCalls(calls)) === '["analyst→fable"]', `fableBridge:true: one analyst call on Fable (got ${JSON.stringify(analystCalls(calls))})`)
+    check(optsBy['analyst→fable'].agentType === FABLE && aiIn(prompts['analyst→fable']) === 'claude-fable-5-1' && r.aiModelActual === 'claude-fable-5-1', `fableBridge:true: synth-fable, ai_model + aiModelActual claude-fable-5-1 (got ${r.aiModelActual})`)
+  }
+  {
+    // fableBridge:true, Fable null → retry on Opus
+    const { result: r, calls, prompts, optsBy, logs } = await run({ ...base, fableBridge: true }, { analystNull: l => l === 'analyst→fable' })
+    check(JSON.stringify(analystCalls(calls)) === '["analyst→fable","analyst→opus-retry"]', `fableBridge:true + null: retry on Opus (got ${JSON.stringify(analystCalls(calls))})`)
+    check(optsBy['analyst→opus-retry'].agentType === OPUS && aiIn(prompts['analyst→opus-retry']) === 'claude-opus-5-5', 'fableBridge:true + null: retry agentType synth-opus, prompt ai_model claude-opus-5-5')
+    check(r.status === 'ok' && r.aiModelActual === 'claude-opus-5-5', `fableBridge:true + null: aiModelActual = claude-opus-5-5 (got ${r.aiModelActual})`)
+    check(logs.some(l => l.includes('analyst (Fable 5.1) вернул null') && l.includes('Opus 5.5')), 'fableBridge:true + null: retry logged Fable → Opus')
+  }
+  {
+    // any non-true fableBridge value keeps the Opus default (strict === true)
+    const { optsBy } = await run({ ...base, fableBridge: 'true' })
+    check(optsBy['analyst'] && optsBy['analyst'].agentType === OPUS, 'fableBridge:"true" (string) is not an opt-in → Opus analyst')
+  }
+  for (const fb of [undefined, true]) {
+    // both families null → synthesis-failed, exactly two analyst calls
+    const a = fb === undefined ? noBridge : { ...base, fableBridge: fb }
+    const { result: r, calls } = await run(a, { analystNull: () => true })
+    check(r.status === 'synthesis-failed' && analystCalls(calls).length === 2 && !r.aiModelActual, `fableBridge:${fb}: both families null → synthesis-failed after exactly 2 calls (got ${r.status}, ${analystCalls(calls).length})`)
+  }
 }
 {
   // Telegram channel registry: protocol reads it before discovery and writes back cited handles

@@ -5,6 +5,26 @@
 
 ## [Unreleased]
 
+## [2.6.0] — 2026-09-22 — Аналитик на Opus 5.5 / Opus 5.5 analyst by default
+
+### Для человека
+
+- Итоговый отчёт ресёрча теперь по умолчанию пишет Opus 5.5 на уровне усилий xhigh, а не Fable 5.1. Причины: в тестах Artificial Analysis (GDPval) Opus 5.5 на xhigh набирает 1820 против 1617 у Fable 5.1 на high, реже отвечает наугад (0,66 против 0,69), дешевле за задачу и не расходует отдельный недельный лимит Fable.
+- Как Opus 5.5 держит факты в очень длинном контексте (400–600 тыс. токенов канальных файлов), пока не измерено. Если нужен прежний аналитик, передайте в workflow `fableBridge: true` — отчёт напишет Fable 5.1.
+- Если аналитик вернул пустой ответ (отказ, лимит), ресёрч один раз повторяет синтез на модели другого семейства: Opus → Fable, Fable → Opus. Раньше повтор был только в одну сторону, с Fable на Opus. В свойстве отчёта `ai_model` записана модель, которая на самом деле его написала.
+- Проверка ссылок и цитат (urlhealth) идёт на низком уровне усилий: это механическая работа, глубокие рассуждения ей не нужны.
+- `/jadlis-research:research-settings` больше не задаёт свой уровень усилий и работает на уровне сессии: смена уровня посреди сессии сбрасывала кэш промпта.
+
+### For agents
+
+- Changed: `workflows/full-research-core.js` — `FABLE_SYNTH = A.fableBridge === true` (was `!== false`); analyst defaults to `jadlis-research:synth-opus`, `fableBridge: true` → `jadlis-research:synth-fable`. New `SYNTH_OPUS`/`SYNTH_FABLE`/`SYNTH_FIRST`/`SYNTH_RETRY` descriptors; `AI_MODEL_RETRY` = the other family's model; retry gate `if (!report)` on both branches, labels `analyst→fable-retry` (Opus first) / `analyst→opus-retry` (Fable first); `synthFellBack = !!report` after the retry; `aiModelActual = synthFellBack ? AI_MODEL_RETRY : AI_MODEL`. Phase `Synthesize` detail, header comment and log lines updated.
+- Changed: urlhealth `agent()` call gets `effort: 'low'` inside `w({...})` (explicit `agent()` effort overrides the `researcher-opus` frontmatter `high`). Channel researchers, verifiers, escalation and curator unchanged (`high` via frontmatter).
+- Changed: `agents/synth-opus.md` `effort: high` → `xhigh`, description = default synthesiser; `agents/synth-fable.md` description = opt-in / retry; `agents/orchestrator-opus.md` = claim curator only (it was never the analyst since the synth-* split). `synth-opus.md`, `synth-fable.md`, `researcher-opus.md` must stay byte-identical with `jadlis-science-research`.
+- Removed: `effort: medium` from `skills/research-settings/SKILL.md` frontmatter — the skill inherits the session effort (a mismatched skill effort recomputes the prompt cache).
+- Docs: `skills/research/SKILL.md` Phase B models paragraph, Phase C `ai_model` post-check, final summary line and `synthesis-failed` error text describe the new default and the symmetric retry.
+- Tests: `tools/smoke-core.mjs` — `hooks.analystNull` stubs a null analyst; new cases: default (no `fableBridge`), `fableBridge: true`, null → retry on the other family for both, both null → `synthesis-failed` after exactly 2 calls, string `"true"` is not an opt-in, urlhealth `effort: 'low'`.
+- Migration: callers that relied on the implicit Fable analyst must pass `fableBridge: true`; callers passing `fableBridge: false` keep the same (Opus) behaviour, now with a Fable retry on null.
+
 ## [2.5.3] — 2026-09-22 — Переход на Opus 5.5 / Switch to Opus 5.5
 
 ### Для человека

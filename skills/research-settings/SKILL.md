@@ -7,7 +7,6 @@ allowed-tools:
   - Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/research-settings/scripts/research-sources.py *)
 argument-hint: "[status [--probe]] | [set provider grok|codex off|auto] | [set channel <key> off|auto] | [reset]"
 model: claude-opus-5-5
-effort: medium
 ---
 
 # /jadlis-research:research-settings — sources of `/research` in one table
