@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+## [2.6.1] — 2026-09-23 — Строка «От тебя:» / Closing «От тебя:» line
+
+### Для человека
+
+- Если в отчёт попали спорные факты или утверждения, по которым веб и сообщества расходятся, итоговое резюме в чате заканчивается отдельной строкой «От тебя:» — что именно проверить или решить самому. Когда таких утверждений нет, строки нет.
+
+### For agents
+
+- Changed: `skills/research/SKILL.md` Phase C step 7 — new last bullet: a closing `**От тебя:**` line when `ledgerSummary.disputed > 0` or `ledgerSummary.familySplit > 0`, naming what to check (DISPUTED) or decide (FAMILY-SPLIT), max 3 items; frontmatter `verified: false` alone is not a trigger. Workflow, agents and report template unchanged.
+
 ## [2.6.0] — 2026-09-22 — Аналитик на Opus 5.5 / Opus 5.5 analyst by default
 
 ### Для человека
