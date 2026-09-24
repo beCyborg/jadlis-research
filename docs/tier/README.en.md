@@ -175,7 +175,7 @@ You get: an answer with a source link under each fact and any disagreements betw
 /research should we move the team wiki to a static generator
 ```
 
-You get: an interview first (the opening question is always "which decision will you make from this"), then a plan with the chosen channels — approving it is the launch gate. The output is a note in `Знания/Ресерчи/` with three buckets (confirmed / disputed / dropped) plus a summary: which channels delivered, how many claims held up, what was dropped and why.
+You get: an interview first (the opening question is always "which decision will you make from this"), then one confirmation question with the refined query and the channels — answering «Запустить» (launch) is the launch gate. The output is a note in `Знания/Ресерчи/` with three buckets (confirmed / disputed / dropped) plus a summary: which channels delivered, how many claims held up, what was dropped and why.
 
 **3. A scientific review — `/science-research`**
 
