@@ -8,7 +8,6 @@ allowed-tools:
   - Bash
   - Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/research-settings/scripts/research-sources.py *)
   - AskUserQuestion
-  - EnterPlanMode
   - ExitPlanMode
   - Workflow
   - mcp__plugin_jadlis-search_brave-search__brave_web_search
@@ -22,15 +21,16 @@ Before Phase A read `references/gotchas.md` — run failure modes (analyst sessi
 
 The heavy part (N channel researchers → per-claim verification with live Brave counter-search →
 analyst synthesis) runs in the deterministic workflow **`full-research-core`**. The skill does the
-interactive intake (Phase A: channels + recon + interview, in plan mode) and the vault write
-(vault contract: dedup, wikilinks, daily-note entry).
+interactive intake (Phase A: channels + recon + interview → brief in `{WORK_DIR}/_brief.md`; one
+AskUserQuestion = launch gate) and the vault write (vault contract: dedup, wikilinks, daily-note
+entry).
 
 **User query:** `$ARGUMENTS`
 
 **Settings short-circuit.** If `$ARGUMENTS` is exactly `settings` or `настройки` (trimmed, case
 insensitive, nothing else), this is not a research request: answer with the single line
-«Настройки источников: запусти `/jadlis-research:research-settings`» and stop. No plan mode, no
-recon, no workflow.
+«Настройки источников: запусти `/jadlis-research:research-settings`» and stop. No recon, no
+launch gate, no workflow.
 
 Language convention (Plan 2, 2026-09): everything the agents read and write inside the workDir
 (channel files, snapshot headers, curator/verifier/escalation output, the claim ledger) is in
@@ -42,21 +42,36 @@ queries in the Yandex/Telegram protocols, and `quotes[]` in the language of the 
 ## Architecture
 
 ```
-Phase A (INTAKE in plan mode: channels + recon + interview → brief in the plan file; ExitPlanMode = launch gate)
-  → Phase B (Workflow full-research-core, exec) → Phase C (WRITE: vault contract)
+Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md; one AskUserQuestion = launch gate)
+  → Phase B (Workflow full-research-core) → Phase C (WRITE: vault contract)
 ```
 
-Under `opusplan` the main session is Fable 5.1 while in plan mode and Opus 5.5 in exec: the intake
-(judgement: channel choice, refined query, decision context) runs on Fable, the mechanical part
-(launching the workflow, writing the vault) on Opus. The frontmatter `model:` above holds for one
-turn only — do not rely on it beyond the first turn.
+## Phase A — INTAKE (main session)
 
-## Phase A — INTAKE (main session, plan mode)
-
-0. **Enter plan mode.** Call `EnterPlanMode` before anything else: recon is read-only, the
-   interview goes through AskUserQuestion, the brief is written into the plan file. No file in the
-   vault or the workDir is written in Phase A. If plan mode is unavailable (headless, `-p`), run the
-   same steps without it and write the brief to `{WORK_DIR}/_brief.md` instead.
+0. **Session branch — pick exactly one.**
+   - **Normal (default).** No plan mode — do not call `EnterPlanMode`. Steps 1-7 run in the
+     session's current mode; the launch gate is the one AskUserQuestion of step 7, the brief goes
+     to `{WORK_DIR}/_brief.md`.
+   - **Brief already approved.** Narrow signals only: the request carries a `## full-research brief`
+     section from an approved plan, gives the path to a `_brief.md`, or explicitly asks to launch
+     without questions («без вопросов», «интервью и гейт пропусти»). Skip the interview (step 4)
+     and the gate (step 7). Run step 2a only if the brief has no `SELECTED_CHANNELS`; fields the
+     brief lacks come from the request and steps 5-6. Then do the launch sequence of step 7
+     (`mkdir -p`, `_brief.md` — keep a given one as is, launch line, Workflow). If this file was
+     opened with Read rather than loaded as a skill, its plugin-root variables stay unsubstituted —
+     use `PLUGIN_ROOT` and `VAULT_PATH` from the brief.
+   - **Session already in plan mode** (the user is planning a bigger task; a plan-mode system
+     reminder names the plan file). Steps 1-6 as usual. Then APPEND the brief of step 7 as a
+     section to that plan file — leave the rest of the plan as it is, no Context/Evidence frame
+     around the brief. The first line under `## full-research brief` is
+     `EXEC: read ${CLAUDE_SKILL_DIR}/SKILL.md — step 0 «Brief already approved», then Phase B–C; launch without questions`
+     so the brief survives «clear context» on approval. The gate is the user's approval of the
+     plan: one `ExitPlanMode`, no AskUserQuestion gate. After approval — the launch sequence of
+     step 7. If Workflow then refuses with «scriptPath must be a script path this tool returned»,
+     the approval switched the session to `auto` — ask the user to switch back to bypass
+     permissions and repeat the same call.
+   - **Headless** (`-p`, AskUserQuestion unavailable): the interview answers come from the prompt,
+     the gate is skipped — write `_brief.md` and launch right away.
 
 1. **Topic.** If `$ARGUMENTS` is empty — ask for the topic via AskUserQuestion (in Russian) and stop.
 
@@ -176,7 +191,7 @@ turn only — do not rely on it beyond the first turn.
 3. **Recon.** Make 1-2 calls of `mcp__plugin_jadlis-search_brave-search__brave_web_search`
    (Search tier: 50 req/s, parallel OK; `count: 5`): a broad overview of the topic + optionally one
    clarifying aspect. The goal is orientation (aspects, sub-topics, controversies), not data
-   collection. Read-only — plan mode allows it.
+   collection. Read-only.
    **Substack handle extraction:** if "substack" is among the channels — parse URLs of the form
    `<handle>.substack.com` from the Brave results → the array `SUBSTACK_HANDLES`.
 
@@ -216,27 +231,59 @@ turn only — do not rely on it beyond the first turn.
    pass the args in full with the same absolute workDir);
    `VAULT_RESEARCH_DIR = {VAULT_PATH}/Знания/Ресерчи`; `PLUGIN_ROOT = ${CLAUDE_PLUGIN_ROOT}`.
 
-7. **Brief → plan file → launch gate.** Write the brief into the plan file (plan mode) in this
-   shape — the exec turn reads it and launches Phase B without re-asking:
+7. **Brief → launch gate.** One AskUserQuestion, in Russian, header «Запуск». The question
+   restates the whole proposal so it reads without scrolling back: `REFINED_QUERY`, the channels
+   that will run (`SELECTED_CHANNELS`, their number) and `LANGUAGES`, plus dropped channels with a
+   short reason if there are any — e.g. «Запускаю полный ресёрч так? Формулировка: «…». Каналы (6):
+   web, codexweb, reddit, twitter, hackernews, substack; grokweb выключен в настройках. Языки: ru.»
+   Options, in this order:
+   - «Запустить (рекомендую)» — start the run;
+   - «Поправить формулировку» — take the change from the answer's note or «Other» text (none →
+     ask one plain question), update `REFINED_QUERY` and `QUERY_RU`;
+   - «Поправить каналы» — which channels to add or drop: a drop edits `SELECTED_CHANNELS`
+     directly, an addition re-runs the step 2a resolve with the new list.
+   Free text via «Other» is a correction too. After any correction apply it and ask the gate
+   again. **Launch only after the user picks «Запустить»** — no Workflow call before the gate has
+   returned that answer. Settle every value before the question (a platform searched in its own
+   language — step 5): the launch uses exactly what the gate showed, and a change after the
+   answer (language, channel, wording) means asking the gate again.
 
-   ```
-   ## full-research brief
-   REFINED_QUERY: …
-   DECISION_CONTEXT: …
-   SELECTED_CHANNELS: [web, codexweb, …]      # = resolve.channels; dropped: … (reason)
-   CHANNEL_NOTES: {}                           # = resolve.notes — {channel: text}, verbatim
-   PROVIDERS_OFF: []                           # = resolve.providers_off, e.g. [grok]
-   SOURCE_DROPPED: []                          # = resolve.dropped — [{channel, reason, detail}]
-   LANGUAGES: [ru]                             # + QUERIES per language if not ru/en
-   QUERIES: {}
-   SUBSTACK_HANDLES: []
-   WORK_DIR: /abs/path/.full-research/<id>_<slug>
-   QUERY_RU: …
-   DATE: YYYY-MM-DD
-   ```
-   Then `ExitPlanMode`. Approval of the plan = the launch gate. After approval (exec):
-   `mkdir -p "{WORK_DIR}" "{VAULT_RESEARCH_DIR}"` and say: «Запущен полный ресерч по {N} каналам:
-   {SELECTED_CHANNELS}; языки: {LANGUAGES}. Ожидаю результаты...»
+   **Launch sequence** — in the same turn as the answer; the other branches of step 0 reuse it:
+   1. `mkdir -p "{WORK_DIR}" "{VAULT_RESEARCH_DIR}"`.
+   2. Write the brief to `{WORK_DIR}/_brief.md` in this shape — it holds every Workflow arg:
+
+      ```
+      ## full-research brief
+      REFINED_QUERY: …
+      DECISION_CONTEXT: …
+      SELECTED_CHANNELS: [web, codexweb, …]      # = resolve.channels; dropped: … (reason)
+      CHANNEL_NOTES: {}                           # = resolve.notes — {channel: text}, verbatim
+      PROVIDERS_OFF: []                           # = resolve.providers_off, e.g. [grok]
+      SOURCE_DROPPED: []                          # = resolve.dropped — [{channel, reason, detail}]
+      LANGUAGES: [ru]                             # + QUERIES per language if not ru/en
+      QUERIES: {}
+      SUBSTACK_HANDLES: []
+      WORK_DIR: /abs/path/.full-research/<id>_<slug>
+      QUERY_RU: …
+      DATE: YYYY-MM-DD
+      VAULT_PATH: /abs/path/to/vault              # step 6 value
+      PLUGIN_ROOT: ${CLAUDE_PLUGIN_ROOT}
+
+      ## Checklist
+      - [ ] Phase B — Workflow launched (runId: …), result received
+      - [ ] Phase C — vault note written (REPORT_PATH: …)
+      - [ ] Summary to the user
+      ```
+      The plan-mode branch of step 0 puts the same block, without `## Checklist`, into the plan
+      file, with the `EXEC:` line first under the heading.
+   3. Say: «Запущен полный ресерч по {N} каналам: {SELECTED_CHANNELS}; языки: {LANGUAGES}.
+      Ожидаю результаты...»
+   4. Call Workflow (Phase B) and put the returned runId into the Phase B checklist line.
+
+   **Context compaction or resume mid-run.** Re-read `{WORK_DIR}/_brief.md`: it holds every
+   Workflow arg and the checklist; tick each line when its phase is done. A runId in the Phase B
+   line means the run already exists — wait for its `<task-notification>` or resume it with
+   `resumeFromRunId` and the same args; never launch a second run.
 
 ## Phase B — INVOKE
 
@@ -286,7 +333,8 @@ BOTH stories go to the report. A single exclusion against UNCHECKED → the thir
 Codex (GPT-6 Astra, live search; cap 8 escalations; `codexModel: "gpt-5.6-sol"` in args —
 rollback); an unconfirmed exclusion → `DISPUTED` (disputed, not part of the conclusions). Dropped claims are
 **filtered** (not merely annotated with criticism), then the analyst writes the draft report to
-`{WORK_DIR}/draft.md` (in Russian). Wait for the `<task-notification>`, then use the object:
+`{WORK_DIR}/draft.md` (in Russian). Wait for the `<task-notification>` (then tick the Phase B line
+of `{WORK_DIR}/_brief.md`) and use the object:
 `{workDir, status, ledgerSchemaVersion, languages, channelsAnswered, channelStatus, failedChannels,
 aiModelActual, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, reportPath, queryRu,
 relatedCandidates, claimLedger, synthMeta, sourceSettings}`; `sourceSettings` =
@@ -358,7 +406,8 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
    placeholder) put wikilinks `[[Название]]` **ONLY** to notes really found in step 3 (do NOT create
    unresolved links; `relatedCandidates` from the object are only search hints). If the obsidian
    CLI is unavailable — leave the section empty/remove it. Write the final file to `REPORT_PATH`
-   (Write — copy the draft with the section filled in).
+   (Write — copy the draft with the section filled in), then tick the Phase C line of
+   `{WORK_DIR}/_brief.md` with that path.
 
 6. **Post-write (daily note).** If Obsidian is open:
    ```bash
@@ -374,6 +423,7 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
    (gc prints deletion candidates; the deletion itself — only on the user's explicit request: `--yes`.)
 
 7. **Summary to the user (in Russian; ledger statements are English — translate them, numbers verbatim):**
+   Tick the last checklist line of `{WORK_DIR}/_brief.md` first, then write the summary.
    - The verdict for the decision from the interview (`DECISION_CONTEXT`): what to do / not to do —
      2-4 sentences from the main conclusion of the draft.
    - **Channel status (mandatory).** From `channelStatus`: if `failedChannels` is non-empty —

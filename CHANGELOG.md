@@ -5,6 +5,25 @@
 
 ## [Unreleased]
 
+## [2.7.0] — 2026-09-24 — Ресёрч без режима планирования / Intake without plan mode
+
+### Для человека
+
+- `/jadlis-research:research` больше не переключает сессию в режим планирования. Опрос идёт в обычном режиме, а запуск подтверждается одним вопросом: в нём формулировка темы, каналы и языки. «Запустить» стартует прогон, «Поправить формулировку» и «Поправить каналы» возвращают к правке, после неё вопрос звучит снова.
+- Зачем: режим планирования добавили ради опроса на Fable под `opusplan`, а `opusplan` отменили 06.09. Остались одни сбои. Одобрение плана с очисткой контекста выбрасывало текст навыка (19 прогонов из 28), бриф вклеивался в план другой задачи, а после одобрения сессия уходила из bypass в auto, и Workflow отказывался стартовать.
+- Бриф прогона лежит в рабочей папке, в файле `_brief.md`, вместе с чек-листом фаз. После сжатия контекста ресёрч продолжает по нему и не запускает прогон второй раз.
+- Если вы сами уже в режиме планирования, бриф уходит секцией в ваш план. Первая строка секции говорит, где взять инструкции, поэтому бриф переживает очистку контекста при одобрении.
+- Бриф из одобренного плана, путь к `_brief.md` или просьба «без вопросов» запускают прогон сразу, без опроса и подтверждения.
+
+### For agents
+
+- Changed: `skills/research/SKILL.md` — `EnterPlanMode` removed from `allowed-tools` (`ExitPlanMode` stays for the plan-mode branch). Phase A step 0 = four branches: normal (no plan mode, never call `EnterPlanMode`); brief already approved (a `## full-research brief` section, a `_brief.md` path or an explicit «без вопросов» → skip interview and gate, step 2a only without `SELECTED_CHANNELS`, launch sequence); session already in plan mode (brief appended to the current plan file, first line `EXEC: read ${CLAUDE_SKILL_DIR}/SKILL.md …`, gate = one `ExitPlanMode`); headless (no gate).
+- Changed: step 7 «Brief → launch gate» — one AskUserQuestion (header «Запуск»; `REFINED_QUERY`, channels and languages in the question text; options «Запустить (рекомендую)» / «Поправить формулировку» / «Поправить каналы», adding a channel re-runs the step 2a resolve). Workflow only after «Запустить», with exactly the values the gate showed (a smoke run switched `LANGUAGES` ru → en after the answer; now any later change re-asks the gate). Launch sequence: `mkdir -p` → `{WORK_DIR}/_brief.md` → launch line → Workflow.
+- Changed: the brief gains `VAULT_PATH` and `PLUGIN_ROOT` (every Workflow arg is now in it) and, in `_brief.md`, a `## Checklist` (Phase B with runId, Phase C with `REPORT_PATH`, summary); Phase B, Phase C step 5 and step 7 tick it. New rule for compaction/resume: re-read `_brief.md`; a runId in the Phase B line means wait or `resumeFromRunId`, never a second launch.
+- Removed: the `opusplan` paragraph (dropped 2026-09-06) and «plan mode allows it» in the recon step.
+- Docs: `docs/tier/README.md`, `docs/tier/README.en.md` — the launch gate is one confirmation question, not a plan approval; `references/gotchas.md` says «brief» instead of «plan».
+- Migration: none for callers. Briefs already sitting in plan files launch through the «brief already approved» branch.
+
 ## [2.6.1] — 2026-09-23 — Строка «От тебя:» / Closing «От тебя:» line
 
 ### Для человека
