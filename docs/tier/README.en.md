@@ -29,7 +29,7 @@ Read the pipeline: collection by channels first, then a separate verification ph
 5. **urlhealth + snapshot gate** — MEDIUM ceiling on a weak citation.
 6. **Two verifiers per claim, one per source family** — the first challenges the claim where it was found (from Reddit → on Reddit, from the web → via Brave), the second takes the other family. Web and communities disagree → a "family split": both stories go into the report, priority by claim type (fact → web, experience → communities). A lone exclusion → third vote by Codex (no more than 8 escalations per run).
 7. **Synthesis** — survivors only; dropped = one line with the reason.
-8. **Note in `Знания/Ресерчи/`** — `verified: false` until you read it.
+8. **Note in `Знания/Ресерчи/`** — an AI draft until you read it.
 
 ![Two magnifiers over one card: through one it is intact, through the other it is cracked](https://github.com/beCyborg/jadlis-hub/blob/main/docs/img/05-full-research-01.webp?raw=1)
 
@@ -47,7 +47,6 @@ Channels roll up into source families: `web`, `codexweb`, `grokweb` and `yandex`
 type: research
 created: 2026-09-06
 ai_drafted: true
-verified: false
 ai_model: "claude-opus-5-5"
 query: "Стоит ли переносить командную вики на статический генератор"
 decision: "Решить, мигрировать ли вики команды в этом квартале"
@@ -212,7 +211,7 @@ What degrades without keys and binaries:
 What these tools do not do:
 
 - `research` does not check the whole text: the ceiling is 16 claims per run, everything else in the report is collected but unverified.
-- "Confirmed" means "survived a counter-search", not "true". The report is marked `verified: false` until you read it yourself.
+- "Confirmed" means "survived a counter-search", not "true". The report stays an AI draft (`ai_drafted: true`) until you read it yourself.
 - Agreement between several search engines is not confirmation — that is one source family.
 - `research` does not judge study methodology; "how strongly is this proven" is a question for `science-research`.
 - `science-research` grades mostly from abstracts: full texts are read for 6 papers, not for the whole corpus.

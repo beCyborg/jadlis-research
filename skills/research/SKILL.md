@@ -448,12 +448,10 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      every branch since 2.7.1: xhigh by default, high with `fableBridge: true` or on the retry).
    - Report path: `REPORT_PATH` (vault, `Знания/Ресерчи`).
    - Working directory: `{WORK_DIR}/` (per-source files + draft — the full process).
-   - Reminder: the report frontmatter has `verified: false` — an AI draft. After review the user
-     sets `verified: true` by hand.
    - **Closing line «От тебя:» — only when unverified claims reached the report.** Trigger:
      `ledgerSummary.disputed > 0` or `ledgerSummary.familySplit > 0` (claims with verdict
-     `DISPUTED` / `FAMILY-SPLIT` — the report carries them without a verified answer). The
-     frontmatter `verified: false` alone is NOT a trigger: every report has it. CHALLENGED/OUTDATED
+     `DISPUTED` / `FAMILY-SPLIT` — the report carries them without a verified answer). No other
+     signal is a trigger: a report with neither has no «От тебя:» line. CHALLENGED/OUTDATED
      are already filtered out and UNCHECKED never entered the report — they are not listed here.
      Then the summary ends with a separate line starting with `**От тебя:**` that names, in Russian,
      what the user checks or decides: per DISPUTED claim — the statement and what exactly to check

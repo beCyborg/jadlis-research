@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+## [2.7.2] — 2026-09-30 — Без свойства verified / verified property dropped
+
+### Для человека
+
+- В свойствах отчёта больше нет `verified: false`. Флаг никто не переключал и ничто его не читало, а черновик ИИ и так отмечен свойством `ai_drafted: true`.
+- Строка «От тебя:» в итоге ресёрча работает как раньше: она появляется только при спорных утверждениях и расхождениях веба и сообществ.
+
+### For agents
+
+- Removed: the `verified` frontmatter property from the analyst report template in `workflows/full-research-core.js` (and `verified:false` from the Synthesize phase detail), `skills/research/examples/sample-report.md`, `docs/tier/README*.md` (example frontmatter, pipeline step 8, limits list).
+- Changed: `skills/research/SKILL.md` Phase C step 7 — the «Reminder: … `verified: false` … user sets `verified: true` by hand» bullet is gone; the «От тебя:» trigger sentence no longer mentions the field (trigger unchanged: `ledgerSummary.disputed > 0` or `ledgerSummary.familySplit > 0`).
+- Tests: `node tools/smoke-core.mjs` → ALL OK.
+- Migration: none; existing vault notes keep their `verified` property, nothing reads it.
+
 ## [2.7.1] — 2026-09-29 — Без Fable / Fable dropped
 
 ### Для человека

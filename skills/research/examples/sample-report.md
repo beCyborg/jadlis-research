@@ -2,7 +2,6 @@
 type: research
 created: 2026-03-04
 ai_drafted: true
-verified: false
 ai_model: "claude-opus-5"
 tags: []
 query: "Claude Code vs Cursor: что выбрать для ежедневной работы"

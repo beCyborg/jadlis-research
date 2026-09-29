@@ -4,7 +4,7 @@ export const meta = {
   phases: [
     { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты' },
     { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims с evidence-префиксами → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5)' },
-    { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию, Opus 5.5 high при fableBridge:true; null → один повтор на другой роли synth-*) пишет отчёт (verified:false): три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
+    { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию, Opus 5.5 high при fableBridge:true; null → один повтор на другой роли synth-*) пишет отчёт: три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
 
@@ -570,7 +570,6 @@ REPORT FORMAT (Obsidian Flavored Markdown, structure EXACTLY as in the reference
 type: research
 created: ${DATE}
 ai_drafted: true
-verified: false
 ai_model: "${aiModel}"
 tags: []
 query: "{the original query; replace inner double quotes with «»}"
