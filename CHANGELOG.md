@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+## [2.7.1] — 2026-09-29 — Без Fable / Fable dropped
+
+### Для человека
+
+- Ресёрч больше не обращается к Fable 5.1. Запасной аналитик и аналитик по флагу `fableBridge: true` теперь тоже Opus 5.5, только на уровне усилий high вместо xhigh. Если первый аналитик вернул пустой ответ, повтор идёт на Opus 5.5 с другим уровнем усилий.
+- Зачем: по ресёрчу «Opus 5.5 на моих задачах» Opus 5.5 на high по индексу Artificial Analysis держится вровень с Fable 5.1 на max, а задача обходится примерно вчетверо дешевле.
+- В свойствах отчёта `ai_model` теперь всегда `claude-opus-5-5`.
+
+### For agents
+
+- Changed: `agents/synth-fable.md` — `model: claude-fable-5-1` → `claude-opus-5-5` (effort `high` unchanged), description marks the name as historical. `agents/synth-opus.md` and `agents/orchestrator-opus.md` descriptions follow.
+- Changed: `workflows/full-research-core.js` — `SYNTH_FABLE.model` → `'claude-opus-5-5'`, `name` → `'Opus 5.5 high (synth-fable)'`; comments and the Synthesize phase detail describe the retry as the other synth-* role (xhigh ↔ high), not the other family. `fableBridge`, `FABLE_SYNTH`, the agent name and the `analyst→fable` / `analyst→fable-retry` labels are kept (one vocabulary across the workflows).
+- Changed: `skills/research/SKILL.md` (models paragraph, Phase C «Synthesis model»), `docs/tier/README*.md` example `ai_model` → `claude-opus-5-5`.
+- Tests: `tools/smoke-core.mjs` — expected model ids `claude-fable-5-1` → `claude-opus-5-5`, retry log strings updated; `node tools/smoke-core.mjs` → ALL OK.
+- Migration: none; `fableBridge: true` still works and now selects synth-fable on Opus 5.5 high.
+
 ## [2.7.0] — 2026-09-24 — Ресёрч без режима планирования / Intake without plan mode
 
 ### Для человека

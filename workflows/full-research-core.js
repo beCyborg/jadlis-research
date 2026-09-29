@@ -4,7 +4,7 @@ export const meta = {
   phases: [
     { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты' },
     { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims с evidence-префиксами → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5)' },
-    { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию, Fable 5.1 при fableBridge:true; null → один повтор на другой семье) пишет отчёт (verified:false): три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
+    { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию, Opus 5.5 high при fableBridge:true; null → один повтор на другой роли synth-*) пишет отчёт (verified:false): три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
 
@@ -42,17 +42,17 @@ const w = extra => Object.assign({}, WORKER_OPTS, extra)
 // not intelligence-sensitive. orchestrator-opus serves the curator only; the analyst runs on synth-*.
 // analyst: Opus 5.5 at effort xhigh by default (synth-opus) since 2.6.0 — AA GDPval xhigh 1820
 // vs Fable 5.1 high 1617, fewer guesses, cheaper per task, no separate Fable weekly cap.
-// Fable 5.1 (synth-fable, effort high) only when the caller passes fableBridge:true — the escape
-// hatch while long-context retrieval of Opus 5.5 (400–600K of channel files) is not measured.
-// If the first analyst returns null, ONE retry runs on the other family (Opus → Fable,
-// Fable → Opus): a refusal or a quota hit of one family does not cost the report.
+// synth-fable only when the caller passes fableBridge:true. Since 2.7.1 (2026-09-29) it runs on
+// Opus 5.5 at effort high, not Fable 5.1 — the user dropped Fable; the agent name and the
+// `fableBridge` flag are historical. If the first analyst returns null, ONE retry runs on the
+// other synth-* role (xhigh → high, high → xhigh): same model, a fresh attempt at another effort.
 // Both run as ordinary subagents: the headless bridge existed only to dodge our own
 // CLAUDE_CODE_SUBAGENT_MODEL_FORCE, removed 2026-09-07. The two synth-* agents pin the model,
 // the effort and the tool allow-list (Read, Write, Glob) — agent() has no allowedTools option.
 // The argument name stays `fableBridge`: one vocabulary across all eight workflows.
 const FABLE_SYNTH = A.fableBridge === true
 const SYNTH_OPUS = { agentType: 'jadlis-research:synth-opus', model: 'claude-opus-5-5', name: 'Opus 5.5' }
-const SYNTH_FABLE = { agentType: 'jadlis-research:synth-fable', model: 'claude-fable-5-1', name: 'Fable 5.1' }
+const SYNTH_FABLE = { agentType: 'jadlis-research:synth-fable', model: 'claude-opus-5-5', name: 'Opus 5.5 high (synth-fable)' }
 const SYNTH_FIRST = FABLE_SYNTH ? SYNTH_FABLE : SYNTH_OPUS
 const SYNTH_RETRY = FABLE_SYNTH ? SYNTH_OPUS : SYNTH_FABLE
 const SYNTH_AGENT = SYNTH_FIRST.agentType
@@ -930,9 +930,9 @@ const ledgerOut = claimLedger.map(({ rawVotes, ...c }) => c)
 let report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL),
   synthOpts(FABLE_SYNTH ? 'analyst→fable' : 'analyst', SYNTH_AGENT))
 
-// One retry on the OTHER model family, both branches (Opus → synth-fable, Fable → synth-opus):
-// a null from one family (safety-classifier stop on a grey/OSINT topic, a Fable weekly-cap hit,
-// a session limit) should not leave the run without a report. Same prompt, the retry's ai_model.
+// One retry on the OTHER synth-* role, both branches (synth-opus → synth-fable and back; both
+// Opus 5.5 since 2.7.1, labels keep the old names): a null (safety-classifier stop on a grey/OSINT
+// topic, a session limit) should not leave the run without a report. Same prompt, the retry's ai_model.
 // synthFellBack = the retry ran AND produced the report.
 let synthFellBack = false
 if (!report) {

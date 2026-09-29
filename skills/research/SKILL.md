@@ -311,9 +311,9 @@ Workflow({
 Models inside the workflow: channels, verifiers and curator — Opus 5.5
 (`jadlis-research:researcher-opus` / `jadlis-research:orchestrator-opus`; urlhealth runs at effort low);
 analyst — **Opus 5.5 at effort xhigh** (`jadlis-research:synth-opus`) by default.
-`fableBridge: true` in args → analyst on Fable 5.1 instead (`jadlis-research:synth-fable`,
-effort high) — the opt-in while long-context retrieval of Opus 5.5 is unmeasured. Either way, an
-analyst that returns null is retried ONCE on the other family (Opus → Fable, Fable → Opus).
+`fableBridge: true` in args → analyst on `jadlis-research:synth-fable` instead — since 2.7.1 also
+Opus 5.5, at effort high (name and flag are historical; Fable 5.1 is no longer used). Either way, an
+analyst that returns null is retried ONCE on the other synth-* role (xhigh ↔ high).
 Do NOT pass `aiModel`: the workflow derives the frontmatter value itself and reports the model
 that actually wrote the report in `aiModelActual`.
 
@@ -444,8 +444,8 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      снапшот-гейту M (причины из byReason); urlhealth: dead/fabrication».
      `evidenceHealth: "skipped"` → say the URL health was not checked.
    - Gaps (`synthMeta.gaps`): what the research did not cover.
-   - Synthesis model: `aiModelActual` — the one that actually wrote the report (Opus 5.5 by
-     default, Fable 5.1 with `fableBridge: true`, or the other family on the retry).
+   - Synthesis model: `aiModelActual` — the one that actually wrote the report (Opus 5.5 in
+     every branch since 2.7.1: xhigh by default, high with `fableBridge: true` or on the retry).
    - Report path: `REPORT_PATH` (vault, `Знания/Ресерчи`).
    - Working directory: `{WORK_DIR}/` (per-source files + draft — the full process).
    - Reminder: the report frontmatter has `verified: false` — an AI draft. After review the user

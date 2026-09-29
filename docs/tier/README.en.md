@@ -48,7 +48,7 @@ type: research
 created: 2026-09-06
 ai_drafted: true
 verified: false
-ai_model: "claude-fable-5-1"
+ai_model: "claude-opus-5-5"
 query: "Стоит ли переносить командную вики на статический генератор"
 decision: "Решить, мигрировать ли вики команды в этом квартале"
 channels: [web, codexweb, reddit, hackernews, substack]
