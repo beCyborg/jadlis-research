@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+## [2.7.5] — 2026-09-30 — Fast для поиска Codex / Fast tier for the Codex channel
+
+### Для человека
+
+- Два поисковых вызова Codex в ресёрче идут в режиме Fast: в замере они стали в среднем в 1,7 раза быстрее, на длинных темах — до 2,1 раза, при том же числе поисков и открытых страниц. Канал Codex заканчивает последним, так что весь ресёрч короче на несколько минут.
+- Цена — расход лимита Codex примерно в 2,5 раза выше на эти два вызова. Третий голос при спорных утверждениях (до 8 вызовов, лимит общий с `/verif`) остался в обычном режиме.
+
+### For agents
+
+- Changed: `skills/research/protocols/codex-web-protocol.md` — the base command, Call 1 and Call 2 use `service_tier="priority"`; the escalation command and `workflows/full-research-core.js` keep `service_tier="default"`. The "do NOT use priority" note is replaced by the 2026-09-30 decision with the A/B numbers (693→334 s, 1042→618 s, 319→277 s; searches/opened pages unchanged); the 2026-08-15 history is kept.
+- Tests: `node tools/smoke-core.mjs` → ALL OK.
+- Migration: none. Rollback — `priority` → `default` in the three channel commands.
+
 ## [2.7.4] — 2026-09-30 — Ловушка смоука с `--tools ""` / smoke gotcha for `--tools ""`
 
 ### Для человека
