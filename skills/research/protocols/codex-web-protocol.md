@@ -7,11 +7,15 @@ Web search via **Codex CLI** (`codex exec`) with web search enabled. Billing —
 > [!note] `service_tier="priority"` ("Fast" in the Codex UI) — do NOT use
 > The name `gpt-5.6-sol-fast` does not exist in the API (HTTP 400 "not supported when using Codex with a ChatGPT account" — verified 2026-08-15). The "Fast" setting in the Codex UI = `service_tier="priority"`: officially "1.5x speed, increased usage", by the user's estimate ≈2.5× the quota burn for −15% of the time (A/B 2026-08-15: sol-high 177 s → 151 s, live searches the same — 11). Decision 2026-09-05: the priority is quota spent on evidence, not speed → an explicit `service_tier="default"` in every command (the global `~/.codex/config.toml` is on `default` too, so that a call without the flag does not inherit priority).
 > **The channel model is `gpt-6-astra` as of 2026-09-05** (the user's decision; part B of Plan 1, "astra vs sol", has been dropped as a gate — the comparison of live searches happens after the fact, on the first escalation of tranche 1 of Plan 2). Effort `high` explicitly: Astra's default is `medium`, and search depth is the whole point of the channel. Do not use Luna/Terra: the luna-high measurement gave −43% of the time, but half as many live searches (5 vs 11). **Rollback** — `gpt-5.6-sol` (alive in the CLI catalog, priority 6): if the first escalation yields < 5 live `web_search` calls against the Sol benchmark of 11 (measurement 2026-08-15) — restore the literals here and `CODEX_MODEL` in the core in a single commit.
+> **Re-checked 2026-09-30 against GPT-6.1 Sol — Astra high stays.** Blind A/B on 3 real channel prompts (Porsche diagnostics, supplements, B2B-mobile counter-arguments), Opus grader with URL spot-checks: Astra high 7.7/10 (isolated home) and 7.7 (old global config), Sol 6.1 high 7.7 but 2× slower (median 1199 s vs ≈830 s), Sol 6.1 medium 7.0 (a stale bulletin revision on the Porsche prompt) at 2–4× fewer input tokens and not consistently faster (415/1064/496 s). No fabricated citations in any arm. Re-test when Sol 6.1 Ultrafast ships in Codex.
+
+> [!warning] Isolated Codex home — every call goes through `scripts/codex-home.sh` (since 2026-09-30)
+> A bare `codex exec` inherits the user's `~/.codex`: `model_instructions_file` (replaces the Codex base prompt), the global `AGENTS.md`, memories, plugins and MCP servers. Measured 2026-09-30: a global "answer in Russian" rule turned 7 of 8 English research prompts into 63–75% Cyrillic answers — quotes got translated and could no longer be matched against the source pages. `codex-home.sh` keeps a separate `CODEX_HOME` (`~/.claude/research-homes/codex`, login symlinked from `~/.codex/auth.json`) with its own search-worker `AGENTS.md` (answer in the prompt's language, verbatim quotes, URL + date per claim, batched queries) and prints its path. `--ignore-user-config` is not enough: it still loads the global `AGENTS.md`.
 
 Base command (Bash, `timeout: 300000` ms per call):
 
 ```bash
-codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json '<PROMPT>' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json '<PROMPT>' < /dev/null
 ```
 
 > [!warning] `< /dev/null` is MANDATORY in every call — without it the channel hangs until timeout
@@ -54,13 +58,13 @@ Query language: whenever `languages` is not ru/en only, both `codex exec` prompt
 ### Call 1 — Broad overview (mandatory)
 
 ```bash
-codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json 'Research the web for: <expanded query — topic, aspects, what decision is being made>. Use ONLY the web search tool - run real searches, do NOT answer from memory. Every claim MUST have a source URL and publication date; omit claims without URLs. Prefer 2024-2026 sources. Open and READ THE FULL PAGE of every key source before citing it - do NOT cite from search-result snippets alone; quote specifics that only appear in the page body. Return: key findings (bulleted, each with URL), notable numbers/quotes with URLs, and a final Sources section listing all URLs.' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json 'Research the web for: <expanded query — topic, aspects, what decision is being made>. Use ONLY the web search tool - run real searches, do NOT answer from memory. Every claim MUST have a source URL and publication date; omit claims without URLs. Prefer 2024-2026 sources. Open and READ THE FULL PAGE of every key source before citing it - do NOT cite from search-result snippets alone; quote specifics that only appear in the page body. Return: key findings (bulleted, each with URL), notable numbers/quotes with URLs, and a final Sources section listing all URLs.' < /dev/null
 ```
 
 ### Call 2 — Counter-arguments (mandatory)
 
 ```bash
-codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json 'Search the web for criticism, problems, failures and counter-arguments about: <topic>. Use ONLY the web search tool - real searches, NOT memory; every claim needs a source URL. Who disagrees and why? Known issues, regressions, negative experience reports. Open and READ THE FULL PAGE of key sources before citing - do NOT cite from snippets alone. Return bulleted findings with URLs + Sources section.' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json 'Search the web for criticism, problems, failures and counter-arguments about: <topic>. Use ONLY the web search tool - real searches, NOT memory; every claim needs a source URL. Who disagrees and why? Known issues, regressions, negative experience reports. Open and READ THE FULL PAGE of key sources before citing - do NOT cite from snippets alone. Return bulleted findings with URLs + Sources section.' < /dev/null
 ```
 
 Launch both calls in ONE message (two Bash calls in parallel), each with a `timeout` of ~300000 ms.
@@ -98,7 +102,7 @@ Besides serving as a channel, Codex is used by the `full-research-core` workflow
 The call (made by a lightweight subagent bridge, the `escalationPrompt` prompt in core.js):
 
 ```bash
-codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json -o "<workDir>/_codex-esc-<claimId>-last.md" "$(cat "<workDir>/_codex-esc-<claimId>-prompt.md")" < /dev/null > "<workDir>/_codex-esc-<claimId>.jsonl"
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json -o "<workDir>/_codex-esc-<claimId>-last.md" "$(cat "<workDir>/_codex-esc-<claimId>-prompt.md")" < /dev/null > "<workDir>/_codex-esc-<claimId>.jsonl"
 ```
 
 - **Live-search gate:** the JSONL must contain ≥1 `web_search` event (`grep -c '"web_search'`); 0 → the voice does not count (`escalationSkipped: 'no-live-search'`) — Codex was answering from memory.
@@ -113,7 +117,7 @@ The ChatGPT-subscription quota is one finite pool for the codexweb channel (auto
 Replacement, same OpenAI web_search backend (Bing index + OAI-SearchBot), ≈30–80 s per question, `agent_message.text` = JSON matching the schema:
 
 ```bash
-codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c 'tools.web_search={mode="live"}' --json --output-schema schema.json '<PROMPT>' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c 'tools.web_search={mode="live"}' --json --output-schema schema.json '<PROMPT>' < /dev/null
 ```
 
 `web_search` events show the queries (but not the list of opened sources — only the cited ones). Priority inside the pool: `/verif` > codexweb > everything else. Before a mass run make one probe API call (the 429 arrives immediately) and one `codex exec ... 'ok' < /dev/null` probe; a usage-limit answer means the channel goes off. Any script built on the Responses API must ship with a `codex exec` fallback.

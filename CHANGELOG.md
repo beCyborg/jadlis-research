@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+## [2.7.3] — 2026-09-30 — Отдельный дом Codex для поиска / isolated Codex home
+
+### Для человека
+
+- Поиск через Codex больше не подхватывает твой глобальный конфиг Codex: чужой системный промпт, общий `AGENTS.md`, memories, плагины. Раньше из-за правила «отвечай по-русски» Codex отвечал на английские запросы по-русски и переводил цитаты, а проверка цитат потом не находила их на страницах источников.
+- Модель остаётся GPT-6 Astra high: в слепом сравнении с новым GPT-6.1 Sol качество одинаковое, а Sol на high вдвое медленнее.
+
+### For agents
+
+- Added: `scripts/codex-home.sh` — creates/refreshes an isolated `CODEX_HOME` (`~/.claude/research-homes/codex`; override `JADLIS_RESEARCH_CODEX_HOME`, source login `CODEX_HOME_SOURCE`) with `auth.json` symlinked from `~/.codex`, a seeded `models_cache.json`, a generated `config.toml` (read-only, default tier, live search, memories off) and a search-worker `AGENTS.md`; prints the path.
+- Changed: every `codex exec` in `skills/research/protocols/codex-web-protocol.md` and the escalation bridge in `workflows/full-research-core.js` run as `CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec …`. `--ignore-user-config` was rejected: it still loads the global `AGENTS.md`.
+- Docs: protocol note with the 2026-09-30 blind A/B (Astra high 7.7, Sol 6.1 high 7.7 at 2× time, Sol 6.1 medium 7.0). Live-search gate (`grep -c '"web_search'`) re-checked on codex-cli 0.159.0 in both search modes — unchanged.
+- Tests: `node tools/smoke-core.mjs` → ALL OK.
+- Migration: none; the home is created on first call.
+
 ## [2.7.2] — 2026-09-30 — Без свойства verified / verified property dropped
 
 ### Для человека

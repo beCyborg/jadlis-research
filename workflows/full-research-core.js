@@ -25,7 +25,7 @@ const VERIFIERS = 2
 const CLAIM_HARD_CAP = 16
 // Cap on Codex escalations per run (vote splits beyond the cap → exclusion on a single vote + flag 'cap').
 const ESCALATION_CAP = Number.isFinite(A.escalationCap) ? A.escalationCap : 8
-// Codex model for escalation (third vote). gpt-6-astra since 2026-09-05 (owner decision);
+// Codex model for escalation (third vote). gpt-6-astra since 2026-09-05 (owner decision; re-checked vs GPT-6.1 Sol 2026-09-30 — see codex-web-protocol.md);
 // rollback — args.codexModel: 'gpt-5.6-sol' (still in the CLI catalogue). Effort high explicitly
 // (Astra default is medium), service_tier default explicitly (the global config could hand out
 // priority ≈2.5× quota). The codexweb channel literals live in protocols/codex-web-protocol.md —
@@ -522,7 +522,7 @@ Answer with EXACTLY one JSON object as the final message, no prose after it:
 2. Check the binary: Bash \`command -v codex >/dev/null && echo HAVE || echo NONE\`. NONE → return status="no-binary" (other fields: confirmsExclusion=false, verdictSuggested="UNCHECKED", reasoning="codex binary missing", urls=[], liveSearchEvents=0) and stop.
 
 3. ONE Bash call (parameter timeout: 300000; < /dev/null is mandatory):
-codex exec -m ${CODEX_MODEL} -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json -o "${lf}" "$(cat "${pf}")" < /dev/null > "${jf}" 2>"${WORK_DIR}/_codex-esc-${claim.id}.err"; echo "EXIT=$?"
+CODEX_HOME="$(bash ${PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m ${CODEX_MODEL} -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json -o "${lf}" "$(cat "${pf}")" < /dev/null > "${jf}" 2>"${WORK_DIR}/_codex-esc-${claim.id}.err"; echo "EXIT=$?"
 
 4. Parsing:
    - EXIT≠0 and ${jf}/.err contains "usage limit" / "quota" / "rate limit" / 429 → status="quota". Bash timeout (call interrupted) → status="timeout".
