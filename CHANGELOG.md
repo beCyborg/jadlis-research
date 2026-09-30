@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+## [2.7.4] — 2026-09-30 — Ловушка смоука с `--tools ""` / smoke gotcha for `--tools ""`
+
+### Для человека
+
+- В список ловушек скилла добавлена одна: быстрая проверка скилла через `claude -p` без инструментов возвращает пустой ответ. Это не поломка плагина — нужен флаг `--tools Bash`.
+
+### For agents
+
+- Added: `skills/research/references/gotchas.md` — «Resolve-smoke of this skill needs `--tools Bash`» (bang substitution `` !`date` `` + `--tools ""` → `result: ""`, 0 tokens). Moved here from the owner's always-loaded `bash-gotchas.md` rule to cut startup context.
+- Migration: none.
+
 ## [2.7.3] — 2026-09-30 — Отдельный дом Codex для поиска / isolated Codex home
 
 ### Для человека
