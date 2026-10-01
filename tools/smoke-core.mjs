@@ -96,6 +96,48 @@ const check = (cond, msg) => { if (!cond) { failures++; console.log('FAIL', msg)
 const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'hackernews'], workDir: '/tmp/smoke', pluginRoot: '/tmp/plugin', date: '2026-09-06', aiModel: 'x', fableBridge: false }
 
 {
+  // ── args guard (2.7.6): a broken call throws before the first agent() call ──
+  const guard = async (args, label) => {
+    const calls = []
+    const agent = async (p, o) => { calls.push((o && o.label) || '?'); return null }
+    const fn = new AsyncFunction('args', 'agent', 'parallel', 'phase', 'log', src)
+    try {
+      await fn(args, agent, fns => Promise.all(fns.map(f => f())), () => {}, () => {})
+      return { err: null, calls }
+    } catch (e) { return { err: e, calls } }
+  }
+  const msg = r => (r.err && r.err.message) || ''
+  {
+    const r = await guard(undefined)
+    check(r.err && r.calls.length === 0 && msg(r).includes('full-research-core') && msg(r).includes('refinedQuery') && msg(r).includes('dryRun:true'),
+      `guard: no args → throws, 0 agents, names script + missing keys + dryRun hint (got ${r.calls.length} calls: ${msg(r).slice(0, 120)})`)
+  }
+  {
+    const r = await guard('{"refinedQuery": "„Цены“ на "Kwork"", "workDir": "/tmp/x"}')
+    check(r.err && r.calls.length === 0 && msg(r).includes('not valid JSON') && msg(r).includes('curly quotes „“') && msg(r).includes('resume does not inherit args') && msg(r).includes('Kwork'),
+      `guard: unparsable string with curly quotes → throws with hint + raw preview, 0 agents (got ${msg(r).slice(0, 120)})`)
+  }
+  {
+    const r = await guard({ ...base, workDir: '.full-research/x' })
+    check(r.err && r.calls.length === 0 && msg(r).includes('absolute'), `guard: relative workDir → throws, 0 agents (got ${msg(r).slice(0, 120)})`)
+  }
+  {
+    const { channels: _c, ...noChannels } = base
+    const r = await guard(JSON.stringify({ ...noChannels, date: '' }))
+    check(r.err && r.calls.length === 0 && msg(r).includes('channels, date') && msg(r).includes('string:'),
+      `guard: JSON-string args with a missing + an empty key → both named, preview typed (got ${msg(r).slice(0, 160)})`)
+  }
+  {
+    const r = await guard(JSON.stringify(base))
+    check(!r.err && r.calls.length > 0, `guard: full valid args (as JSON string) pass the guard and reach the agents (err: ${msg(r).slice(0, 120)})`)
+  }
+  {
+    const r = await guard({ dryRun: true })
+    check(!r.err && r.calls.length > 0, `guard: dryRun:true alone reaches the dry-run defaults (err: ${msg(r).slice(0, 120)})`)
+  }
+}
+
+{
   const { result: r, logs, prompts } = await run(base)
   const led = Object.fromEntries(r.claimLedger.map(c => [c.id, c]))
   const ev = (id, p) => led[id].evidence.find(e => e.prefix === p)

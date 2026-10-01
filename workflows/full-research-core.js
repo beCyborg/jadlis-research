@@ -8,9 +8,52 @@ export const meta = {
   ],
 }
 
-// ── Parameters (the skill passes them after Phase A: recon + interview; defaults are for dry-run) ──
-// args may arrive as a JSON string — normalise.
-const A = (() => { try { return typeof args === 'string' ? JSON.parse(args) : (args || {}) } catch (e) { return {} } })()
+// ── Parameters (the skill passes them after Phase A: recon + interview; defaults only with dryRun:true) ──
+// args may arrive as a JSON string — normalise. An unparsable string is an error, never `{}`.
+const SCRIPT_NAME = 'full-research-core'
+const argsPreview = v => {
+  let s
+  try { s = typeof v === 'string' ? v : JSON.stringify(v) } catch (e) { s = String(v) }
+  return `${v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v}: ${String(s).slice(0, 300)}`
+}
+const A = (() => {
+  if (typeof args !== 'string') return args || {}
+  let parsed
+  try { parsed = JSON.parse(args) } catch (e) {
+    throw new Error(`${SCRIPT_NAME}: args is a string that is not valid JSON (${e.message}). ` +
+      `Raw args (first 300 chars): ${args.slice(0, 300)} — hint: curly quotes „“ or an unescaped \\" inside a value break JSON; ` +
+      'pass the same args in full (resume does not inherit args).')
+  }
+  return parsed
+})()
+
+// ── Args guard (2.7.6) — fail fast with ZERO agents spawned ──
+// Before 2.7.6 a broken call (unparsable args, a resumeFromRunId call without args, a missing key)
+// fell through to the dry-run defaults below and ran the whole pipeline on a test topic
+// (2–2.6M tokens per incident); a relative workDir resolved against the session cwd and scattered
+// files. Now: the defaults are reachable ONLY with dryRun:true. Otherwise every key the skill
+// always passes (skills/research/SKILL.md Phase B) must be present and non-empty, and workDir
+// must be absolute. Keep this block before the first agent() call.
+const DRY_RUN = !!A && typeof A === 'object' && !Array.isArray(A) && A.dryRun === true
+const REQUIRED_ARGS = ['refinedQuery', 'channels', 'date', 'workDir', 'pluginRoot']
+const ARGS_HINT = 'pass the same args in full — resumeFromRunId does not inherit args; ' +
+  'for a test run on the built-in dry-run defaults pass dryRun:true'
+if (!A || typeof A !== 'object' || Array.isArray(A)) {
+  throw new Error(`${SCRIPT_NAME}: args must be an object; got ${argsPreview(args)} — hint: ${ARGS_HINT}.`)
+}
+if (!DRY_RUN) {
+  const isEmpty = v => v === undefined || v === null || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && !v.length)
+  const missing = REQUIRED_ARGS.filter(k => isEmpty(A[k]))
+  if (missing.length) {
+    throw new Error(`${SCRIPT_NAME}: missing or empty required args: ${missing.join(', ')}. ` +
+      `Arrived ${argsPreview(args)} — hint: ${ARGS_HINT}.`)
+  }
+  if (typeof A.workDir !== 'string' || !A.workDir.startsWith('/')) {
+    throw new Error(`${SCRIPT_NAME}: workDir must be an absolute path (starts with '/'); got ${argsPreview(A.workDir)}. ` +
+      'A relative workDir resolves against the session cwd and scatters files — pass {VAULT_PATH}/.full-research/<id>_<slug>.')
+  }
+}
+
 const QUERY = A.refinedQuery || 'Compare local AI coding assistants in 2026: privacy vs capability'
 const DECISION = A.decisionContext || ''
 const DATE = A.date || 'DRYRUN-DATE'

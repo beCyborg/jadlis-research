@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+## [2.7.6] — 2026-10-02 — Ядро не стартует на сломанных аргументах / args guard
+
+### Для человека
+
+- Если ресёрч запущен с испорченными аргументами — кавычки-ёлочки „“ или лишняя `"` внутри формулировки, повторный запуск без аргументов, пропущенное поле, — он больше не уходит молча на тестовую тему. Раньше такой запуск отрабатывал весь конвейер по «Compare local AI coding assistants» и стоил 2–2,6 млн токенов.
+- Теперь ядро останавливается сразу, ни одного агента не запускает и пишет, что именно сломано: какие поля пустые или где ошибка в JSON, с началом того, что пришло.
+- Папка прогона должна быть полным путём: относительный путь раскидывал файлы по текущей папке сессии.
+
+### For agents
+
+- Added: args guard block in `workflows/full-research-core.js` right after the args normalisation, before any `agent()` call. Unparsable string `args` → `throw` (script name, `JSON.parse` message, 300-char raw preview, hint about curly quotes „“ / unescaped `\"` and that resume does not inherit args) instead of `{}`. Non-object args → throw. Unless `dryRun: true`: `refinedQuery`, `channels`, `date`, `workDir`, `pluginRoot` must be present and non-empty (missing → throw listing the keys + typed 300-char preview of what arrived + hint about `resumeFromRunId` and `dryRun:true`), and `workDir` must start with `/`. The dry-run defaults are reachable only with `dryRun: true`.
+- Required keys = what `skills/research/SKILL.md` Phase B always passes and what has a silent fallback (`channels` missing used to fall back to the default channel set). `decisionContext`, `languages`, `queries`, `substackHandles`, `vaultPath` stay optional (legitimately empty or unused by the core).
+- Caller audit: the only caller is `skills/research/SKILL.md` (absolute `{VAULT_PATH}/.full-research/<id>_<slug>`); no personal workflow or skill under `~/.claude` calls the core.
+- Docs: `skills/research/SKILL.md` Phase B — guard paragraph; `skills/research/references/gotchas.md` — new entry.
+- Tests: `node tools/smoke-core.mjs` → ALL OK (6 new guard checks: no args, curly-quote string, relative workDir, missing + empty key in a JSON string, full args as a JSON string pass, `dryRun:true` alone passes); `pytest tests/` → 5 passed.
+- Migration: none for the skill. A hand-made or test call without the required keys must add them or pass `dryRun: true`.
+
 ## [2.7.5] — 2026-09-30 — Fast для поиска Codex / Fast tier for the Codex channel
 
 ### Для человека

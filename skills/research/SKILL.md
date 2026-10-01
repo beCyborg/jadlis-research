@@ -308,6 +308,13 @@ Workflow({
 })
 ```
 
+Args guard (2.7.6): the core refuses to start — zero agents spawned — when `args` is a string
+that is not valid JSON (curly quotes „“ or an unescaped `"` inside a value), when any of
+`refinedQuery`, `channels`, `date`, `workDir`, `pluginRoot` is missing or empty, or when `workDir`
+is not absolute. The error names what broke; fix the args and call again. A `resumeFromRunId`
+call does not inherit args — pass them in full. The built-in dry-run defaults run only with
+`dryRun: true`.
+
 Models inside the workflow: channels, verifiers and curator — Opus 5.5
 (`jadlis-research:researcher-opus` / `jadlis-research:orchestrator-opus`; urlhealth runs at effort low);
 analyst — **Opus 5.5 at effort xhigh** (`jadlis-research:synth-opus`) by default.
