@@ -73,8 +73,11 @@ async function run(args, hooks = {}) {
     calls.push(label); prompts[label] = String(prompt); optsBy[label] = opts || {}
     // fixtures are mutated by the core (relevance demotion) → fresh copy per run
     if (channels[label]) return structuredClone(channels[label])
-    if (label.startsWith('curator')) return structuredClone(curator)
+    // hooks.curator(label) → replaces the curator answer (null / empty claims → curation-failed)
+    if (label.startsWith('curator')) return hooks.curator ? hooks.curator(label) : structuredClone(curator)
     if (label === 'urlhealth') return structuredClone(urlhealth)
+    // hooks.verifyNull(label) → true simulates a verifier killed mid-run (agent() resolves to null)
+    if (label.startsWith('verify:') && hooks.verifyNull && hooks.verifyNull(label)) return null
     if (label.startsWith('verify:')) return Object.assign({ claimId: label.split(':')[1].split('#')[0], verdict: 'CONFIRMED', credibility: 2, evidence: 'mock', url: 'https://v.example.com', numberVerbatim: null, searchedVia: 'mock' }, hooks.verify ? hooks.verify(label) : {})
     if (label.startsWith('escalate:')) return { claimId: label.split(':')[1], status: 'ok', confirmsExclusion: false, verdictSuggested: 'UNCHECKED', reasoning: 'mock', urls: [], liveSearchEvents: 1 }
     // hooks.analystNull(label) → true simulates an analyst that returned null (refusal / limit)
@@ -307,6 +310,37 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
     const a = fb === undefined ? noBridge : { ...base, fableBridge: fb }
     const { result: r, calls } = await run(a, { analystNull: () => true })
     check(r.status === 'synthesis-failed' && analystCalls(calls).length === 2 && !r.aiModelActual, `fableBridge:${fb}: both synth-* roles null → synthesis-failed after exactly 2 calls (got ${r.status}, ${analystCalls(calls).length})`)
+  }
+}
+{
+  // ── wave counter + curation-failed (2.7.7) ──
+  const { fableBridge: _fb, ...noBridge } = base
+  {
+    // all verifiers returned → complete, nothing lost
+    const { result: r } = await run(noBridge)
+    const ls = r.synthMeta.ledgerSummary
+    check(r.completeness === 'complete' && ls.votesLaunched === 10 && ls.votesReturned === 10 && ls.votesLost === 0 && ls.unverified === 0,
+      `wave: all verifiers returned → complete 10/10 (got ${r.completeness} ${ls.votesReturned}/${ls.votesLaunched}, lost ${ls.votesLost})`)
+  }
+  {
+    // one verifier of c2 and both of c4 killed → partial, 3 lost, c4 unverified
+    const { result: r, logs } = await run(noBridge, { verifyNull: l => l === 'verify:c2#2' || l.startsWith('verify:c4#') })
+    const ls = r.synthMeta.ledgerSummary
+    check(r.status === 'ok' && r.completeness === 'partial' && ls.votesLaunched === 10 && ls.votesReturned === 7 && ls.votesLost === 3 && ls.unverified === 1,
+      `wave: 3 verifiers lost → partial 7/10, 1 unverified (got ${r.completeness} ${ls.votesReturned}/${ls.votesLaunched}, unverified ${ls.unverified})`)
+    check(logs.some(l => l.includes('потеряно 3') && l.includes('completeness=partial')), 'wave: lost votes are logged')
+  }
+  for (const [name, ans] of [['null', null], ['empty claims', { claims: [] }]]) {
+    // curator gives nothing twice → curation-failed, no verifier and no analyst runs
+    const { result: r, calls } = await run(noBridge, { curator: () => structuredClone(ans) })
+    const curatorCalls = calls.filter(c => c.startsWith('curator')).length
+    check(r.status === 'curation-failed' && curatorCalls === 2 && !calls.some(c => c.startsWith('verify:') || c.startsWith('analyst')),
+      `curator ${name} twice → curation-failed, no verify/analyst (got ${r.status}, curator calls ${curatorCalls})`)
+  }
+  {
+    // curator empty once, fine on the retry → normal run
+    const { result: r } = await run(noBridge, { curator: l => l === 'curator' ? null : structuredClone(curator) })
+    check(r.status === 'ok' && r.completeness === 'complete', `curator null once, ok on retry → ok (got ${r.status})`)
   }
 }
 {

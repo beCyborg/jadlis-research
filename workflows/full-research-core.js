@@ -754,15 +754,16 @@ phase('Verify')
 
 // Resilience to a curator failure (network drop / quota limit / empty answer): without this gate
 // null.claims crashed the WHOLE run after a successful fan-out (incident 2026-09-01).
-// One retry, then degradation: synthesis proceeds with an empty ledger, the report is still written.
+// One retry, then stop with status 'curation-failed' (2.7.7): synthesis over an empty ledger used to
+// write a report whose conclusions looked verified while nothing was checked.
 let curated = await agent(curatorPrompt(files), o({ label: 'curator', phase: 'Verify', schema: CURATOR_SCHEMA }))
 if (!curated || !Array.isArray(curated.claims) || !curated.claims.length) {
   log('Curator не вернул claims — один повтор.')
   curated = await agent(curatorPrompt(files), o({ label: 'curator-retry', phase: 'Verify', schema: CURATOR_SCHEMA }))
 }
-if (!curated || !Array.isArray(curated.claims)) {
-  log('⚠ Curator недоступен после повтора — иду в синтез с ПУСТЫМ ledger (claims не верифицированы).')
-  curated = { claims: [] }
+if (!curated || !Array.isArray(curated.claims) || !curated.claims.length) {
+  log('⚠ Curator не вернул claims и после повтора — синтез не запускаю: отчёт без проверки выдал бы непроверенное за проверенное. Материалы каналов в workDir.')
+  return { workDir: WORK_DIR, status: 'curation-failed', ledgerSchemaVersion: 5, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED } }
 }
 
 const STRENGTH_RANK = { STRONG: 3, MODERATE: 2, WEAK: 1 }
@@ -854,12 +855,24 @@ try {
 }
 
 // ── Verifier votes ──
+// Wave accounting (2.7.7): a failed or killed verifier makes agent() resolve to null and
+// votes.filter(Boolean) drops it silently — count launched vs returned so a lossy wave shows up
+// in ledgerSummary and as completeness: 'partial'. Pure function, covered by tools/smoke-core.mjs.
+function waveStats(voted, claimsCount, verifiers) {
+  const votesLaunched = claimsCount * verifiers
+  const votesReturned = voted.reduce((n, x) => n + (x && Array.isArray(x.votes) ? x.votes.length : 0), 0)
+  const unverified = voted.filter(x => !x || !Array.isArray(x.votes) || !x.votes.length).length + Math.max(0, claimsCount - voted.length)
+  return { votesLaunched, votesReturned, votesLost: Math.max(0, votesLaunched - votesReturned), unverified }
+}
 const voted = (await parallel(claims.map(c => () =>
   parallel(Array.from({ length: VERIFIERS }, (_, i) => () =>
     agent(verifyPrompt(c, i), w({ label: `verify:${c.id}#${i + 1}`, phase: 'Verify', schema: VERIFY_SCHEMA }))
       .then(v => (v ? Object.assign({ family: voteFamilies(c)[i] || 'web', lens: i === 0 ? 'same-family' : 'cross-type' }, v) : null))
   )).then(votes => ({ claim: c, votes: votes.filter(Boolean) }))
 ))).filter(Boolean)
+const wave = waveStats(voted, claims.length, VERIFIERS)
+const completeness = wave.votesLost > 0 ? 'partial' : 'complete'
+log(`Волна проверки: голосов запущено ${wave.votesLaunched}, вернулось ${wave.votesReturned}, потеряно ${wave.votesLost}; claims без единого голоса: ${wave.unverified}${wave.votesLost ? ' ⚠ completeness=partial' : ''}`)
 
 // ── Vote aggregation (schema v5) — truth table ──
 //   Every claim has ONE vote per macro-family (web / community), see voteFamilies().
@@ -956,7 +969,7 @@ const evidencelessN = claimLedger.filter(c => c.evidenceless).length
 const credVals = claimLedger.filter(c => c.verdict !== 'UNCHECKED' && c.verdict !== 'UNVERIFIED').map(c => c.credibility).sort((a, b) => a - b)
 const credibilityMedian = credVals.length ? (credVals.length % 2 ? credVals[(credVals.length - 1) / 2] : (credVals[credVals.length / 2 - 1] + credVals[credVals.length / 2]) / 2) : null
 const ceilingCappedN = claimLedger.filter(c => c.ceilingCapped).length
-const ledgerSummary = { total: claimLedger.length, confirmed, confirmedSplit, challenged, outdated, unchecked, disputed, familySplit, escalated: escalationStats.escalated, escalationSkipped: Object.values(escalationStats.skipped).reduce((a, b) => a + b, 0), weakEvidence, evidenceless: evidencelessN, ceilingCapped: ceilingCappedN, credibilityMedian, claimsDroppedByCap }
+const ledgerSummary = { total: claimLedger.length, confirmed, confirmedSplit, challenged, outdated, unchecked, disputed, familySplit, escalated: escalationStats.escalated, escalationSkipped: Object.values(escalationStats.skipped).reduce((a, b) => a + b, 0), weakEvidence, evidenceless: evidencelessN, ceilingCapped: ceilingCappedN, credibilityMedian, claimsDroppedByCap, votesLaunched: wave.votesLaunched, votesReturned: wave.votesReturned, votesLost: wave.votesLost, unverified: wave.unverified }
 log(`Ledger v5: CONFIRMED=${confirmed} (split: ${confirmedSplit}), FAMILY-SPLIT=${familySplit}, DISPUTED=${disputed}, CHALLENGED=${challenged}, OUTDATED=${outdated}, UNCHECKED=${unchecked}; эскалаций ${escalationStats.escalated}, пропущено ${ledgerSummary.escalationSkipped}; weakEvidence=${weakEvidence}; ceilingCapped=${ceilingCappedN}; медиана credibility=${credibilityMedian}`)
 
 // ═══ Phase 3 — Synthesize ═══
@@ -985,7 +998,7 @@ if (!report) {
 }
 if (!report) {
   log(`Синтез не удался дважды (${SYNTH_FIRST.name}, затем ${SYNTH_RETRY.name}). Материалы собраны, отчёт не написан.`)
-  return { workDir: WORK_DIR, status: 'synthesis-failed', claimLedger: ledgerOut, synthMeta: { ledgerSummary } }
+  return { workDir: WORK_DIR, status: 'synthesis-failed', completeness, claimLedger: ledgerOut, synthMeta: { ledgerSummary } }
 }
 // The model that actually wrote the report: the first family, or the other one if the retry did.
 const aiModelActual = synthFellBack ? AI_MODEL_RETRY : AI_MODEL
@@ -993,6 +1006,8 @@ const aiModelActual = synthFellBack ? AI_MODEL_RETRY : AI_MODEL
 return {
   workDir: WORK_DIR,
   status: 'ok',
+  // 'partial' = at least one verifier vote was lost (see waveStats); Phase C says so in the summary.
+  completeness,
   // Version of the ledger/verdict schema: bump when VERIFY_SCHEMA/aggregation changes —
   // telemetry segments the confirmed trends by this version (compare only within one).
   // v2 (2026-08-15): UNCHECKED + vote vector + atomic curator + snapshots.

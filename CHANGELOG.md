@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+## [2.7.7] — 2026-10-02 — Счётчик волны проверки / verification wave counter
+
+### Для человека
+
+- Если часть проверяющих агентов упала, ресёрч больше не делает вид, что всё проверено. В сводке появилось «проверяющих вернулось X из Y». Если хоть один голос потерян, сводка прямо говорит, сколько и у скольких утверждений нет ни одного голоса.
+- Если куратор дважды не выделил ни одного утверждения, ресёрч останавливается до синтеза. Раньше он писал отчёт по пустой проверке, и выводы выглядели проверенными. Материалы каналов остаются в рабочей папке, в vault ничего не пишется.
+
+### For agents
+
+- Added: pure `waveStats(voted, claimsCount, verifiers)` in `workflows/full-research-core.js` → `{votesLaunched, votesReturned, votesLost, unverified}`; the four fields join `synthMeta.ledgerSummary`. `agent()` resolves to null for a killed verifier and `votes.filter(Boolean)` used to drop it silently.
+- Added: `completeness: "partial" | "complete"` in the `ok` and `synthesis-failed` result objects (`partial` when `votesLost > 0`); the wave is logged after the verifier fan-out.
+- Changed: curator returns no claims (null, bad shape or an empty array) on the first call and on the retry → `status: "curation-failed"`, return before urlhealth/verify/synthesis (same shape as `insufficient-sources`). Before: synthesis over an empty ledger.
+- Docs: `skills/research/SKILL.md` — result shape, Phase C step 1 and Error handling treat `curation-failed` like `synthesis-failed`; the «Проверка» line gets «проверяющих вернулось R из T» plus a partial-wave sentence.
+- Tests: `node tools/smoke-core.mjs` → ALL OK (6 new checks: full wave 10/10, three lost votes → partial 7/10 with one unverified claim and a log line, curator null twice / empty twice → curation-failed with no verify or analyst calls, curator null once then ok → ok).
+- Migration: none for callers; Phase C must know the new status (shipped in the same release).
+
 ## [2.7.6] — 2026-10-02 — Ядро не стартует на сломанных аргументах / args guard
 
 ### Для человека

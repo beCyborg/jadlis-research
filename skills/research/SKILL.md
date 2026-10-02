@@ -342,13 +342,16 @@ rollback); an unconfirmed exclusion → `DISPUTED` (disputed, not part of the co
 **filtered** (not merely annotated with criticism), then the analyst writes the draft report to
 `{WORK_DIR}/draft.md` (in Russian). Wait for the `<task-notification>` (then tick the Phase B line
 of `{WORK_DIR}/_brief.md`) and use the object:
-`{workDir, status, ledgerSchemaVersion, languages, channelsAnswered, channelStatus, failedChannels,
+`{workDir, status, completeness, ledgerSchemaVersion, languages, channelsAnswered, channelStatus, failedChannels,
 aiModelActual, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, reportPath, queryRu,
 relatedCandidates, claimLedger, synthMeta, sourceSettings}`; `sourceSettings` =
 `{providersOff, notes, dropped}` — what the source resolve decided, echoed back for Phase C; `ledgerSchemaVersion` = 5; every
 ledger claim carries `votes` (`family:verdict`), `familyVotes`, `leadFamily`/`leadVerdict` (FAMILY-SPLIT only), `searchedVia`; `synthMeta.ledgerSummary` = `{total, confirmed,
 confirmedSplit, challenged, outdated, unchecked, disputed, familySplit, escalated, escalationSkipped,
-weakEvidence, evidenceless, ceilingCapped, credibilityMedian, claimsDroppedByCap}`; `snapshotGate` =
+weakEvidence, evidenceless, ceilingCapped, credibilityMedian, claimsDroppedByCap, votesLaunched,
+votesReturned, votesLost, unverified}` (the last four = the verification wave: votes launched =
+claims × 2, votes that came back, votes lost to killed verifiers, claims with no vote at all);
+`completeness` = `"partial"` when `votesLost > 0`, else `"complete"` (2.7.7); `snapshotGate` =
 `{minChars, llmMediatedChannels, demotedTotal, byReason: {noSnapshot, shortSnapshot, llmMediated,
 quoteNotFound}, byChannel, ceilingCapped}` — how many HIGH citations were lowered to MEDIUM and why
 (`args.channelCeiling: {codexweb: "HIGH"}` — the explicit escape of a channel ceiling, no automation).
@@ -359,8 +362,10 @@ Codex quota is a shared pool with verif).
 
 The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contract.md`.
 
-1. **Partial result.** If `status: "insufficient-sources"` (<2 channels) or
-   `status: "synthesis-failed"` (the analyst returned null twice — no report was written) — report
+1. **Partial result.** If `status: "insufficient-sources"` (<2 channels),
+   `status: "curation-failed"` (the curator returned no claims twice — nothing was verified, the
+   core did not synthesise) or `status: "synthesis-failed"` (the analyst returned null twice — no
+   report was written) — report
    the error, show what was collected in `{WORK_DIR}`, write NOTHING to the vault, stop here.
    Otherwise continue.
 
@@ -447,8 +452,11 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
    - **Verification in one line** from `ledgerSummary`/`escalationStats`/`snapshotGate`: «проверено
      N claims (по голосу от веба и от сообществ): X подтверждено (Y одним голосом), F расхождений
      веб/сообщества (приоритет по типу claim), Z спорных (эскалаций в Codex: E, пропущено: S —
-     причины), W отсеяно, U не проверено; evidence: weak K, без evidence L, потолок MEDIUM по
-     снапшот-гейту M (причины из byReason); urlhealth: dead/fabrication».
+     причины), W отсеяно, U не проверено; проверяющих вернулось R из T; evidence: weak K, без
+     evidence L, потолок MEDIUM по снапшот-гейту M (причины из byReason); urlhealth:
+     dead/fabrication». R/T = `ledgerSummary.votesReturned`/`votesLaunched`. `completeness:
+     "partial"` → add a second sentence: «N голосов потеряно (упали проверяющие), у M claims нет ни
+     одного голоса — их выводы в отчёте проверены слабее» (`votesLost`, `unverified`).
      `evidenceHealth: "skipped"` → say the URL health was not checked.
    - Gaps (`synthMeta.gaps`): what the research did not cover.
    - Synthesis model: `aiModelActual` — the one that actually wrote the report (Opus 5.5 in
@@ -470,6 +478,10 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
 ## Error handling
 
 - The workflow returned `insufficient-sources` — show what was collected, do not write to the vault.
+- The workflow returned `curation-failed` (2.7.7) — the curator returned no claims on the first
+  call and on the retry. Handle it like `synthesis-failed`: the channel files are in `{WORK_DIR}`,
+  nothing was verified, there is no report — show the working directory, do not write to the
+  vault. Before 2.7.7 the core synthesised over an empty ledger and the report looked verified.
 - The workflow returned `synthesis-failed` — the analyst returned null on both families (the first
   model and the retry on the other one). The material is in `{WORK_DIR}` but there is no report:
   show the working directory, do not write to the vault. A re-run of Phase B synthesises from the
