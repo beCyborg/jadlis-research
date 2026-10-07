@@ -86,6 +86,8 @@ async function run(args, hooks = {}) {
   const agent = async (fullPrompt, opts) => {
     const label = (opts && opts.label) || '?'
     calls.push(label); prompts[label] = String(fullPrompt); optsBy[label] = opts || {}
+    // hooks.throwOn(label) → agent() rejects (e.g. an agent type the session does not know yet)
+    if (hooks.throwOn && hooks.throwOn(label)) throw new Error('unknown agent type: ' + (opts && opts.agentType))
     // hooks.stop(label) → true, or the simulateClassifierStop prompt hook → an interrupted stub (2.7.8)
     if ((hooks.stop && hooks.stop(label)) || String(fullPrompt).includes('TEST HOOK (simulateClassifierStop)')) return stubFor(label, hooks.stopText)
     // `<label>→opus48` = the Opus 4.8 retry of the same role: same fixtures
@@ -428,6 +430,13 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
     const st = r.classifierStops[0] || {}
     check(st.label === 'hackernews' && st.retried && !st.recovered && cs(r).hackernews.failReason === 'classifier-blocked' && !cs(r).hackernews.ok && cs(r).hackernews.fallbackModel === null && r.synthMeta.ledgerSummary.classifierBlocked === 1,
       `stopped twice: hackernews failReason classifier-blocked (got ${JSON.stringify(cs(r).hackernews)})`)
+  }
+  {
+    // the Opus 4.8 retry throws (agent type unknown before a restart) → the run goes on, error recorded
+    const { result: r } = await run({ ...noBridge, simulateClassifierStop: ['web'] }, { throwOn: l => l === 'web→opus48' })
+    const st = r.classifierStops[0] || {}
+    check(r.status === 'ok' && st.retried && !st.recovered && /unknown agent type/.test(st.error || '') && cs(r).web.failReason === 'classifier-blocked',
+      `retry throws → run continues, stop.error recorded, web classifier-blocked (got ${r.status}, ${JSON.stringify(st)})`)
   }
   {
     // cap 1: two channels stopped → one retried, the other blocked without a retry

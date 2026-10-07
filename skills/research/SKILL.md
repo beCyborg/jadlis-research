@@ -345,11 +345,13 @@ of `{WORK_DIR}/_brief.md`) and use the object:
 `{workDir, status, completeness, ledgerSchemaVersion, languages, channelsAnswered, channelStatus, failedChannels,
 classifierStops, aiModelActual, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, reportPath, queryRu,
 relatedCandidates, claimLedger, synthMeta, sourceSettings}`; `classifierStops` (2.7.8) = every
-safety-classifier stop of the run, `{role, label, detectedBy, retried, recovered, model, skipped?}`:
+safety-classifier stop of the run, `{role, label, detectedBy, retried, recovered, model, skipped?, error?}`:
 `role` channel | curator | verifier | escalation | analyst, `detectedBy` schema (the agent set
 `interrupted`) | text (regex over its own findings/evidence) | null (the analyst returned nothing —
 a classifier stop or another failure), `retried` — one re-run on Opus 4.8 happened (`model:
-"claude-opus-4-8"`), `skipped: "cap"` — over `classifierRetryCap`; every early-return status carries it too;
+"claude-opus-4-8"`), `skipped: "cap"` — over `classifierRetryCap`, `error` — the retry itself failed (most often: the
+session was started before the plugin update and does not know `researcher-opus48` / `synth-opus48`
+yet — restart Claude Code); every early-return status carries it too;
 `channelStatus[]` gets `fallbackModel` (`"claude-opus-4-8"` when the channel was recovered on the
 retry) and `failReason` (`"classifier-blocked"` when it stayed stopped and is not ok); `sourceSettings` =
 `{providersOff, notes, dropped}` — what the source resolve decided, echoed back for Phase C; `ledgerSchemaVersion` = 5; every

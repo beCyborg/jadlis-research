@@ -742,9 +742,17 @@ async function withClassifierRetry(role, label, prompt, opts, fallbackOpts) {
   stop.retried = true
   stop.model = OPUS48
   log(`${label}: обрыв защитным фильтром (${detectedBy}) — один повтор на Opus 4.8.`)
-  const second = await agent(RETRY_NOTE + text(OPUS48), Object.assign({}, fallbackOpts, { label: `${label}→opus48` }))
+  // A retry that throws or fails (e.g. the Opus 4.8 agent type is unknown to a session that loaded its
+  // agent registry before the plugin update — fixed by a restart) must not take the whole run down.
+  let second = null
+  try {
+    second = await agent(RETRY_NOTE + text(OPUS48), Object.assign({}, fallbackOpts, { label: `${label}→opus48` }))
+  } catch (e) {
+    stop.error = String((e && e.message) || e).slice(0, 300)
+  }
+  if (!second && !stop.error) stop.error = `no answer from ${fallbackOpts.agentType || OPUS48} (unknown agent type before a session restart, or a failure)`
   stop.recovered = !!second && !classifierStopped(second, role)
-  log(`${label}→opus48: ${stop.recovered ? 'восстановлен' : 'не восстановлен'}.`)
+  log(`${label}→opus48: ${stop.recovered ? 'восстановлен' : `не восстановлен${stop.error ? ` (${stop.error})` : ''}`}.`)
   return { r: second || first, stop, fromRetry: !!second }
 }
 const classifierSummary = () => ({ classifierRetries: classifierStops.filter(s => s.retried).length, classifierBlocked: classifierStops.filter(s => !s.recovered).length })
