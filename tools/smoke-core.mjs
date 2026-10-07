@@ -5,6 +5,8 @@
 // Also the analyst model choice (2.6.0; 2.7.1 — synth-fable on Opus 5.5 high): synth-opus default,
 // fableBridge:true → synth-fable, a null analyst → one retry on the other synth-* role
 // (hooks.analystNull), aiModelActual; urlhealth effort low.
+// 2.7.8: safety-classifier retry — hooks.stop(label) or the simulateClassifierStop prompt hook make a
+// role hand in an interrupted stub; the `<label>→opus48` retry answers from the same fixtures.
 // Usage: node tools/smoke-core.mjs [path/to/full-research-core.js]
 import fs from 'node:fs'
 import path from 'node:path'
@@ -64,24 +66,44 @@ const urlhealth = { status: 'ok', elapsedSec: 1, note: 'mock', items: [
   { prefix: 'w4', url: 'https://blog.example.com/d', urlStatus: 'ok', quoteStatus: 'notChecked', fabricationSuspect: false, snapshotChars: 0 },
 ] }
 
+// A role stopped by the classifier: schema-valid stub with interrupted=safety-classifier — or, with
+// stopText, interrupted=none and the stop only described in the narrative (the regex fallback).
+function stubFor(label, stopText) {
+  const interrupted = stopText ? 'none' : 'safety-classifier'
+  const say = stopText || 'stopped'
+  const role = label.replace(/→opus48$/, '')
+  if (role.startsWith('curator')) return { claims: [], interrupted }
+  if (role.startsWith('verify:')) return { claimId: role.split(':')[1].split('#')[0], verdict: 'UNCHECKED', credibility: 6, evidence: say, url: '', numberVerbatim: null, searchedVia: 'none', interrupted }
+  if (role.startsWith('escalate:')) return { claimId: role.split(':')[1], status: 'ok', confirmsExclusion: false, verdictSuggested: 'UNCHECKED', reasoning: say, urls: [], liveSearchEvents: 0, interrupted }
+  if (role.startsWith('analyst')) return { reportPath: '', queryRu: '', mainConclusion: say, relatedCandidates: [], droppedClaims: [], disputedClaims: [], familySplitClaims: [], gaps: [], interrupted }
+  return { source: role, findings: [say], citations: [], counterarguments: [], sourceQuality: 'LOW', fileWritten: '', snapshots: [], interrupted }
+}
+
 async function run(args, hooks = {}) {
   const calls = []
   const prompts = {}
   const optsBy = {}
-  const agent = async (prompt, opts) => {
+  const agent = async (fullPrompt, opts) => {
     const label = (opts && opts.label) || '?'
-    calls.push(label); prompts[label] = String(prompt); optsBy[label] = opts || {}
+    calls.push(label); prompts[label] = String(fullPrompt); optsBy[label] = opts || {}
+    // hooks.stop(label) → true, or the simulateClassifierStop prompt hook → an interrupted stub (2.7.8)
+    if ((hooks.stop && hooks.stop(label)) || String(fullPrompt).includes('TEST HOOK (simulateClassifierStop)')) return stubFor(label, hooks.stopText)
+    // `<label>→opus48` = the Opus 4.8 retry of the same role: same fixtures
+    const role = label.replace(/→opus48$/, '')
+    return answer(role, label)
+  }
+  const answer = async (label, fullLabel) => {
     // fixtures are mutated by the core (relevance demotion) → fresh copy per run
     if (channels[label]) return structuredClone(channels[label])
     // hooks.curator(label) → replaces the curator answer (null / empty claims → curation-failed)
     if (label.startsWith('curator')) return hooks.curator ? hooks.curator(label) : structuredClone(curator)
     if (label === 'urlhealth') return structuredClone(urlhealth)
     // hooks.verifyNull(label) → true simulates a verifier killed mid-run (agent() resolves to null)
-    if (label.startsWith('verify:') && hooks.verifyNull && hooks.verifyNull(label)) return null
+    if (label.startsWith('verify:') && hooks.verifyNull && hooks.verifyNull(fullLabel)) return null
     if (label.startsWith('verify:')) return Object.assign({ claimId: label.split(':')[1].split('#')[0], verdict: 'CONFIRMED', credibility: 2, evidence: 'mock', url: 'https://v.example.com', numberVerbatim: null, searchedVia: 'mock' }, hooks.verify ? hooks.verify(label) : {})
     if (label.startsWith('escalate:')) return { claimId: label.split(':')[1], status: 'ok', confirmsExclusion: false, verdictSuggested: 'UNCHECKED', reasoning: 'mock', urls: [], liveSearchEvents: 1 }
     // hooks.analystNull(label) → true simulates an analyst that returned null (refusal / limit)
-    if (label.startsWith('analyst')) return hooks.analystNull && hooks.analystNull(label) ? null : { reportPath: '/tmp/smoke/draft.md', queryRu: 'smoke', mainConclusion: 'ok', relatedCandidates: [], droppedClaims: [], disputedClaims: [], familySplitClaims: [], gaps: [] }
+    if (label.startsWith('analyst')) return hooks.analystNull && hooks.analystNull(fullLabel) ? null : { reportPath: '/tmp/smoke/draft.md', queryRu: 'smoke', mainConclusion: 'ok', relatedCandidates: [], droppedClaims: [], disputedClaims: [], familySplitClaims: [], gaps: [] }
     throw new Error('unmocked agent label: ' + label)
   }
   const parallel = fns => Promise.all(fns.map(f => f()))
@@ -265,7 +287,7 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
   // ── analyst model choice (2.6.0, 2.7.1): synth-opus (Opus 5.5 xhigh) by default, synth-fable
   //    (Opus 5.5 high since 2.7.1) with fableBridge:true, null → ONE retry on the other synth-* role,
   //    aiModelActual = what actually wrote the report ──
-  const OPUS = 'jadlis-research:synth-opus', FABLE = 'jadlis-research:synth-fable'
+  const OPUS = 'jadlis-research:synth-opus', FABLE = 'jadlis-research:synth-fable', OPUS48 = 'jadlis-research:synth-opus48'
   const aiIn = p => ((p || '').match(/ai_model: "([^"]+)"/) || [])[1]
   const { fableBridge: _fb, ...noBridge } = base
   const analystCalls = calls => calls.filter(l => l.startsWith('analyst'))
@@ -279,12 +301,27 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
     check(!optsBy['verify:c1#1'].effort && !optsBy['curator'].effort, 'verifiers and curator carry no effort override (agent frontmatter high)')
   }
   {
-    // default, first analyst null → retry on synth-fable
+    // default, first analyst null → retry on synth-opus48 (Opus 4.8, 2.7.8), ai_model claude-opus-4-8
     const { result: r, calls, prompts, optsBy, logs } = await run(noBridge, { analystNull: l => l === 'analyst' })
-    check(JSON.stringify(analystCalls(calls)) === '["analyst","analyst→fable-retry"]', `default + null: retry on synth-fable (got ${JSON.stringify(analystCalls(calls))})`)
-    check(optsBy['analyst→fable-retry'].agentType === FABLE && aiIn(prompts['analyst→fable-retry']) === 'claude-opus-5-5', 'default + null: retry agentType synth-fable, prompt ai_model claude-opus-5-5')
-    check(r.status === 'ok' && r.aiModelActual === 'claude-opus-5-5', `default + null: aiModelActual = claude-opus-5-5 (got ${r.aiModelActual})`)
-    check(logs.some(l => l.includes('analyst (Opus 5.5) вернул null') && l.includes('Opus 5.5 high (synth-fable)')), 'default + null: retry logged synth-opus → synth-fable')
+    check(JSON.stringify(analystCalls(calls)) === '["analyst","analyst→opus48"]', `default + null: retry on synth-opus48 (got ${JSON.stringify(analystCalls(calls))})`)
+    check(optsBy['analyst→opus48'].agentType === OPUS48 && aiIn(prompts['analyst→opus48']) === 'claude-opus-4-8' && prompts['analyst→opus48'].startsWith('RETRY AFTER A SAFETY-CLASSIFIER STOP'), 'default + null: retry agentType synth-opus48, prompt ai_model claude-opus-4-8 + retry note')
+    check(r.status === 'ok' && r.aiModelActual === 'claude-opus-4-8', `default + null: aiModelActual = claude-opus-4-8 (got ${r.aiModelActual})`)
+    const st = r.classifierStops[0] || {}
+    check(r.classifierStops.length === 1 && st.role === 'analyst' && st.detectedBy === 'null' && st.retried && st.recovered && r.synthMeta.ledgerSummary.classifierRetries === 1, `default + null: classifierStops = analyst/null/recovered, ledgerSummary.classifierRetries 1 (got ${JSON.stringify(r.classifierStops)})`)
+    check(logs.some(l => l.includes('analyst: обрыв защитным фильтром (null) — один повтор на Opus 4.8')), 'default + null: retry logged')
+  }
+  {
+    // default, synth-opus AND synth-opus48 null → last resort on synth-fable (Opus 5.5 high)
+    const { result: r, calls, prompts, optsBy, logs } = await run(noBridge, { analystNull: l => l === 'analyst' || l === 'analyst→opus48' })
+    check(JSON.stringify(analystCalls(calls)) === '["analyst","analyst→opus48","analyst→fable-retry"]', `default + 2×null: last resort on synth-fable (got ${JSON.stringify(analystCalls(calls))})`)
+    check(optsBy['analyst→fable-retry'].agentType === FABLE && aiIn(prompts['analyst→fable-retry']) === 'claude-opus-5-5', 'default + 2×null: last resort agentType synth-fable, prompt ai_model claude-opus-5-5')
+    check(r.status === 'ok' && r.aiModelActual === 'claude-opus-5-5' && r.classifierStops[0].recovered === false, `default + 2×null: aiModelActual = claude-opus-5-5, stop not recovered (got ${r.aiModelActual})`)
+    check(logs.some(l => l.includes('analyst (Opus 5.5, затем Opus 4.8 (synth-opus48)) вернул null') && l.includes('Opus 5.5 high (synth-fable)')), 'default + 2×null: last resort logged')
+  }
+  {
+    // retry cap 0: a null analyst skips Opus 4.8 and goes straight to the other synth-* role
+    const { result: r, calls } = await run({ ...noBridge, classifierRetryCap: 0 }, { analystNull: l => l === 'analyst' })
+    check(JSON.stringify(analystCalls(calls)) === '["analyst","analyst→fable-retry"]' && r.classifierStops[0].skipped === 'cap' && r.aiModelActual === 'claude-opus-5-5', `cap 0 + null: no Opus 4.8, synth-fable retry (got ${JSON.stringify(analystCalls(calls))})`)
   }
   {
     // fableBridge:true → synth-fable first
@@ -293,12 +330,12 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
     check(optsBy['analyst→fable'].agentType === FABLE && aiIn(prompts['analyst→fable']) === 'claude-opus-5-5' && r.aiModelActual === 'claude-opus-5-5', `fableBridge:true: synth-fable, ai_model + aiModelActual claude-opus-5-5 (got ${r.aiModelActual})`)
   }
   {
-    // fableBridge:true, synth-fable null → retry on synth-opus
-    const { result: r, calls, prompts, optsBy, logs } = await run({ ...base, fableBridge: true }, { analystNull: l => l === 'analyst→fable' })
-    check(JSON.stringify(analystCalls(calls)) === '["analyst→fable","analyst→opus-retry"]', `fableBridge:true + null: retry on synth-opus (got ${JSON.stringify(analystCalls(calls))})`)
+    // fableBridge:true, synth-fable null → Opus 4.8; Opus 4.8 null too → last resort on synth-opus
+    const { result: r, calls, prompts, optsBy, logs } = await run({ ...base, fableBridge: true }, { analystNull: l => l === 'analyst→fable' || l === 'analyst→fable→opus48' })
+    check(JSON.stringify(analystCalls(calls)) === '["analyst→fable","analyst→fable→opus48","analyst→opus-retry"]', `fableBridge:true + 2×null: Opus 4.8, then synth-opus (got ${JSON.stringify(analystCalls(calls))})`)
     check(optsBy['analyst→opus-retry'].agentType === OPUS && aiIn(prompts['analyst→opus-retry']) === 'claude-opus-5-5', 'fableBridge:true + null: retry agentType synth-opus, prompt ai_model claude-opus-5-5')
     check(r.status === 'ok' && r.aiModelActual === 'claude-opus-5-5', `fableBridge:true + null: aiModelActual = claude-opus-5-5 (got ${r.aiModelActual})`)
-    check(logs.some(l => l.includes('analyst (Opus 5.5 high (synth-fable)) вернул null') && l.includes('на Opus 5.5.')), 'fableBridge:true + null: retry logged synth-fable → synth-opus')
+    check(logs.some(l => l.includes('analyst (Opus 5.5 high (synth-fable), затем Opus 4.8 (synth-opus48)) вернул null') && l.includes('на Opus 5.5.')), 'fableBridge:true + 2×null: last resort logged synth-fable → synth-opus')
   }
   {
     // any non-true fableBridge value keeps the Opus default (strict === true)
@@ -306,10 +343,10 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
     check(optsBy['analyst'] && optsBy['analyst'].agentType === OPUS, 'fableBridge:"true" (string) is not an opt-in → Opus analyst')
   }
   for (const fb of [undefined, true]) {
-    // both synth-* roles null → synthesis-failed, exactly two analyst calls
+    // both synth-* roles and synth-opus48 null → synthesis-failed, exactly three analyst calls
     const a = fb === undefined ? noBridge : { ...base, fableBridge: fb }
     const { result: r, calls } = await run(a, { analystNull: () => true })
-    check(r.status === 'synthesis-failed' && analystCalls(calls).length === 2 && !r.aiModelActual, `fableBridge:${fb}: both synth-* roles null → synthesis-failed after exactly 2 calls (got ${r.status}, ${analystCalls(calls).length})`)
+    check(r.status === 'synthesis-failed' && analystCalls(calls).length === 3 && !r.aiModelActual && Array.isArray(r.classifierStops), `fableBridge:${fb}: all analysts null → synthesis-failed after exactly 3 calls, classifierStops in result (got ${r.status}, ${analystCalls(calls).length})`)
   }
 }
 {
@@ -341,6 +378,101 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
     // curator empty once, fine on the retry → normal run
     const { result: r } = await run(noBridge, { curator: l => l === 'curator' ? null : structuredClone(curator) })
     check(r.status === 'ok' && r.completeness === 'complete', `curator null once, ok on retry → ok (got ${r.status})`)
+  }
+}
+{
+  // ── safety-classifier retry on Opus 4.8 (2.7.8) ──
+  const { fableBridge: _fb, ...noBridge } = base
+  const W48 = 'jadlis-research:researcher-opus48'
+  const retries = calls => calls.filter(l => l.endsWith('→opus48'))
+  const cs = r => Object.fromEntries(r.channelStatus.map(s => [s.channel, s]))
+  {
+    // zero mode: no stop → no retry, empty classifierStops, the interruption line in every schema prompt
+    const { result: r, calls, prompts } = await run(noBridge, { verify: l => (l === 'verify:c2#1' ? { verdict: 'CHALLENGED', credibility: 4 } : l === 'verify:c2#2' ? { verdict: 'UNCHECKED', credibility: 6 } : {}) })
+    check(r.status === 'ok' && r.classifierStops.length === 0 && retries(calls).length === 0 && r.synthMeta.ledgerSummary.classifierRetries === 0 && r.synthMeta.ledgerSummary.classifierBlocked === 0,
+      `zero mode: classifierStops [], no →opus48 calls, counters 0 (got ${JSON.stringify(r.classifierStops)}, ${retries(calls)})`)
+    const line = 'set interrupted="safety-classifier"'
+    check(['web', 'curator', 'verify:c1#1', 'escalate:c2', 'analyst'].every(l => (prompts[l] || '').includes(line)), 'zero mode: channel, curator, verifier, escalation and analyst prompts carry the interruption line')
+    check(!(prompts['web'] || '').includes('TEST HOOK') && cs(r).web.fallbackModel === null && cs(r).web.failReason === null, 'zero mode: no test hook, channelStatus fallbackModel/failReason null')
+  }
+  {
+    // simulateClassifierStop ['web'] → web stub on the first attempt, retry on researcher-opus48 recovers it
+    const { result: r, calls, prompts, optsBy } = await run({ ...noBridge, simulateClassifierStop: ['web'] })
+    const st = r.classifierStops[0] || {}
+    check(r.classifierStops.length === 1 && st.role === 'channel' && st.label === 'web' && st.detectedBy === 'schema' && st.retried && st.recovered && st.model === 'claude-opus-4-8',
+      `simulate web: classifierStops[0] = channel/web/schema/retried/recovered/opus-4-8 (got ${JSON.stringify(r.classifierStops)})`)
+    check(JSON.stringify(retries(calls)) === '["web→opus48"]' && optsBy['web→opus48'].agentType === W48 && optsBy['web→opus48'].schema && !optsBy['web→opus48'].model,
+      `simulate web: one retry on researcher-opus48 with the channel schema (got ${retries(calls)}, ${optsBy['web→opus48'] && optsBy['web→opus48'].agentType})`)
+    check(prompts['web'].includes('TEST HOOK (simulateClassifierStop)') && !prompts['web→opus48'].includes('TEST HOOK') && prompts['web→opus48'].startsWith('RETRY AFTER A SAFETY-CLASSIFIER STOP') && prompts['web→opus48'].includes('OVERWRITE them') && prompts['web→opus48'].includes('do NOT write step-by-step code'),
+      'simulate web: hook only on the first attempt; retry prompt = retry note (overwrite, write in parts, no bypass code) + original task')
+    check(cs(r).web.citations === 4 && cs(r).web.ok && cs(r).web.fallbackModel === 'claude-opus-4-8' && cs(r).web.failReason === null,
+      `simulate web: channelStatus.web restored — 4 citations, fallbackModel opus-4-8 (got ${JSON.stringify(cs(r).web)})`)
+    check(r.synthMeta.ledgerSummary.classifierRetries === 1 && r.synthMeta.ledgerSummary.classifierBlocked === 0 && !r.failedChannels.includes('web'), 'simulate web: ledgerSummary classifierRetries 1 / blocked 0, web not failed')
+  }
+  {
+    // regex fallback: interrupted=none but the narrative says the write-up was stopped → retry
+    const { result: r } = await run(noBridge, { stop: l => l === 'reddit', stopText: 'the write-up was stopped partway through' })
+    check(r.classifierStops.length === 1 && r.classifierStops[0].detectedBy === 'text' && r.classifierStops[0].recovered, `regex fallback: findings text detected (got ${JSON.stringify(r.classifierStops)})`)
+  }
+  {
+    // no false positive: a citation ABOUT classifiers (context/quotes) never triggers a retry
+    const saved = channels.reddit.citations[0].context
+    channels.reddit.citations[0].context = 'the reply was stopped by a safety classifier, REFUSAL_NO_FALLBACK'
+    const { result: r, calls } = await run(noBridge)
+    channels.reddit.citations[0].context = saved
+    check(r.classifierStops.length === 0 && retries(calls).length === 0, 'regex fallback ignores citation context/quotes')
+  }
+  {
+    // stopped twice → classifier-blocked, channel not ok
+    const { result: r } = await run(noBridge, { stop: l => l === 'hackernews' || l === 'hackernews→opus48' })
+    const st = r.classifierStops[0] || {}
+    check(st.label === 'hackernews' && st.retried && !st.recovered && cs(r).hackernews.failReason === 'classifier-blocked' && !cs(r).hackernews.ok && cs(r).hackernews.fallbackModel === null && r.synthMeta.ledgerSummary.classifierBlocked === 1,
+      `stopped twice: hackernews failReason classifier-blocked (got ${JSON.stringify(cs(r).hackernews)})`)
+  }
+  {
+    // cap 1: two channels stopped → one retried, the other blocked without a retry
+    const { result: r, calls, logs } = await run({ ...noBridge, classifierRetryCap: 1, simulateClassifierStop: ['web', 'reddit'] })
+    const skipped = r.classifierStops.filter(s => s.skipped === 'cap')
+    check(retries(calls).length === 1 && r.classifierStops.length === 2 && skipped.length === 1 && cs(r)[skipped[0].label].failReason === 'classifier-blocked',
+      `cap 1: one retry, one skipped:'cap' → classifier-blocked (got ${JSON.stringify(r.classifierStops)})`)
+    check(logs.some(l => l.includes('лимит повторов 1 исчерпан')), 'cap 1: cap logged')
+  }
+  {
+    // verifier stopped twice → the vote is LOST (waveStats), not UNCHECKED; stopped once → recovered vote counts
+    const { result: r } = await run(noBridge, { stop: l => l === 'verify:c1#1' || l === 'verify:c1#1→opus48' || l === 'verify:c3#2' })
+    const ls = r.synthMeta.ledgerSummary
+    const led = Object.fromEntries(r.claimLedger.map(c => [c.id, c]))
+    check(ls.votesLost === 1 && r.completeness === 'partial' && led.c1.voteCount === 1 && !led.c1.votes.some(v => v.includes('UNCHECKED')),
+      `verifier stopped twice → votesLost 1, partial, no UNCHECKED vote for c1 (got lost ${ls.votesLost}, votes ${JSON.stringify(led.c1.votes)})`)
+    check(led.c3.voteCount === 2 && r.classifierStops.filter(s => s.role === 'verifier').length === 2 && ls.classifierRetries === 2,
+      `verifier stopped once → recovered vote counts (c3 voteCount ${led.c3.voteCount}, retries ${ls.classifierRetries})`)
+  }
+  {
+    // curator stopped → retry on researcher-opus48, the same-model curator-retry is not used
+    const { result: r, calls, optsBy } = await run(noBridge, { stop: l => l === 'curator' })
+    check(r.status === 'ok' && calls.includes('curator→opus48') && !calls.includes('curator-retry') && optsBy['curator→opus48'].agentType === W48,
+      `curator stopped → curator→opus48 on researcher-opus48, no curator-retry (got ${calls.filter(c => c.startsWith('curator'))})`)
+    const r2 = await run(noBridge, { stop: l => l.startsWith('curator') })
+    check(r2.result.status === 'curation-failed' && !r2.calls.includes('curator-retry') && r2.result.classifierStops[0].role === 'curator' && !r2.result.classifierStops[0].recovered,
+      `curator stopped twice → curation-failed, classifierStops in result (got ${r2.result.status})`)
+  }
+  {
+    // escalation bridge stopped twice → escalationSkipped classifier-blocked
+    const { result: r } = await run(noBridge, { verify: l => (l === 'verify:c2#1' ? { verdict: 'CHALLENGED', credibility: 4 } : l === 'verify:c2#2' ? { verdict: 'UNCHECKED', credibility: 6 } : {}), stop: l => l.startsWith('escalate:c2') })
+    const c2 = r.claimLedger.find(c => c.id === 'c2')
+    check(c2.escalationSkipped === 'classifier-blocked' && r.escalationStats.skipped['classifier-blocked'] === 1, `escalation stopped twice → escalationSkipped classifier-blocked (got ${c2.escalationSkipped})`)
+  }
+  {
+    // insufficient-sources early return carries classifierStops
+    const { result: r } = await run({ ...noBridge, channels: ['web', 'reddit'] }, { stop: l => l.startsWith('reddit') })
+    check(r.status === 'insufficient-sources' && Array.isArray(r.classifierStops) && r.classifierStops.length === 1, `insufficient-sources carries classifierStops (got ${r.status})`)
+  }
+  {
+    // the Opus 4.8 agents ship with the plugin and pin the model
+    const read = n => fs.readFileSync(path.join(here, '..', 'agents', n), 'utf8')
+    const rw = read('researcher-opus48.md'), sy = read('synth-opus48.md')
+    check(/^model: claude-opus-4-8$/m.test(rw) && /^name: researcher-opus48$/m.test(rw), 'agents/researcher-opus48.md pins claude-opus-4-8')
+    check(/^model: claude-opus-4-8$/m.test(sy) && /^tools: Read, Write, Glob$/m.test(sy) && /^effort: high$/m.test(sy), 'agents/synth-opus48.md pins claude-opus-4-8, tools Read/Write/Glob, effort high')
   }
 }
 {

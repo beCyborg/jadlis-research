@@ -2,9 +2,9 @@ export const meta = {
   name: 'full-research-core',
   description: 'Ядро full-research: N канальных исследователей → curator (evidence-префиксы) → urlhealth → per-claim верификация (2 линзы: та же семья + другая семья, по голосу от веба и от сообществ) → веб и сообщества разошлись = FAMILY-SPLIT (без Codex) → одиночное исключение → третий голос Codex → analyst пишет отчёт в workDir. Vault-контракт — в скилле.',
   phases: [
-    { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты' },
+    { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты; обрыв защитным фильтром у любой роли → один повтор на Opus 4.8 (лимит classifierRetryCap)' },
     { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims с evidence-префиксами → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5)' },
-    { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию, Opus 5.5 high при fableBridge:true; null → один повтор на другой роли synth-*) пишет отчёт: три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
+    { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию, Opus 5.5 high при fableBridge:true; null или обрыв защитным фильтром → один повтор на Opus 4.8 (synth-opus48), затем последний — на другой роли synth-*) пишет отчёт: три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
 
@@ -87,8 +87,9 @@ const w = extra => Object.assign({}, WORKER_OPTS, extra)
 // vs Fable 5.1 high 1617, fewer guesses, cheaper per task, no separate Fable weekly cap.
 // synth-fable only when the caller passes fableBridge:true. Since 2.7.1 (2026-09-29) it runs on
 // Opus 5.5 at effort high, not Fable 5.1 — the user dropped Fable; the agent name and the
-// `fableBridge` flag are historical. If the first analyst returns null, ONE retry runs on the
-// other synth-* role (xhigh → high, high → xhigh): same model, a fresh attempt at another effort.
+// `fableBridge` flag are historical. If the first analyst returns null or reports a classifier stop,
+// ONE retry runs on synth-opus48 (Opus 4.8, 2.7.8); if that gives nothing too, a last retry runs on
+// the other synth-* role (xhigh → high, high → xhigh): same model, a fresh attempt at another effort.
 // Both run as ordinary subagents: the headless bridge existed only to dodge our own
 // CLAUDE_CODE_SUBAGENT_MODEL_FORCE, removed 2026-09-07. The two synth-* agents pin the model,
 // the effort and the tool allow-list (Read, Write, Glob) — agent() has no allowedTools option.
@@ -200,6 +201,10 @@ const SELECTED = (Array.isArray(A.channels) && A.channels.length)
   : ['web', 'codexweb', 'grokweb', 'reddit', 'twitter', 'hackernews', 'substack'].filter(c => ALL_CHANNELS[c] && providerOn(c))
 
 // ── Schemas ──
+// interrupted (2.7.8): the agent's own report of a safety-classifier stop. A schema agent hands in
+// its StructuredOutput BEFORE the SubagentStop hook appends REFUSAL_NO_FALLBACK, so the marker never
+// reaches agent()'s return value — the signal has to live in the schema (see withClassifierRetry).
+const INTERRUPTED_PROP = { type: 'string', enum: ['none', 'safety-classifier', 'other'], description: 'safety-classifier — a tool_result said the response "was stopped by a safety classifier"; other — another interruption you could not recover from; none — a normal run' }
 const CHANNEL_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -229,8 +234,9 @@ const CHANNEL_SCHEMA = {
     snapshots: { type: 'array', items: { type: 'string' }, description: 'paths of the snapshots written to workDir/snapshots/ (empty = not a single HIGH source snapshotted — telemetry sees this)' },
     startedAt: { type: 'string', description: 'YYYY-MM-DD HH:MM:SS — before the first search' },
     finishedAt: { type: 'string', description: 'YYYY-MM-DD HH:MM:SS — after Write' },
+    interrupted: INTERRUPTED_PROP,
   },
-  required: ['source', 'findings', 'citations', 'counterarguments', 'sourceQuality', 'fileWritten', 'snapshots'],
+  required: ['source', 'findings', 'citations', 'counterarguments', 'sourceQuality', 'fileWritten', 'snapshots', 'interrupted'],
 }
 
 const CURATOR_SCHEMA = {
@@ -255,8 +261,9 @@ const CURATOR_SCHEMA = {
         required: ['id', 'statement', 'channels', 'strength', 'loadBearing', 'claimType', 'evidencePrefixes'],
       },
     },
+    interrupted: INTERRUPTED_PROP,
   },
-  required: ['claims'],
+  required: ['claims', 'interrupted'],
 }
 
 const URLHEALTH_SCHEMA = {
@@ -298,8 +305,9 @@ const VERIFY_SCHEMA = {
     url: { type: 'string' },
     numberVerbatim: { type: ['string', 'null'], description: 'for numeric claims — the number/date/version VERBATIM from the source found (as written, no normalisation); null — claim not numeric or number not found' },
     searchedVia: { type: 'string', description: 'the platform you ACTUALLY searched (honest telemetry): brave | reddit | hn | x | <site or layer>; "none" when no search ran' },
+    interrupted: INTERRUPTED_PROP,
   },
-  required: ['claimId', 'verdict', 'credibility', 'evidence', 'url', 'numberVerbatim', 'searchedVia'],
+  required: ['claimId', 'verdict', 'credibility', 'evidence', 'url', 'numberVerbatim', 'searchedVia', 'interrupted'],
 }
 
 const ESCALATION_SCHEMA = {
@@ -313,8 +321,9 @@ const ESCALATION_SCHEMA = {
     reasoning: { type: 'string' },
     urls: { type: 'array', items: { type: 'string' } },
     liveSearchEvents: { type: 'integer', description: 'number of web_search events in the codex JSONL output' },
+    interrupted: INTERRUPTED_PROP,
   },
-  required: ['claimId', 'status', 'confirmsExclusion', 'verdictSuggested', 'reasoning', 'urls', 'liveSearchEvents'],
+  required: ['claimId', 'status', 'confirmsExclusion', 'verdictSuggested', 'reasoning', 'urls', 'liveSearchEvents', 'interrupted'],
 }
 
 const ANALYST_SCHEMA = {
@@ -329,10 +338,13 @@ const ANALYST_SCHEMA = {
     disputedClaims: { type: 'array', items: { type: 'string' }, description: 'DISPUTED claims — moved to «Спорные факты», not part of the conclusions' },
     familySplitClaims: { type: 'array', items: { type: 'string' }, description: 'FAMILY-SPLIT claims — the web and the communities tell different stories; rendered in «Веб и сообщества расходятся»' },
     gaps: { type: 'array', items: { type: 'string' }, description: 'what the research did not cover (frontmatter + methodology callout)' },
+    interrupted: INTERRUPTED_PROP,
   },
-  required: ['reportPath', 'queryRu', 'mainConclusion', 'relatedCandidates', 'droppedClaims', 'disputedClaims', 'familySplitClaims', 'gaps'],
+  required: ['reportPath', 'queryRu', 'mainConclusion', 'relatedCandidates', 'droppedClaims', 'disputedClaims', 'familySplitClaims', 'gaps', 'interrupted'],
 }
 
+// One line in every schema prompt (2.7.8): the agent itself reports a safety-classifier stop.
+const INTERRUPT_NOTE = 'INTERRUPTION: if ANY tool_result says the response "was stopped by a safety classifier", set interrupted="safety-classifier" and hand in what you managed so far (do not pad it). Another interruption you could not recover from → interrupted="other". A normal run → interrupted="none".'
 const TOOL_NOTE = 'IMPORTANT: do NOT use the built-in WebSearch/WebFetch (banned). Load the MCP tools you need through ToolSearch before calling them. Brave (Search tier): 50 req/s — parallel calls are fine. Firecrawl scrape: 1 req/s.'
 
 // ── Language block shared by the channel prompts ──
@@ -405,7 +417,8 @@ Started: {startedAt} / Finished: {finishedAt}
 (for every citation: Evidence type / Author / Date / Bias signals / Cites original)
 
 After writing, return the structure (schema): source="${c.source}", findings[], citations[{prefix,url,relevance,context,quotes,reliability,reliabilityWhy}], counterarguments[], sourceQuality, fileWritten="${WORK_DIR}/${c.file}".
-If the channel is unavailable after the fallbacks — return sourceQuality="LOW", empty citations and note it in findings.`
+If the channel is unavailable after the fallbacks — return sourceQuality="LOW", empty citations and note it in findings.
+${INTERRUPT_NOTE}`
 }
 
 // ── Claim curator prompt ──
@@ -428,7 +441,8 @@ Task:
 
 4. ATOMICITY (schema v2): every statement is ONE checkable factual core WITHOUT a superlative/evaluative wrapper. Forbidden in a statement: "best/#1", "consensus", "unanimous", "bible/canon", ratings by hearsay. KEEP significant qualifiers (dates, versions, applicability conditions) — atomic does not mean truncated. Split a compound statement into separate claims or take only the load-bearing core. Write numbers/dates/versions in the statement as in the source (do not round).
 
-Every claim is a concrete statement that can be checked by web search or in communities. Not a matter of taste. Write the statement IN ENGLISH (proper names/terms/numbers as in the source). Return strictly by the schema.`
+Every claim is a concrete statement that can be checked by web search or in communities. Not a matter of taste. Write the statement IN ENGLISH (proper names/terms/numbers as in the source). Return strictly by the schema.
+${INTERRUPT_NOTE}`
 }
 
 // ── urlhealth (A2): one light agent runs the script over the evidence URLs of the selected claims ──
@@ -532,6 +546,7 @@ Judge:
 - credibility (1-6): 1 — confirmed by an independent source of another type; 2 — probably true (logical, consistent, no direct independent confirmation); 3 — possibly true; 4 — doubtful; 5 — improbable; 6 — cannot be judged.
 
 Return by the schema: claimId="${claim.id}", verdict (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), credibility (1-6), evidence (what you found, in English; for UNCHECKED — what exactly failed and why), url (key verification source; for UNCHECKED — the unreachable URL or an empty string), numberVerbatim (the number verbatim or null), searchedVia (the platform you ACTUALLY searched: brave | reddit | hn | x | <site or layer>; "none" if no search ran).
+${INTERRUPT_NOTE}
 Do NOT spawn sub-agents.`
 }
 
@@ -572,7 +587,8 @@ CODEX_HOME="$(bash ${PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m ${CODEX_
    - Live-search gate: Bash \`grep -c '"web_search' "${jf}"\` → liveSearchEvents. 0 → status="no-live-search" (Codex answered from memory — such a vote does not count).
    - Final JSON: read ${lf} (Read); if the file is missing — the last line of ${jf} with item.type=="agent_message" (field .item.text). Extract the JSON object (the last {...} block). Unparsable → status="invalid-output".
    - All fine → status="ok", fields from the JSON. verdictSuggested outside the enum → "UNCHECKED".
-Return strictly by the schema: claimId="${claim.id}", status, confirmsExclusion, verdictSuggested, reasoning, urls, liveSearchEvents. Do NOT spawn sub-agents, do NOT repeat the codex call (no retries — the quota is shared with /verif).
+Return strictly by the schema: claimId="${claim.id}", status, confirmsExclusion, verdictSuggested, reasoning, urls, liveSearchEvents, interrupted. Do NOT spawn sub-agents, do NOT repeat the codex call (no retries — the quota is shared with /verif).
+${INTERRUPT_NOTE}
 
 <<<ROLE_PROMPT
 ${rolePrompt}
@@ -664,17 +680,86 @@ TEXT RULES:
 
 SAVING: with Write save the draft report to ${WORK_DIR}/draft.md (NOT to the vault — the orchestrator writes to the vault).
 After writing, return by the schema: reportPath="${WORK_DIR}/draft.md", queryRu (a short Russian phrasing ≤25 chars for the file name), mainConclusion, relatedCandidates (3-6 keywords/topics for the obsidian search of related notes), droppedClaims (what was filtered as CHALLENGED/OUTDATED), disputedClaims (what was moved to «Спорные факты»), familySplitClaims (what was rendered in «Веб и сообщества расходятся»), gaps (the same as in the frontmatter).
-Do NOT spawn sub-agents, do NOT call skills, read only the channel files in ${WORK_DIR}, the snapshots and the reference.`
+Do NOT spawn sub-agents, do NOT call skills, read only the channel files in ${WORK_DIR}, the snapshots and the reference.
+${INTERRUPT_NOTE}`
 }
+
+// ═══ Safety-classifier retry (2.7.8) ═══
+// Incident wf_0685606d-100 (2026-10-07): the cyber classifier stopped the web channel mid-Write; the
+// agent stayed on Opus 5.5 and handed in a schema-valid stub (LOW, 0 citations) that looked like an
+// ordinary weak channel. Now every schema role reports `interrupted`, the core detects the stop and
+// re-runs the role ONCE on an Opus 4.8 plugin agent — researcher-opus48 / synth-opus48, our own
+// agents: the user-level opus-48-fallback does not exist on a recipient's machine. Cap per run:
+// args.classifierRetryCap (default 6); over the cap the role is reported blocked without a retry.
+const OPUS48 = 'claude-opus-4-8'
+const OPUS48_WORKER = { agentType: 'jadlis-research:researcher-opus48' }
+const OPUS48_SYNTH = { agentType: 'jadlis-research:synth-opus48', model: OPUS48, name: 'Opus 4.8 (synth-opus48)' }
+const opus48w = extra => Object.assign({}, OPUS48_WORKER, extra)
+const CLASSIFIER_RETRY_CAP = Number.isFinite(A.classifierRetryCap) ? A.classifierRetryCap : 6
+// Test hook: labels whose FIRST attempt is told to fake a classifier stop (the retry never gets it).
+const SIMULATE_STOP = new Set(Array.isArray(A.simulateClassifierStop) ? A.simulateClassifierStop.map(String) : [])
+const SIMULATE_NOTE = '\n\nTEST HOOK (simulateClassifierStop): do NOT search, do NOT read or write any file. Immediately return the schema with interrupted="safety-classifier", empty arrays for every list field (findings, citations, claims, …), sourceQuality="LOW" where the schema has it, empty strings elsewhere.'
+// Fallback text match — only the agent's own narrative fields, never citations or quotes
+// (a channel quoting an article ABOUT classifiers must not trigger a retry).
+const CLASSIFIER_RE = /(stopped|blocked|interrupted|cut off) by (a|the) (safety )?classifier|safety[- ]classifier (stop|block|interrupt)|REFUSAL_NO_FALLBACK|stopped partway|write-?up was (stopped|interrupted|cut off)/i
+const NARRATIVE_FIELDS = ['findings', 'fileWritten', 'evidence', 'reasoning', 'mainConclusion', 'gaps']
+// → 'schema' | 'text' | 'null' (analyst only: a stopped synth-* usually returns nothing) | null
+function classifierStopped(r, role) {
+  if (r === null || r === undefined) return role === 'analyst' ? 'null' : null
+  if (r.interrupted === 'safety-classifier') return 'schema'
+  const text = NARRATIVE_FIELDS.map(k => (r[k] === undefined ? '' : JSON.stringify(r[k]))).join(' ')
+  return CLASSIFIER_RE.test(text) ? 'text' : null
+}
+const classifierStops = []   // {role, label, detectedBy, retried, recovered, model, skipped?}
+let classifierRetriesUsed = 0
+const RETRY_NOTE = `RETRY AFTER A SAFETY-CLASSIFIER STOP — read this before the task.
+The previous attempt at this exact task was stopped by a safety classifier.
+1. Files from that attempt may be incomplete: OVERWRITE them (Write from scratch), never append to them.
+2. Write a long file in parts: a short first Write (header + first section), then Edit to add the rest.
+3. The task is to compare how tools and products behave according to their public documentation and reports, with links. Describe and compare; do NOT write step-by-step code or instructions that bypass protections, detection or security controls.
+4. Stopped again → set interrupted="safety-classifier" and hand in what you have.
+
+── ORIGINAL TASK ──
+`
+// role: channel | curator | verifier | escalation | analyst. prompt: a string, or fn(model) → string
+// (the analyst prints ai_model into the report; null = the first attempt's model). opts — the first
+// attempt; fallbackOpts — the Opus 4.8 retry (label is set here). Returns { r, stop, fromRetry }:
+// r — the retry's answer when it gave one, else the first attempt's; stop — the classifierStops entry.
+async function withClassifierRetry(role, label, prompt, opts, fallbackOpts) {
+  const text = m => (typeof prompt === 'function' ? prompt(m) : prompt)
+  const first = await agent(text(null) + (SIMULATE_STOP.has(label) ? SIMULATE_NOTE : ''), opts)
+  const detectedBy = classifierStopped(first, role)
+  if (!detectedBy) return { r: first, stop: null, fromRetry: false }
+  const stop = { role, label, detectedBy, retried: false, recovered: false, model: null }
+  classifierStops.push(stop)
+  // check-and-increment before any await: parallel() callers cannot overshoot the cap
+  if (classifierRetriesUsed >= CLASSIFIER_RETRY_CAP) {
+    stop.skipped = 'cap'
+    log(`⚠ ${label}: обрыв защитным фильтром (${detectedBy}), лимит повторов ${CLASSIFIER_RETRY_CAP} исчерпан — без повтора.`)
+    return { r: first, stop, fromRetry: false }
+  }
+  classifierRetriesUsed++
+  stop.retried = true
+  stop.model = OPUS48
+  log(`${label}: обрыв защитным фильтром (${detectedBy}) — один повтор на Opus 4.8.`)
+  const second = await agent(RETRY_NOTE + text(OPUS48), Object.assign({}, fallbackOpts, { label: `${label}→opus48` }))
+  stop.recovered = !!second && !classifierStopped(second, role)
+  log(`${label}→opus48: ${stop.recovered ? 'восстановлен' : 'не восстановлен'}.`)
+  return { r: second || first, stop, fromRetry: !!second }
+}
+const classifierSummary = () => ({ classifierRetries: classifierStops.filter(s => s.retried).length, classifierBlocked: classifierStops.filter(s => !s.recovered).length })
 
 // ═══ Phase 1 — Fan-out ═══
 phase('Fan-out')
 log(`Запускаю ${SELECTED.length} канальных исследователей: ${SELECTED.join(', ')}; языки: ${LANGUAGES.join(', ')}; providers off: ${[...PROVIDERS_OFF].join(', ') || 'нет'}`)
 
-const channelResults = (await parallel(SELECTED.map(key => () =>
-  agent(channelPrompt(key), w({ label: key, phase: 'Fan-out', schema: CHANNEL_SCHEMA }))
-    .then(r => (r ? Object.assign({ channelKey: key }, r) : null))
-))).filter(Boolean)
+const channelStops = {}
+const channelResults = (await parallel(SELECTED.map(key => async () => {
+  const { r, stop } = await withClassifierRetry('channel', key, channelPrompt(key),
+    w({ label: key, phase: 'Fan-out', schema: CHANNEL_SCHEMA }), opus48w({ phase: 'Fan-out', schema: CHANNEL_SCHEMA }))
+  if (stop) channelStops[key] = stop
+  return r ? Object.assign({ channelKey: key }, r) : null
+}))).filter(Boolean)
 
 const files = channelResults.map(r => r.fileWritten).filter(Boolean)
 // Channel success = non-LOW sourceQuality AND non-empty valid citations (with URLs).
@@ -735,7 +820,10 @@ const sumDemoted = d => d ? Object.values(d).reduce((a, b) => a + b, 0) : 0
 const channelStatus = SELECTED.map(k => {
   const r = channelResults.find(x => x.channelKey === k)
   const cits = r ? (r.citations || []) : []
-  return { channel: k, answered: !!r, ok: r ? okChannel(r) : false, sourceQuality: r ? r.sourceQuality : null, citations: cits.length, snapshots: r ? (r.snapshots || []).length : 0, highCitations: cits.filter(c => c && c.relevance === 'HIGH').length, quotedCitations: cits.filter(c => c && Array.isArray(c.quotes) && c.quotes.length).length, snapshotDemoted: sumDemoted(demotedBy[k]), snapshotDemotedBy: demotedBy[k] || { noSnapshot: 0, shortSnapshot: 0, llmMediated: 0, quoteNotFound: 0 }, ceiling: channelCeiling(k), snapshotBytesMedian: null }
+  return { channel: k, answered: !!r, ok: r ? okChannel(r) : false, sourceQuality: r ? r.sourceQuality : null, citations: cits.length, snapshots: r ? (r.snapshots || []).length : 0, highCitations: cits.filter(c => c && c.relevance === 'HIGH').length, quotedCitations: cits.filter(c => c && Array.isArray(c.quotes) && c.quotes.length).length, snapshotDemoted: sumDemoted(demotedBy[k]), snapshotDemotedBy: demotedBy[k] || { noSnapshot: 0, shortSnapshot: 0, llmMediated: 0, quoteNotFound: 0 }, ceiling: channelCeiling(k), snapshotBytesMedian: null,
+    // 2.7.8: recovered on the Opus 4.8 retry → fallbackModel; still stopped (or over the cap) and not ok → classifier-blocked
+    fallbackModel: channelStops[k] && channelStops[k].recovered ? OPUS48 : null,
+    failReason: channelStops[k] && !channelStops[k].recovered && !(r && okChannel(r)) ? 'classifier-blocked' : null }
 })
 const failedChannels = channelStatus.filter(s => !s.ok).map(s => s.channel)
 const answeredFamilies = [...new Set(okResults.map(r => FAMILY[r.channelKey]))]
@@ -746,7 +834,7 @@ log(`Каналов успешно: ${okResults.length}/${SELECTED.length} (уп
 // one succeeded, there will be no triangulation. A deliberate web-only run (1 family) is fine.
 if (okResults.length < 2 || (selectedFamilies.length >= 2 && answeredFamilies.length < 2)) {
   log(`Недостаточно независимых источников (успешных каналов: ${okResults.length}, семей: ${answeredFamilies.length}) — отдаю что есть, без синтеза.`)
-  return { workDir: WORK_DIR, status: 'insufficient-sources', ledgerSchemaVersion: 5, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED } }
+  return { workDir: WORK_DIR, status: 'insufficient-sources', ledgerSchemaVersion: 5, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], classifierStops, sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED } }
 }
 
 // ═══ Phase 2 — Verify (per-claim live counter-search) ═══
@@ -756,14 +844,17 @@ phase('Verify')
 // null.claims crashed the WHOLE run after a successful fan-out (incident 2026-09-01).
 // One retry, then stop with status 'curation-failed' (2.7.7): synthesis over an empty ledger used to
 // write a report whose conclusions looked verified while nothing was checked.
-let curated = await agent(curatorPrompt(files), o({ label: 'curator', phase: 'Verify', schema: CURATOR_SCHEMA }))
-if (!curated || !Array.isArray(curated.claims) || !curated.claims.length) {
+// 2.7.8: a classifier stop gets its one retry on Opus 4.8 (inside withClassifierRetry) instead of the
+// same-model retry below, which would most likely be stopped the same way.
+let { r: curated, stop: curatorStop } = await withClassifierRetry('curator', 'curator', curatorPrompt(files),
+  o({ label: 'curator', phase: 'Verify', schema: CURATOR_SCHEMA }), opus48w({ phase: 'Verify', schema: CURATOR_SCHEMA }))
+if (!curatorStop && (!curated || !Array.isArray(curated.claims) || !curated.claims.length)) {
   log('Curator не вернул claims — один повтор.')
   curated = await agent(curatorPrompt(files), o({ label: 'curator-retry', phase: 'Verify', schema: CURATOR_SCHEMA }))
 }
 if (!curated || !Array.isArray(curated.claims) || !curated.claims.length) {
   log('⚠ Curator не вернул claims и после повтора — синтез не запускаю: отчёт без проверки выдал бы непроверенное за проверенное. Материалы каналов в workDir.')
-  return { workDir: WORK_DIR, status: 'curation-failed', ledgerSchemaVersion: 5, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED } }
+  return { workDir: WORK_DIR, status: 'curation-failed', ledgerSchemaVersion: 5, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], classifierStops, sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED } }
 }
 
 const STRENGTH_RANK = { STRONG: 3, MODERATE: 2, WEAK: 1 }
@@ -866,8 +957,12 @@ function waveStats(voted, claimsCount, verifiers) {
 }
 const voted = (await parallel(claims.map(c => () =>
   parallel(Array.from({ length: VERIFIERS }, (_, i) => () =>
-    agent(verifyPrompt(c, i), w({ label: `verify:${c.id}#${i + 1}`, phase: 'Verify', schema: VERIFY_SCHEMA }))
-      .then(v => (v ? Object.assign({ family: voteFamilies(c)[i] || 'web', lens: i === 0 ? 'same-family' : 'cross-type' }, v) : null))
+    withClassifierRetry('verifier', `verify:${c.id}#${i + 1}`, verifyPrompt(c, i),
+      w({ label: `verify:${c.id}#${i + 1}`, phase: 'Verify', schema: VERIFY_SCHEMA }), opus48w({ phase: 'Verify', schema: VERIFY_SCHEMA }))
+      // 2.7.8: a vote still stopped after the Opus 4.8 retry (or over the cap) is a LOST vote (waveStats), not UNCHECKED
+      .then(({ r: v, stop }) => (v && !(stop && !stop.recovered)
+        ? Object.assign({ family: voteFamilies(c)[i] || 'web', lens: i === 0 ? 'same-family' : 'cross-type' }, v, stop ? { fallbackModel: OPUS48 } : {})
+        : null))
   )).then(votes => ({ claim: c, votes: votes.filter(Boolean) }))
 ))).filter(Boolean)
 const wave = waveStats(voted, claims.length, VERIFIERS)
@@ -924,7 +1019,11 @@ const escalationStats = { candidates: escalationCandidates.length, escalated: 0,
 if (toEscalate.length) {
   const results = await parallel(toEscalate.map(c => async () => {
     try {
-      return await agent(escalationPrompt(c, c.rawVotes), w({ label: `escalate:${c.id}`, phase: 'Verify', schema: ESCALATION_SCHEMA }))
+      const { r, stop } = await withClassifierRetry('escalation', `escalate:${c.id}`, escalationPrompt(c, c.rawVotes),
+        w({ label: `escalate:${c.id}`, phase: 'Verify', schema: ESCALATION_SCHEMA }), opus48w({ phase: 'Verify', schema: ESCALATION_SCHEMA }))
+      // still stopped → the third vote did not happen; the status names the reason (JS value, not the schema enum)
+      if (stop && !stop.recovered) return { claimId: c.id, status: 'classifier-blocked', confirmsExclusion: false, verdictSuggested: 'UNCHECKED', reasoning: 'stopped by a safety classifier (Opus 5.5, then the Opus 4.8 retry)', urls: [], liveSearchEvents: 0, interrupted: 'safety-classifier' }
+      return r
     } catch (e) {
       // `budget`/failure throws — without the catch the claim would vanish from the ledger together with the paid votes
       return { claimId: c.id, status: /budget/i.test(String(e && e.message)) ? 'budget' : 'timeout', confirmsExclusion: false, verdictSuggested: 'UNCHECKED', reasoning: String(e && e.message || e), urls: [], liveSearchEvents: 0 }
@@ -969,7 +1068,7 @@ const evidencelessN = claimLedger.filter(c => c.evidenceless).length
 const credVals = claimLedger.filter(c => c.verdict !== 'UNCHECKED' && c.verdict !== 'UNVERIFIED').map(c => c.credibility).sort((a, b) => a - b)
 const credibilityMedian = credVals.length ? (credVals.length % 2 ? credVals[(credVals.length - 1) / 2] : (credVals[credVals.length / 2 - 1] + credVals[credVals.length / 2]) / 2) : null
 const ceilingCappedN = claimLedger.filter(c => c.ceilingCapped).length
-const ledgerSummary = { total: claimLedger.length, confirmed, confirmedSplit, challenged, outdated, unchecked, disputed, familySplit, escalated: escalationStats.escalated, escalationSkipped: Object.values(escalationStats.skipped).reduce((a, b) => a + b, 0), weakEvidence, evidenceless: evidencelessN, ceilingCapped: ceilingCappedN, credibilityMedian, claimsDroppedByCap, votesLaunched: wave.votesLaunched, votesReturned: wave.votesReturned, votesLost: wave.votesLost, unverified: wave.unverified }
+const ledgerSummary = { total: claimLedger.length, confirmed, confirmedSplit, challenged, outdated, unchecked, disputed, familySplit, escalated: escalationStats.escalated, escalationSkipped: Object.values(escalationStats.skipped).reduce((a, b) => a + b, 0), weakEvidence, evidenceless: evidencelessN, ceilingCapped: ceilingCappedN, credibilityMedian, claimsDroppedByCap, votesLaunched: wave.votesLaunched, votesReturned: wave.votesReturned, votesLost: wave.votesLost, unverified: wave.unverified, ...classifierSummary() }
 log(`Ledger v5: CONFIRMED=${confirmed} (split: ${confirmedSplit}), FAMILY-SPLIT=${familySplit}, DISPUTED=${disputed}, CHALLENGED=${challenged}, OUTDATED=${outdated}, UNCHECKED=${unchecked}; эскалаций ${escalationStats.escalated}, пропущено ${ledgerSummary.escalationSkipped}; weakEvidence=${weakEvidence}; ceilingCapped=${ceilingCappedN}; медиана credibility=${credibilityMedian}`)
 
 // ═══ Phase 3 — Synthesize ═══
@@ -982,26 +1081,32 @@ const synthOpts = (label, agentType) => ({ label, phase: 'Synthesize', schema: A
 // Ledger out — without raw votes (rawVotes duplicate evidence/urls)
 const ledgerOut = claimLedger.map(({ rawVotes, ...c }) => c)
 
-let report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL),
-  synthOpts(FABLE_SYNTH ? 'analyst→fable' : 'analyst', SYNTH_AGENT))
+// 2.7.8: a null analyst (the usual shape of a classifier stop on synth-*) or interrupted=safety-classifier
+// → ONE retry on synth-opus48 (Opus 4.8, Read/Write/Glob) with ai_model claude-opus-4-8 in the prompt.
+const analystFor = model => analystPrompt(files, claimLedger, ledgerSummary, model || AI_MODEL)
+let { r: report, stop: analystStop, fromRetry: synthBy48 } = await withClassifierRetry('analyst',
+  FABLE_SYNTH ? 'analyst→fable' : 'analyst', analystFor,
+  synthOpts(FABLE_SYNTH ? 'analyst→fable' : 'analyst', SYNTH_AGENT), synthOpts(undefined, OPUS48_SYNTH.agentType))
 
-// One retry on the OTHER synth-* role, both branches (synth-opus → synth-fable and back; both
-// Opus 5.5 since 2.7.1, labels keep the old names): a null (safety-classifier stop on a grey/OSINT
-// topic, a session limit) should not leave the run without a report. Same prompt, the retry's ai_model.
-// synthFellBack = the retry ran AND produced the report.
+// Last resort, both branches: the OTHER synth-* role (synth-opus → synth-fable and back; both Opus 5.5
+// since 2.7.1, labels keep the old names) — only when Opus 4.8 gave nothing either or the retry cap
+// was spent: a null that is not a classifier stop (network drop, session limit) still gets a fresh try.
+// synthFellBack = this retry ran AND produced the report.
 let synthFellBack = false
 if (!report) {
-  log(`analyst (${SYNTH_FIRST.name}) вернул null — одна попытка на ${SYNTH_RETRY.name}.`)
+  log(`analyst (${SYNTH_FIRST.name}${analystStop && analystStop.retried ? `, затем ${OPUS48_SYNTH.name}` : ''}) вернул null — последняя попытка на ${SYNTH_RETRY.name}.`)
   report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL_RETRY),
     synthOpts(FABLE_SYNTH ? 'analyst→opus-retry' : 'analyst→fable-retry', SYNTH_RETRY.agentType))
   synthFellBack = !!report
 }
+Object.assign(ledgerSummary, classifierSummary())
 if (!report) {
-  log(`Синтез не удался дважды (${SYNTH_FIRST.name}, затем ${SYNTH_RETRY.name}). Материалы собраны, отчёт не написан.`)
-  return { workDir: WORK_DIR, status: 'synthesis-failed', completeness, claimLedger: ledgerOut, synthMeta: { ledgerSummary } }
+  log(`Синтез не удался (${SYNTH_FIRST.name}${analystStop && analystStop.retried ? `, ${OPUS48_SYNTH.name}` : ''}, затем ${SYNTH_RETRY.name}). Материалы собраны, отчёт не написан.`)
+  return { workDir: WORK_DIR, status: 'synthesis-failed', completeness, claimLedger: ledgerOut, classifierStops, synthMeta: { ledgerSummary } }
 }
-// The model that actually wrote the report: the first family, or the other one if the retry did.
-const aiModelActual = synthFellBack ? AI_MODEL_RETRY : AI_MODEL
+// The model that actually wrote the report: Opus 4.8 after a classifier retry, the other synth-*
+// role after the last-resort retry, else the first one.
+const aiModelActual = synthBy48 ? OPUS48 : synthFellBack ? AI_MODEL_RETRY : AI_MODEL
 
 return {
   workDir: WORK_DIR,
@@ -1027,6 +1132,8 @@ return {
   sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED },
   channelStatus,
   failedChannels,
+  // 2.7.8: every safety-classifier stop of the run and what the Opus 4.8 retry did about it
+  classifierStops,
   aiModelActual,
   answeredFamilies,
   timing: channelResults.map(r => ({ channel: r.channelKey, startedAt: r.startedAt || null, finishedAt: r.finishedAt || null })),

@@ -343,20 +343,31 @@ rollback); an unconfirmed exclusion → `DISPUTED` (disputed, not part of the co
 `{WORK_DIR}/draft.md` (in Russian). Wait for the `<task-notification>` (then tick the Phase B line
 of `{WORK_DIR}/_brief.md`) and use the object:
 `{workDir, status, completeness, ledgerSchemaVersion, languages, channelsAnswered, channelStatus, failedChannels,
-aiModelActual, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, reportPath, queryRu,
-relatedCandidates, claimLedger, synthMeta, sourceSettings}`; `sourceSettings` =
+classifierStops, aiModelActual, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, reportPath, queryRu,
+relatedCandidates, claimLedger, synthMeta, sourceSettings}`; `classifierStops` (2.7.8) = every
+safety-classifier stop of the run, `{role, label, detectedBy, retried, recovered, model, skipped?}`:
+`role` channel | curator | verifier | escalation | analyst, `detectedBy` schema (the agent set
+`interrupted`) | text (regex over its own findings/evidence) | null (the analyst returned nothing —
+a classifier stop or another failure), `retried` — one re-run on Opus 4.8 happened (`model:
+"claude-opus-4-8"`), `skipped: "cap"` — over `classifierRetryCap`; every early-return status carries it too;
+`channelStatus[]` gets `fallbackModel` (`"claude-opus-4-8"` when the channel was recovered on the
+retry) and `failReason` (`"classifier-blocked"` when it stayed stopped and is not ok); `sourceSettings` =
 `{providersOff, notes, dropped}` — what the source resolve decided, echoed back for Phase C; `ledgerSchemaVersion` = 5; every
 ledger claim carries `votes` (`family:verdict`), `familyVotes`, `leadFamily`/`leadVerdict` (FAMILY-SPLIT only), `searchedVia`; `synthMeta.ledgerSummary` = `{total, confirmed,
 confirmedSplit, challenged, outdated, unchecked, disputed, familySplit, escalated, escalationSkipped,
 weakEvidence, evidenceless, ceilingCapped, credibilityMedian, claimsDroppedByCap, votesLaunched,
-votesReturned, votesLost, unverified}` (the last four = the verification wave: votes launched =
-claims × 2, votes that came back, votes lost to killed verifiers, claims with no vote at all);
+votesReturned, votesLost, unverified, classifierRetries, classifierBlocked}` (votesLaunched…unverified = the verification wave: votes launched =
+claims × 2, votes that came back, votes lost to killed or twice-stopped verifiers, claims with no vote at all;
+the last two = Opus 4.8 retries and roles still stopped, 2.7.8);
 `completeness` = `"partial"` when `votesLost > 0`, else `"complete"` (2.7.7); `snapshotGate` =
 `{minChars, llmMediatedChannels, demotedTotal, byReason: {noSnapshot, shortSnapshot, llmMediated,
 quoteNotFound}, byChannel, ceilingCapped}` — how many HIGH citations were lowered to MEDIUM and why
 (`args.channelCeiling: {codexweb: "HIGH"}` — the explicit escape of a channel ceiling, no automation).
 Progress — in `/workflows`. `escalationCap: N` in args changes the escalation cap (default 8; the
-Codex quota is a shared pool with verif).
+Codex quota is a shared pool with verif). `classifierRetryCap: N` caps the Opus 4.8 retries after a
+safety-classifier stop (default 6 per run). `simulateClassifierStop: ["web"]` — TEST ONLY: the first
+attempt of the named labels fakes a stop, so the retry path can be checked without a real classifier;
+never pass it in a real run.
 
 ## Phase C — WRITE (vault contract, main session)
 
@@ -376,7 +387,7 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
 2a. **Draft post-check (deterministic).**
    - **Honest `ai_model`.** Compare the frontmatter `ai_model` with `aiModelActual` from the
      workflow object. They normally agree; a mismatch means the first analyst returned null and
-     the retry on the other family wrote the report — fix the frontmatter line to
+     a retry wrote the report (Opus 4.8 after a classifier stop, or the other synth-* role) — fix the frontmatter line to
      `ai_model: "{aiModelActual}"` before writing to the vault.
    - **Canonical sections.** If `synthMeta.ledgerSummary.confirmed > 0`, check
      `grep -c '^### Проверенные факты$' draft`. No section → render it programmatically from
@@ -391,7 +402,8 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      `claims_confirmed`, `claims_disputed`, `claims_family_split` (= familySplit), `claims_dropped` (= challenged + outdated),
      `claims_unchecked`, `votes_confirmed_2` (= confirmed − confirmedSplit),
      `votes_confirmed_1` (= confirmedSplit), `escalations` (= escalated),
-     `credibility_median`; `languages` (= `languages` from the object). A missing field — add it
+     `credibility_median`; `languages` (= `languages` from the object); `classifier_retries`
+     (= classifierRetries) and `classifier_blocked` (= classifierBlocked) — always, 0 included. A missing field — add it
      before `gaps:`. This way the report can be re-evaluated without the wf log.
 
 2b. **Short publish address.** Add `permalink: <slug>` to the draft frontmatter (before `gaps:`) unless
@@ -441,6 +453,8 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
    - **Channel status (mandatory).** From `channelStatus`: if `failedChannels` is non-empty —
      list explicitly which SELECTED channels failed/degraded (LOW or no citations) and what that
      means for completeness (a run without part of the selected channels is not a full one).
+     A channel with `failReason: "classifier-blocked"` is named for what happened — «web: оборван
+     защитным фильтром, повтор на Opus 4.8 не помог» — never «не дописал отчёт» or «деградировал».
      All channels ok → one line «все N каналов отработали».
      Then, from `sourceSettings.dropped`, the channels that never started — these are NOT
      failures of the run: `reason: disabled-by-settings` → one line «выключено в настройках:
@@ -458,9 +472,19 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      "partial"` → add a second sentence: «N голосов потеряно (упали проверяющие), у M claims нет ни
      одного голоса — их выводы в отчёте проверены слабее» (`votesLost`, `unverified`).
      `evidenceHealth: "skipped"` → say the URL health was not checked.
+   - **Safety-classifier stops (2.7.8)** — only when `classifierStops` is non-empty, one line:
+     «обрыв защитным фильтром: web → повтор на Opus 4.8, восстановлен; verify:c3#1 → не
+     восстановлен (голос потерян)» — per entry: `label`, then «повтор на Opus 4.8» + «восстановлен /
+     не восстановлен», or «без повтора — лимит» for `skipped: "cap"`; `detectedBy: "null"` of the
+     analyst — «analyst не ответил (фильтр или сбой)». Second check: if
+     `~/.claude/scripts/refusal-audit.py` exists, run
+     `python3 ~/.claude/scripts/refusal-audit.py "<Transcript dir from the Workflow result>"`; an
+     UNRESOLVED agent that matches no `classifierStops` entry → say so in the same line («аудит
+     транскриптов нашёл ещё N обрывов без повтора»). No script → skip silently.
    - Gaps (`synthMeta.gaps`): what the research did not cover.
-   - Synthesis model: `aiModelActual` — the one that actually wrote the report (Opus 5.5 in
-     every branch since 2.7.1: xhigh by default, high with `fableBridge: true` or on the retry).
+   - Synthesis model: `aiModelActual` — the one that actually wrote the report (Opus 5.5 since
+     2.7.1: xhigh by default, high with `fableBridge: true` or on the last-resort retry;
+     `claude-opus-4-8` when the analyst was re-run after a classifier stop or a null, 2.7.8).
    - Report path: `REPORT_PATH` (vault, `Знания/Ресерчи`).
    - Working directory: `{WORK_DIR}/` (per-source files + draft — the full process).
    - **Closing line «От тебя:» — only when unverified claims reached the report.** Trigger:
@@ -482,8 +506,8 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
   call and on the retry. Handle it like `synthesis-failed`: the channel files are in `{WORK_DIR}`,
   nothing was verified, there is no report — show the working directory, do not write to the
   vault. Before 2.7.7 the core synthesised over an empty ledger and the report looked verified.
-- The workflow returned `synthesis-failed` — the analyst returned null on both families (the first
-  model and the retry on the other one). The material is in `{WORK_DIR}` but there is no report:
+- The workflow returned `synthesis-failed` — the analyst returned null on every attempt (the first
+  model, the Opus 4.8 retry and the last-resort retry on the other synth-* role). The material is in `{WORK_DIR}` but there is no report:
   show the working directory, do not write to the vault. A re-run of Phase B synthesises from the
   same material.
 - The source-resolve script of step 2a failed (no JSON, exit ≠ 0, timeout) — fail-closed on Grok:
@@ -494,6 +518,9 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
   not a failure and is not reported as a degraded channel; the missing part is the semantic angle,
   which the channel itself states in its findings.
 - Channel agents have built-in fallbacks (Brave `site:` instead of MCP) inside the protocols.
+- A safety classifier stopped a role (2.7.8) — the core re-runs it once on Opus 4.8
+  (`researcher-opus48` / `synth-opus48`) and reports it in `classifierStops`; nothing to do in the
+  session. A role still stopped is reported by name (Phase C step 7), never re-run by hand on Opus 5.5.
 - Channel `yandex`: `exit 2` — no `YC_SEARCH_API_KEY`; `exit 3` — API error; `exit 4` — polling
   timeout. In all three cases the channel returns `sourceQuality=LOW` without retries and without a
   Brave fallback; the workflow continues on the other channels.

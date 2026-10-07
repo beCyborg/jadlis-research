@@ -5,6 +5,28 @@
 
 ## [Unreleased]
 
+## [2.7.8] — 2026-10-07 — Повтор на Opus 4.8 после обрыва защитным фильтром / safety-classifier retry
+
+### Для человека
+
+- Если защитный фильтр модели обрывает агента посреди работы, ресёрч теперь это видит. Он повторяет ту же задачу один раз на Opus 4.8. Раньше оборванный канал выглядел как слабый, и сводка писала «Brave не дописал отчёт».
+- Повтор работает для всех ролей: каналы, куратор, проверяющие, Codex-эскалация и аналитик.
+- Сводка называет обрыв прямо: «web: обрыв защитным фильтром → повтор на Opus 4.8, восстановлен». Если повтор не помог, канал получает статус «оборван фильтром», а не «деградировал».
+- Повторов не больше 6 за прогон, поэтому тема с частыми обрывами не удваивает цену.
+- Проверяющий, которого фильтр оборвал дважды, считается потерянным голосом, а не «не удалось проверить».
+
+### For agents
+
+- Added: `agents/researcher-opus48.md` (`model: claude-opus-4-8`, effort high) and `agents/synth-opus48.md` (`tools: Read, Write, Glob`, `model: claude-opus-4-8`, effort high) — workflow-only fallback targets. Own plugin agents, not the user-level `opus-48-fallback`, which recipients do not have.
+- Added: required `interrupted` (`none` | `safety-classifier` | `other`) in `CHANNEL_SCHEMA`, `CURATOR_SCHEMA`, `VERIFY_SCHEMA`, `ESCALATION_SCHEMA`, `ANALYST_SCHEMA`, plus one `INTERRUPT_NOTE` line in each prompt. Why: a schema agent hands in StructuredOutput before the SubagentStop hook appends `REFUSAL_NO_FALLBACK` (incident `wf_0685606d-100`: 18:15:17 vs 18:15:26), so the hook marker never reaches `agent()`.
+- Added: `classifierStopped(r, role)` → `schema` | `text` (regex over the role's own narrative fields only — findings, fileWritten, evidence, reasoning, mainConclusion, gaps; never citations) | `null` (analyst returned nothing) | none; `withClassifierRetry(role, label, prompt, opts, fallbackOpts)` → one re-run with a retry note (overwrite partial files, write long files in parts, compare documented behaviour with links, no bypass code) on the Opus 4.8 agent; cap `args.classifierRetryCap` (default 6), over the cap → `skipped: "cap"`.
+- Changed: channels, curator, verifiers, escalation and analyst go through the wrapper. Curator: a classifier stop replaces the same-model `curator-retry`. Verifier still stopped → vote dropped (`votesLost`). Escalation still stopped → `escalationSkipped: "classifier-blocked"`. Analyst: null or stop → `synth-opus48` with `ai_model: "claude-opus-4-8"`; still nothing → the old last-resort retry on the other `synth-*` role (now up to 3 analyst calls).
+- Added to the result: `classifierStops[]` `{role, label, detectedBy, retried, recovered, model, skipped?}` (also in `insufficient-sources`, `curation-failed`, `synthesis-failed`); `channelStatus[].fallbackModel`, `channelStatus[].failReason: "classifier-blocked"`; `ledgerSummary.classifierRetries`, `ledgerSummary.classifierBlocked`; `aiModelActual` may be `claude-opus-4-8`.
+- Added: test hook `args.simulateClassifierStop: ["<label>"]` — the first attempt of those labels fakes a stop; the retry never gets the hook.
+- Docs: `skills/research/SKILL.md` — result shape, `classifierRetryCap` / `simulateClassifierStop`, Phase C 2a frontmatter `classifier_retries` / `classifier_blocked`, step 7 stop line + `refusal-audit.py` second check, Error handling; `references/gotchas.md` — new entry.
+- Tests: `node tools/smoke-core.mjs` — analyst-chain checks updated (null → synth-opus48 → other synth-*), 21 new 2.7.8 checks (zero mode, simulated web stop recovered on researcher-opus48, regex fallback + no false positive on citation text, blocked channel, cap, lost verifier vote, curator, escalation, early return, agent pins).
+- Migration: none for callers. A caller passing `workerOpts` keeps it for first attempts; retries always use the plugin's Opus 4.8 agents.
+
 ## [2.7.7] — 2026-10-02 — Счётчик волны проверки / verification wave counter
 
 ### Для человека
