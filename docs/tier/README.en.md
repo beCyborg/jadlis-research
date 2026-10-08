@@ -31,11 +31,11 @@ Read the pipeline: collection by channels first, then a separate verification ph
 7. **Synthesis** — survivors only; dropped = one line with the reason.
 8. **Note in `Знания/Ресерчи/`** — an AI draft until you read it.
 
-![Two magnifiers over one card: through one it is intact, through the other it is cracked](https://github.com/beCyborg/jadlis-hub/blob/main/docs/img/05-full-research-01.webp?raw=1)
+![Two magnifiers over one card: through one it is intact, through the other it is cracked](https://gitlab.com/beCyborg/jadlis-hub/-/raw/main/docs/img/05-full-research-01.webp)
 
 That is the verification phase: one lens hunts for a refutation in the same family the claim came from, the other takes a source of a different type. A web-vs-community disagreement is never averaged and never settled by a third web vote — the reader sees both stories and which one has priority.
 
-![A shelf with five containers; three identical sheets are clipped into one container](https://github.com/beCyborg/jadlis-hub/blob/main/docs/img/05-full-research-02.webp?raw=1)
+![A shelf with five containers; three identical sheets are clipped into one container](https://gitlab.com/beCyborg/jadlis-hub/-/raw/main/docs/img/05-full-research-02.webp)
 
 Channels roll up into source families: `web`, `codexweb`, `grokweb` and `yandex` are one family (the same open web), while Reddit, X, HackerNews, Substack, YouTube, Telegram and the language layers are separate ones. Agreement inside one family does not count as independent confirmation.
 
@@ -84,7 +84,7 @@ The report body itself stays in Russian — it becomes the vault note as is.
 
 </details>
 
-![Sheets on a conveyor pass three arches: a hook pulls one into a closed box, a stamp presses the second, the third moves on](https://github.com/beCyborg/jadlis-hub/blob/main/docs/img/06-search-paper-03.webp?raw=1)
+![Sheets on a conveyor pass three arches: a hook pulls one into a closed box, a stamp presses the second, the third moves on](https://gitlab.com/beCyborg/jadlis-hub/-/raw/main/docs/img/06-search-paper-03.webp)
 
 `science-research` is built differently: 9 scientific sources in parallel → citation snowballing (up to 6 hubs per round, 2 rounds max, corpus cap of 120 papers) → link hygiene (batches of 25 DOIs: existence, title match, three retraction signals) → GRADE per outcome → an independent critic → edits with confidence 0.7 and above.
 
@@ -115,7 +115,7 @@ Block to hand to an agent:
 
 ```text
 You are the installer. Do exactly these steps and nothing beyond them:
-1. Bash: claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+1. Bash: claude plugin marketplace add https://gitlab.com/beCyborg/jadlis-hub.git
    (already added — ignore the message and move on)
 2. Bash: claude plugin install jadlis-research@jadlis, then claude plugin install jadlis-science-research@jadlis
    (both pull the base search; skip whatever is already installed)
@@ -129,7 +129,7 @@ You are the installer. Do exactly these steps and nothing beyond them:
 The manual path uses the same commands:
 
 ```bash
-claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+claude plugin marketplace add https://gitlab.com/beCyborg/jadlis-hub.git
 claude plugin install jadlis-research@jadlis
 claude plugin install jadlis-science-research@jadlis
 for b in uv jq pdftotext yt-dlp; do command -v $b >/dev/null && echo "$b ok" || echo "$b MISSING"; done

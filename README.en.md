@@ -7,7 +7,7 @@ quote has a snapshot of its page underneath, and the report sits as a file in yo
 chat.
 
 ```
-claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+claude plugin marketplace add https://gitlab.com/beCyborg/jadlis-hub.git
 claude plugin install jadlis-search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
 claude plugin install jadlis-research@jadlis
 ```
@@ -107,7 +107,7 @@ conclusion but where it came from.
 You are the installer. Install the plugin jadlis-research from the jadlis marketplace on this Mac.
 First check that Claude Code is installed and the subscription is active; if not, stop and say so.
 Then run exactly these commands, verbatim, shortening nothing:
-1. claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+1. claude plugin marketplace add https://gitlab.com/beCyborg/jadlis-hub.git
 2. claude plugin install jadlis-search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
    I will paste the Brave and Firecrawl keys into the command myself. Never print key values back.
 3. claude plugin install jadlis-research@jadlis
@@ -121,7 +121,7 @@ If a command returns an error, stop, show me the output, and do not move to the 
 **b) Commands by hand.**
 
 ```
-claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+claude plugin marketplace add https://gitlab.com/beCyborg/jadlis-hub.git
 claude plugin install jadlis-search@jadlis --config BRAVE_API_KEY=... --config FIRECRAWL_API_KEY=...
 claude plugin install jadlis-research@jadlis
 claude plugin list

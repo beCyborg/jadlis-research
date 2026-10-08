@@ -31,11 +31,11 @@
 7. **Синтез** — только выжившее; отсеянное = строка с причиной.
 8. **Заметка в `Знания/Ресерчи/`** — черновик ИИ, пока ты её не прочитал.
 
-![Две лупы над одной карточкой: через одну она целая, через другую треснула](https://github.com/beCyborg/jadlis-hub/blob/main/docs/img/05-full-research-01.webp?raw=1)
+![Две лупы над одной карточкой: через одну она целая, через другую треснула](https://gitlab.com/beCyborg/jadlis-hub/-/raw/main/docs/img/05-full-research-01.webp)
 
 Так работает фаза проверки: одна линза ищет опровержение в той же семье, где утверждение найдено, вторая берёт источник другого типа. Расхождение веба и сообществ не усредняется и не добивается третьим веб-голосом — читатель видит обе версии и кому приоритет.
 
-![Полка с пятью контейнерами; три одинаковых листа связаны скобой в один контейнер](https://github.com/beCyborg/jadlis-hub/blob/main/docs/img/05-full-research-02.webp?raw=1)
+![Полка с пятью контейнерами; три одинаковых листа связаны скобой в один контейнер](https://gitlab.com/beCyborg/jadlis-hub/-/raw/main/docs/img/05-full-research-02.webp)
 
 Каналы складываются в семьи источников: `web`, `codexweb`, `grokweb` и `yandex` — одна семья (один и тот же открытый веб), Reddit, X, HackerNews, Substack, YouTube, Telegram и языковые слои — отдельные. Согласие внутри одной семьи независимым подтверждением не считается.
 
@@ -82,7 +82,7 @@ escalations: 2
 
 </details>
 
-![Конвейер с листами проходит три арки: крюк снимает лист в закрытый ящик, штамп прижимается ко второму, третий проходит дальше](https://github.com/beCyborg/jadlis-hub/blob/main/docs/img/06-search-paper-03.webp?raw=1)
+![Конвейер с листами проходит три арки: крюк снимает лист в закрытый ящик, штамп прижимается ко второму, третий проходит дальше](https://gitlab.com/beCyborg/jadlis-hub/-/raw/main/docs/img/06-search-paper-03.webp)
 
 `science-research` устроен иначе: 9 научных источников параллельно → снежный ком по цитированиям (до 6 хабов за круг, максимум 2 круга, потолок корпуса 120 работ) → гигиена ссылок (батчи по 25 DOI: существование, сверка заголовка, три сигнала отзыва) → GRADE по каждому исходу → независимый критик → правки с уверенностью от 0,7.
 
@@ -113,7 +113,7 @@ escalations: 2
 
 ```text
 Ты — установщик. Выполни ровно эти шаги и ничего сверх них:
-1. Bash: claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+1. Bash: claude plugin marketplace add https://gitlab.com/beCyborg/jadlis-hub.git
    (если маркетплейс уже добавлен — сообщение об этом пропусти, дальше по списку)
 2. Bash: claude plugin install jadlis-research@jadlis, затем claude plugin install jadlis-science-research@jadlis
    (оба тянут базовый search; что уже стоит — пропусти)
@@ -127,7 +127,7 @@ escalations: 2
 Ручной путь — те же команды:
 
 ```bash
-claude plugin marketplace add https://github.com/beCyborg/jadlis-hub
+claude plugin marketplace add https://gitlab.com/beCyborg/jadlis-hub.git
 claude plugin install jadlis-research@jadlis
 claude plugin install jadlis-science-research@jadlis
 for b in uv jq pdftotext yt-dlp; do command -v $b >/dev/null && echo "$b ok" || echo "$b MISSING"; done
