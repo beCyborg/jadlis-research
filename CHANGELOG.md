@@ -5,6 +5,84 @@
 
 ## [Unreleased]
 
+## [2.9.0] — 2026-10-12 — куратор «сколько нужно», ledger на диске, проход по цитатам, Codex GPT-6.1 Sol, протоколы по аудиту / curator takes what the decision needs, ledger on disk, citation pass, Codex GPT-6.1 Sol, protocols per the audit
+
+Основание: замеры плана «drifting-starlight» (сводка «Замеры jadlis-research — итоги 2026-10», аудит «Аудит канальных протоколов — 2026-10», ресёрчи «Формат отчёта для решения» и «Остановка поиска по насыщению»).
+
+### Для человека
+
+- Куратор берёт столько тезисов, сколько нужно для решения. Сначала он делит кандидатов на «критично» и «фон». Потом берёт все критичные и добирает фон, только если тезис новый и его можно проверить. До числа он больше не добивает.
+- Потолок поднят с 16 до 32 тезисов. Это защита цены, а не цель: прогон стоит столько, сколько тезисов реально нашлось.
+- «Несущий» тезис теперь означает одно: на нём держится вывод отчёта. Ожидаем 3–8 таких на прогон. Если их больше 8, лог предупреждает.
+- Лог и итог прогона показывают, сколько было кандидатов, сколько критичных взято и сколько отрезал потолок. Так видно, режет ли потолок важное.
+- Ядро пишет в папку прогона `_curated.json` (после куратора) и `_ledger.json` (после проверки). Их можно разбирать без телеметрии.
+- Новый флаг `reuseStages: true` пропускает готовые стадии при повторе в той же папке. Если есть `_ledger.json` — сразу пишется отчёт. Если есть `_curated.json` — куратор не запускается. Если есть все файлы каналов — каналы не ищут заново. Без флага всё работает как раньше.
+- Третий голос проверки идёт через Codex GPT-6.1 Sol в режиме priority (Fast) — решение 12.10. Прежняя модель возвращается через `codexModel: 'gpt-6-astra'`.
+- Проверщики на Reddit ищут сабреддиты через reddit-alt и берут 25 постов вместо 10. Несуществующие операции в подсказке названы явно.
+- Если запрошен язык без своего слоя (ja/zh/ko, а для uk/pl/de/es — eu), ядро пишет об этом в лог. Слой оно не добавляет — решает скилл.
+- Перед записью в хранилище скрипт сверяет цитаты отчёта со снимками источников. Модель в этом шаге не участвует.
+- Скрипт сверяет каждую цитату из трёх и больше слов («…» или "…") строкой со снимком ссылки рядом. Так же он сверяет числа: проценты, годы и значения из двух и больше цифр.
+- В «Методологии и проверке» появится строка «Проверка цитат: N ссылок, M цитат сверено, K не найдено в снимке, L ссылок без снимка». Под ней будут до 10 ненайденных цитат.
+- Если цитату в выводе (выше «📚 Контекст и находки») скрипт не нашёл в снимке, он добавит в конец строки «(⚠ цитата не найдена в снимке)». Сам текст и ссылки скрипт не меняет и не удаляет. Причина: в ресёрче автоисправление заменяло верные ссылки неверными.
+- Русская цитата из иностранного снимка — это перевод. Строкой её не проверить, поэтому скрипт считает её отдельно и не помечает как ненайденную. Если у источника нет снимка, цитата тоже не считается ненайденной.
+- Скрипт сам проверяет себя на реальном снимке прогона: одна заведомо верная и одна заведомо ложная строка. Если проверка не прошла, черновик остаётся как был.
+- Прогон на трёх черновиках этапа 9 (A-r1): 280–305 ссылок, из них 115–160 без снимка. Сверить строкой удалось только 0–4 цитаты на отчёт: большинство цитат — переводы или ссылаются на источник без снимка. Чисел сверено 39–82, не найдено 4–7 на отчёт. Я выборочно проверил ненайденные: это настоящие расхождения, ложных срабатываний нет.
+- Канал Codex и третий голос проверки переведены на GPT-6.1 Sol. Все вызовы, включая эскалацию, идут на приоритетном тарифе (решение владельца 12.10).
+- Промпт Codex больше не просит «источники 2024–2026». Теперь он просит источники за последние 24 месяца от даты прогона.
+- Протокол Codex знает сбой «code-mode host» (exit 0, поиска нет): агент делает один повтор и не тратит время на диагностику. Таймаут вызова — 600 с, цифры времени взяты из аудита.
+- Протокол twitter описывает рабочий путь: TwitterAPI.io и Brave `site:x.com`. Режим Grok вынесен в отдельный файл и читается, только если Grok снова включат.
+- В twitter пустая выдача (0 твитов при rc=0) теперь включает фолбэк на Brave. Запрос Top тоже идёт с `since:`.
+- Telegram: убрана фраза «Stars пополнены». Правило теперь такое: платим только бесплатными слотами, пока владелец не пополнит баланс. Добавлена шпаргалка формата вывода `tgsearch` вместо `--help`. Мёртвые фолбэки TGStat и web.telegram.org удалены.
+- Web: Exa для русских тем идёт с `--type auto`. Для продуктов, компаний и людей Exa запускается первым. PDF идёт по лестнице без Firecrawl в начале. Описан формат JSON у `websearch.py exa`.
+- YouTube: имена инструментов исправлены на полные.
+- В каждом канальном протоколе рядом с бюджетом вызовов стоит реальная медиана из телеметрии. Новых лимитов нет.
+- Слой `eu` ищет только на сайтах платформ (`site:`), а не в открытом вебе. Пример топика Zenn исправлен.
+- Проверка Codex теперь делает настоящий веб-поиск через ту же изолированную папку Codex, что и канал. Если поиск не сработал или Codex пишет «timed out negotiating with the code-mode host», канал codexweb выпадает до старта ресерча. Раньше проверка отвечала «ок», а канал потом умирал.
+- Яндекс проверяется одним дешёвым запросом (≈0,03 ₽, ошибки доступа бесплатны). Если ключ без прав (403) или API не принимает запрос (501), канал yandex выпадает с понятной причиной. Результат хранится 2 часа.
+- Telegram по умолчанию ищет только в бесплатных слотах и не тратит Stars. Платить Stars можно разрешить командой `set option telegram-stars paid`. Баланс Stars скрипт не показывает: в tgsearch.py нет такой команды.
+- В таблице источников Codex теперь называется «Codex CLI (gpt-6.1-sol)».
+- YouTube: транскрипт берётся на языке видео, а не дубляж (jadlis-search 2.2.3: `scripts/yt-transcript.py`). Из 2.2.3 взяты также `websearch.py` (дата Brave, Exa `auto` для русских запросов) и `secret.sh`.
+
+### For agents
+
+- Changed: `CLAIM_HARD_CAP` 16 → 32 (cost guard). Curator prompt rewritten: candidates → importance `critical|background` → take all critical, add background only while new and checkable, never pad; `loadBearing` only when a report conclusion rests on the claim (expected 3–8). evidencePrefixes/atomicity rules unchanged.
+- Changed: `CURATOR_SCHEMA` — per-claim `importance` (required), top-level `candidates`, `criticalTaken`, `droppedByCap` (required). Ordering by `selectClaims`: loadBearing → critical → background → strength → curator order. Missing `importance` falls back to loadBearing → critical.
+- Added: `curation` = `{candidates, returned, taken, criticalTaken, backgroundTaken, loadBearing, droppedByCap, criticalDroppedByCap, curatorReported}` in `synthMeta.curation` and `ledgerSummary.curation`; logged, with warnings for critical claims cut by the cap and for >8 load-bearing. `ledgerSummary.claimsDroppedByCap` kept. Ledger claims carry `importance`; the analyst ledger JSON includes it. `ledgerSchemaVersion` stays 5.
+- Added: `${workDir}/_curated.json` (raw curator answer + `curation` + `files`, `queryTitle`) and `${workDir}/_ledger.json` (claimLedger without rawVotes, ledgerSummary, escalationStats, snapshotGate, channelStatus, failedChannels, answeredFamilies, timing, completeness, evidenceHealth, urlhealthSummary, curation, files, queryTitle). Written by a light `persist:*` agent (effort low) in the background; outcome in `result.stageFiles`; a failed write never fails the run.
+- Added: `args.reuseStages === true` → `reuse:probe` agent (sizes + parsed stage files) → pure `reuseDecision`: valid `_ledger.json` (same queryTitle, claimLedger.length === ledgerSummary.total, its channel files non-empty) skips channels+curator+verification; valid `_curated.json` skips channels+curator (channel results restored by `reuse:<key>` agents from the markdown files); all selected channel files non-empty skips channels only. `result.reusedStages = {channels, curator, verification, notes}` only with the flag.
+- Changed: synthesis moved into `finish(x)` (shared by the normal and the reused-ledger path); return shape unchanged plus `languageLayerGaps`, `synthMeta.curation`, optional `stageFiles`/`reusedStages`.
+- Changed: `CODEX_MODEL` default `gpt-6.1-sol`, `CODEX_LABEL` `Codex/GPT-6.1 Sol`, escalation `service_tier="priority"`; `args.codexModel` still overrides. Comment records the 12.10 decision and the mini A/B (Sol 28–49% slower than Astra, same sources).
+- Fixed: verifier `REDDIT_CMD` — reddit-alt `reddit_search_communities` for discovery, `search_subreddit` with `limit:25`, `fetch_comments` by `url`; names get_post_details/search_all as non-existent; no retries on `banned` (audit R1 R-reddit.md).
+- Added: `missingLanguageLayers` — a log note (and `result.languageLayerGaps`) when `languages` has a non-ru/en language whose layer (ja/zh/ko; eu for uk/pl/de/es) is not selected. Family logic untouched.
+- Added: `tools/test-core-v290.mjs` (56 checks: pure helpers sliced between `BEGIN/END PURE HELPERS`, mocked runs for curation, stage files, reuse round trip, Codex defaults, Reddit route, language notes).
+- Not in this branch: `skills/research/SKILL.md` does not yet document `reuseStages`, `stageFiles`, `reusedStages`, `languageLayerGaps`, `synthMeta.curation`; `protocols/codex-web-protocol.md` still carries the codexweb channel's own model literals.
+- Added: `skills/research/scripts/citation-check.py <draft.md> <workDir> [--json] [--apply]` — deterministic citation pass (stdlib, Python 3.9-compatible, exit 0 always). Badge `[prefix·Badge](URL)` → `snapshots/<prefix>.md`, fallbacks `<prefix>-*.md` / `_*.md` / header `Prefix:` or `URL:`. Quotes ≥3 words are checked against the snapshots of the badge cluster that follows them (back-to-back badges = one cluster); normalisation NFKC + quote/dash forms + ё→е + whitespace + casefold, then a punctuation-free fallback; `…`, `...`, `[…]` split a quote into fragments. Statuses: matched / matched-other-prefix / not-found / translated (Cyrillic quote, non-Cyrillic snapshot) / no-snapshot (any cluster badge lacks a snapshot). Numbers: %, currency, ≥2 digits; `900 000`=`900,000`, dates dd.mm.yyyy → year, dd.mm skipped, list numbering and inline code ignored; the `## Источники` section is not quote-checked. Built-in positive/negative control on a real snapshot (`self_check`); `--apply` is skipped on FAIL.
+- Added: `skills/research/SKILL.md` Phase C step 2c «Citation pass» — runs the script with `--apply` (summary line + up to 10 not-found quotes into the «Методология и проверка» callout, before «Полный процесс»; «(⚠ цитата не найдена в снимке)» appended to conclusion lines; idempotent). Explicit rule: never rewrite, replace or delete citations.
+- Added: `tests/test_citation_check.py` — fixture draft + snapshots: exact, ellipsis, case, ru→ru, cluster, glob fallback, translated, no-snapshot, fabricated quote, numbers, `--apply` idempotency, exit 0 on a missing file.
+- Changed: `codex-web-protocol.md` — model `gpt-6.1-sol` in every command (calls 1–2, escalation, Responses-API replacement); `service_tier="priority"` for the escalation too; decision notes compressed to the 2026-10-12 decision + one-line history; «Prefer 2024-2026 sources» → «Prefer sources from the last 24 months (today is <DATE…>)»; Bash `timeout` 300000 → 600000 ms; «156 s» / «median 1078 s ≈ hangs» replaced with audit numbers (call median 525 s, p90 808 s; agent 1244 s); probe location → `research-sources.py`; CLI version notes → 0.162.1.
+- Added: `codex-web-protocol.md` Diagnostics — `timed out negotiating with the code-mode host` (exit 0, 0 `web_search` events) → one retry, then Degradation.
+- Changed: `SKILL.md` — description `web (Brave, Exa, Codex)` (Grok dropped); escalation line → GPT-6.1 Sol, rollback `codexModel: "gpt-6-astra"`.
+- Changed: `twitter-protocol.md` — rewritten around Mode B (TwitterAPI.io REST → Brave `site:x.com`); 3-line mode note; `since:` mandatory for Top; empty page (rc=0, 0 tweets) triggers the Brave fallback (`freshness: "py"`); honest MEDIUM ceiling (core demotes every x.com URL); «486 s» → v5 median 314 s. Section names `TwitterAPI.io layer` / `Mode B — keyword-only` kept for GROK_OFF_NOTE.
+- Added: `protocols/twitter-grok-protocol.md` — Grok CLI Mode A + Mode A complement, read only on `GROK OK`.
+- Changed: `telegram-protocol.md` — free daily slots only; Stars only when the owner topped up and the prompt says so; first `BALANCE_TOO_LOW` stops paid calls. Added output-shape cheat sheet (posts/csearch/comments/read JSON, similar/chats, limits/whoami, TSV columns, jq one-liner), `--in`-via-variable warning, `read --limit=5` and `t.me/c/` notes. Removed TGStat and web.telegram.org fallback lines.
+- Changed: `web-protocol.md` — Exa RU rule `--type auto` (never `keyword`); Exa first for product/company/people and RU research; documented `{_meta, response.results[]}` envelope; PDF ladder pdf-fetch → r.jina.ai → `websearch.py contents --full` → Firecrawl `parsers:["pdf"]`.
+- Fixed: `youtube-protocol.md` tool names → `mcp__plugin_jadlis-search_brave-search__*`, `mcp__plugin_jadlis-search_youtube__*`.
+- Changed: budgets in web, codexweb, reddit, twitter, hackernews, substack, telegram, youtube, yandex, eu (+ ja/zh/ko: no telemetry, 0 of 72 runs) now state the v5 medians from `channel-telemetry-v5.md`; caps unchanged.
+- Changed: `language-layers.md` — grokweb → twitter in the mandatory-read list; `ja-protocol.md` Zenn example `個人開発` (romanised slug → 404); `eu-protocol.md` Layer 1 searches platform sites only (`site:`), open web belongs to `web`.
+- Added: `tests/test_protocol_text_v290.py` — text invariants for the fixes above.
+- Not changed (out of scope, needs the core/settings branch): `full-research-core.js:73-78,585` (`CODEX_MODEL = 'gpt-6-astra'`, escalation `service_tier="default"`), `research-sources.py:419-420` (probe literal `gpt-6-astra`, `default`). Until they change, the escalation and the probe still run Astra on `default`.
+- Changed: `research-sources.py` `probe_codex` — runs via `scripts/codex-home.sh` (CODEX_HOME), `gpt-6.1-sol`, effort low, `service_tier="priority"`, `tools.web_search={mode="live"}`, `--json`, stdin=DEVNULL; counts completed `web_search` items (fallback: lines with `"web_search`); 0 events or stderr/error-event `timed out negotiating with the code-mode host` → access `fail`; partial output is still parsed on timeout; quota regex applies only to stderr and error events. Cache key `codex-quota` (2 h) and the 90 s global deadline unchanged; CODEX_TIMEOUT 60 → 80 s (capped by the deadline).
+- Added: access state `fail` («поиск не работает»), part of BAD_ACCESS → provider unusable, channel dropped.
+- Added: probe `yandex-access` (TTL 2 h) — `yandex-search.sh "тест" --no-wait --num 1 --no-log`, only when the key exists (no-key result is not cached). 403/PermissionDenied → `fail` with detail «403 PermissionDenied: у сервисного аккаунта нет роли search-api.webSearch.user»; 401 and 501 «unknown service» → `fail`; 504/timeout → `unknown` (channel kept + warning). `resolve` drops yandex as `no-access`; `status` shows the cached verdict and runs the probe only with `--probe`.
+- Added: settings `options.telegram-stars` = `free` (default) | `paid`, via `set option telegram-stars free|paid`; with `free` `resolve` adds `notes.telegram` «STARS: FREE SLOTS ONLY …» (no `--pay-stars`, stop global post search when free slots run out). `status` prints a «Telegram Stars:» line. No Stars-balance read: tgsearch.py has no balance command.
+- Changed: `sources.json` — Codex label «Codex CLI (gpt-6.1-sol)», `probe_ids` + `yandex-access`, yandex `probe`/`degrade`/`cost`, telegram `cost`, codex `cost` (probe ≈10 s).
+- Changed: research-settings `SKILL.md` — TTL list, `set option`, Codex/Yandex probe semantics, Telegram note.
+- Added: `tests/test_research_sources_probes.py` (16 tests, mocked subprocess: Codex/Yandex parsing, command/env/stdin, resolve drop + cache, option).
+- Finding 2026-10-12: Yandex async endpoint now answers HTTP 501 `unknown service yandex.cloud.priv.searchapi.v2.WebSearchAsyncService` (was 403 on 11.10) — channel still dead; protocol/yandex-search.sh not touched (out of scope).
+- Changed: `scripts/yt-transcript.py`, `scripts/websearch.py`, `scripts/secret.sh` copied from jadlis-search 2.2.3 (`SHARED_FROM.txt` notes the partial sync). Not used: `tools/sync-shared.sh` — it replaces `scripts/` wholesale and would delete the research-only `codex-home.sh` and `tg-channels.py` (follow-up).
+- Changed: `skills/research/SKILL.md` Phase B documents `reuseStages`, `stageFiles`, `reusedStages`, `synthMeta.curation` (incl. `criticalDroppedByCap`) and `languageLayerGaps`.
+- Changed: version 2.8.0 → 2.9.0.
+
 ## [2.8.0] — 2026-10-12 — интейк с брифом и подвопросами / intake brief with sub-questions
 
 ### Для человека

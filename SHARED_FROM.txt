@@ -1,1 +1,1 @@
-search search--v1.0.0 2ad3666bf41e009f0d904e612b665ce6c34eb55b
+jadlis-search jadlis-search--v2.2.3 f1f626a016857e1ee5836463d03a58fd264a52b3 (partial: yt-transcript.py, websearch.py, secret.sh; research-only codex-home.sh, tg-channels.py kept)

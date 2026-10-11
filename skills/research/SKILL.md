@@ -391,7 +391,15 @@ the last two = Opus 4.8 retries and roles still stopped, 2.7.8);
 `{minChars, llmMediatedChannels, demotedTotal, byReason: {noSnapshot, shortSnapshot, llmMediated,
 quoteNotFound}, byChannel, ceilingCapped}` — how many HIGH citations were lowered to MEDIUM and why
 (`args.channelCeiling: {codexweb: "HIGH"}` — the explicit escape of a channel ceiling, no automation).
-Progress — in `/workflows`. `escalationCap: N` in args changes the escalation cap (default 8; the
+Progress — in `/workflows`. **Stages on disk (2.9.0):** the core writes `{WORK_DIR}/_curated.json` and `{WORK_DIR}/_ledger.json`
+(`result.stageFiles` says whether the writes succeeded). Re-running Phase B with the SAME args plus
+`reuseStages: true` skips what is already there — ledger → curator → channels — and only synthesises
+again (≈0.3M tokens instead of a full run); `result.reusedStages` names what was reused. Use it when the
+analyst failed or the report must be rewritten; never across a changed query. New result fields:
+`synthMeta.curation` / `ledgerSummary.curation` = `{candidates, taken, criticalTaken, backgroundTaken, loadBearing, droppedByCap, criticalDroppedByCap}`
+(the curator takes every claim critical for the decision, cap 32, and adds background claims only while
+they are new — `criticalDroppedByCap > 0` means the cap cut critical claims; say so in the summary), and
+`languageLayerGaps` (a requested language with no matching layer channel — mention it in the summary). `escalationCap: N` in args changes the escalation cap (default 8; the
 Codex quota is a shared pool with verif). `classifierRetryCap: N` caps the Opus 4.8 retries after a
 safety-classifier stop (default 6 per run). `simulateClassifierStop: ["web"]` — TEST ONLY: the first
 attempt of the named labels fakes a stop, so the retry path can be checked without a real classifier;

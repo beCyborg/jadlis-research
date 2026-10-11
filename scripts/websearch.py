@@ -400,12 +400,24 @@ def norm_exa_result(r):
             "snippet": snippet or "", "domain": domain_of(r.get("url") or r.get("id") or "")}
 
 
+ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def brave_date(v):
+    """Brave `age`/`page_age` -> YYYY-MM-DD or "". llm/context sends a list of renderings
+    (["Wednesday, January 08, 2025", "2025-01-08", "636 days ago", "2025-01-08T13:37:18Z"]) or []."""
+    for s in (v if isinstance(v, list) else [v]):
+        if isinstance(s, str) and ISO_DATE_RE.match(s):
+            return s[:10]
+    return ""
+
+
 def norm_brave_web(r):
     snippet = strip_html(r.get("description") or "")
     if not snippet and r.get("extra_snippets"):
         snippet = r["extra_snippets"][0]
-    date = r.get("page_age") or r.get("age") or ""
-    return {"title": strip_html(r.get("title") or ""), "url": r.get("url") or "", "date": date[:10],
+    date = brave_date(r.get("page_age")) or brave_date(r.get("age"))
+    return {"title": strip_html(r.get("title") or ""), "url": r.get("url") or "", "date": date,
             "snippet": snippet, "domain": domain_of(r.get("url") or "")}
 
 
@@ -413,7 +425,7 @@ def norm_brave_ctx(g, sources):
     url = g.get("url") or ""
     src = (sources or {}).get(url) or {}
     snippet = (g.get("snippets") or [""])[0]
-    return {"title": g.get("title") or src.get("title") or "", "url": url, "date": (src.get("age") or "")[:10],
+    return {"title": g.get("title") or src.get("title") or "", "url": url, "date": brave_date(src.get("age")),
             "snippet": snippet, "domain": domain_of(url)}
 
 
@@ -656,7 +668,7 @@ def validate_exa_args(a, max_n=MAX_N):
     valid_date(a.start, "--start")
     valid_date(a.end, "--end")
     if a.type in ("keyword", "neural"):
-        err("[warn] type %r is legacy (not in the documented enum) — on HTTP 400 retry with --type auto" % a.type)
+        err("[warn] type %r is legacy (not in the documented enum; lost 0:14 to auto on Russian queries) — use --type auto" % a.type)
 
 
 def cmd_exa(a):
@@ -1194,7 +1206,8 @@ def build_parser():
     e = sub.add_parser("exa", help="Exa /search")
     e.add_argument("query")
     e.add_argument("--tag", required=True, choices=TAGS)
-    e.add_argument("--type", default="auto", choices=EXA_TYPES)
+    e.add_argument("--type", default="auto", choices=EXA_TYPES,
+                   help="search type (default auto — Russian queries too; keyword/neural are legacy and lose to auto on RU)")
     e.add_argument("--category", choices=EXA_CATEGORIES)
     e.add_argument("--include-domains", help="a.com,b.org")
     e.add_argument("--exclude-domains")
@@ -1228,7 +1241,7 @@ def build_parser():
     bo.add_argument("--tag", required=True, choices=TAGS)
     bo.add_argument("--query-exa", help="separate page-description query for Exa")
     bo.add_argument("-n", type=int, default=8)
-    bo.add_argument("--type", default="auto", choices=EXA_TYPES, help="Exa type")
+    bo.add_argument("--type", default="auto", choices=EXA_TYPES, help="Exa type (default auto, Russian queries too; keyword/neural are legacy)")
     bo.add_argument("--mode", default="web", choices=["web", "context"], help="Brave mode")
     bo.add_argument("--country")
     bo.add_argument("--lang", help="Brave search_lang")
