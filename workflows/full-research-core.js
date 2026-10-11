@@ -3,7 +3,7 @@ export const meta = {
   description: 'Ядро full-research: N канальных исследователей → curator (evidence-префиксы) → urlhealth → per-claim верификация (2 линзы: та же семья + другая семья, по голосу от веба и от сообществ) → веб и сообщества разошлись = FAMILY-SPLIT (без Codex) → одиночное исключение → третий голос Codex → analyst пишет отчёт в workDir. Vault-контракт — в скилле.',
   phases: [
     { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты; обрыв защитным фильтром у любой роли → один повтор на Opus 4.8 (лимит classifierRetryCap)' },
-    { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims с evidence-префиксами → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5)' },
+    { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims «сколько нужно» (все критичные + новый проверяемый фон, потолок 32) с evidence-префиксами → _curated.json → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5) → _ledger.json; reuseStages:true пропускает стадии, чьи файлы уже в workDir' },
     { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию, Opus 5.5 high при fableBridge:true; null или обрыв защитным фильтром → один повтор на Opus 4.8 (synth-opus48), затем последний — на другой роли synth-*) пишет отчёт: три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
@@ -66,17 +66,31 @@ const PLUGIN_ROOT = A.pluginRoot || '.'
 const VAULT_PATH = A.vaultPath || ''
 const SUBSTACK_HANDLES = Array.isArray(A.substackHandles) ? A.substackHandles : []
 const VERIFIERS = 2
-// schema v3: the curator emits up to CLAIM_HARD_CAP claims (sorted loadBearing desc, strength desc).
-const CLAIM_HARD_CAP = 16
+// Curator «as many as needed» (2.9.0, owner decision 12.10): the curator first sorts candidates into
+// critical / background for the user's decision, takes ALL critical ones, adds background claims only
+// while they are new and checkable, never pads to a number. CLAIM_HARD_CAP is a cost guard, not a
+// target: stage 5 showed the curator always filling the old cap of 16 (54/54 sets) and marking 31/32
+// load-bearing, while at 16 a third of the critical findings was never verified. The orchestrator
+// keeps the first CLAIM_HARD_CAP in loadBearing → critical → background order (selectClaims).
+const CLAIM_HARD_CAP = 32
 // Cap on Codex escalations per run (vote splits beyond the cap → exclusion on a single vote + flag 'cap').
 const ESCALATION_CAP = Number.isFinite(A.escalationCap) ? A.escalationCap : 8
-// Codex model for escalation (third vote). gpt-6-astra since 2026-09-05 (owner decision; re-checked vs GPT-6.1 Sol 2026-09-30 — see codex-web-protocol.md);
-// rollback — args.codexModel: 'gpt-5.6-sol' (still in the CLI catalogue). Effort high explicitly
-// (Astra default is medium), service_tier default explicitly (the global config could hand out
-// priority ≈2.5× quota). The codexweb channel literals live in protocols/codex-web-protocol.md —
+// Codex model for escalation (third vote): gpt-6.1-sol on service_tier priority (Fast) since 2026-10-12
+// (owner decision). Mini A/B 12.10 (.audit-research-2026-10/codex-ab/, both on priority, effort high):
+// Sol 28–49% slower than gpt-6-astra (q1 198 s vs 155 s, q7 251 s vs 169 s), slightly more searches,
+// the same number of sources; ultrafast is not supported for 6.1 Sol. Before: gpt-6-astra on
+// service_tier default (2026-09-05 … 2026-10-11). Rollback — args.codexModel: 'gpt-6-astra'.
+// Effort high explicitly. The codexweb channel literals live in protocols/codex-web-protocol.md —
 // the agent reads that file itself.
-const CODEX_MODEL = A.codexModel || 'gpt-6-astra'
-const CODEX_LABEL = A.codexModel ? `Codex/${A.codexModel}` : 'Codex/GPT-6 Astra'
+const CODEX_MODEL = A.codexModel || 'gpt-6.1-sol'
+const CODEX_LABEL = A.codexModel ? `Codex/${A.codexModel}` : 'Codex/GPT-6.1 Sol'
+const CODEX_SERVICE_TIER = 'priority'
+// Ledger on disk (2.9.0): after curation the core writes ${WORK_DIR}/_curated.json, after aggregation
+// ${WORK_DIR}/_ledger.json. With args.reuseStages === true a rerun on the same workDir skips the stages
+// whose files are there (see reuseDecision). Without the flag nothing is read back.
+const REUSE_STAGES = A.reuseStages === true
+const CURATED_FILE = `${WORK_DIR}/_curated.json`
+const LEDGER_FILE = `${WORK_DIR}/_ledger.json`
 // Worker: Opus 5.5 pinned with effort high through the researcher-opus subagent.
 // The agent registry is cached at session start — if the subagent was created in the current
 // session, the orchestrator may pass workerOpts: { model: 'claude-opus-5-5' } as a fallback.
@@ -247,7 +261,7 @@ const CURATOR_SCHEMA = {
   properties: {
     claims: {
       type: 'array',
-      description: `the strongest cross-channel claims (up to ${CLAIM_HARD_CAP}) for live verification`,
+      description: `the claims selected for live verification: ALL critical claims, then background claims only while they are new and checkable (hard ceiling ${CLAIM_HARD_CAP}; never pad to a number)`,
       items: {
         type: 'object',
         additionalProperties: false,
@@ -256,16 +270,50 @@ const CURATOR_SCHEMA = {
           statement: { type: 'string', description: 'checkable statement (atomic), in English' },
           channels: { type: 'array', items: { type: 'string' }, description: 'which channels support it (channel keys)' },
           strength: { type: 'string', enum: ['STRONG', 'MODERATE', 'WEAK'] },
-          loadBearing: { type: 'boolean', description: 'true — the report conclusion/advice rests on this claim; false — background fact' },
+          importance: { type: 'string', enum: ['critical', 'background'], description: 'critical — the user\'s decision changes if this claim is false; background — useful context, the decision does not depend on it' },
+          loadBearing: { type: 'boolean', description: 'true ONLY when a conclusion of the report rests on this claim (expected 3-8 per run); false — everything else, including critical claims no conclusion rests on' },
           claimType: { type: 'string', enum: ['factual', 'experiential'], description: 'factual — checkable fact about the world (number, date, product property, event); experiential — generalisation of people\'s experience ("users complain about X", "in practice Y works like this")' },
           evidencePrefixes: { type: 'array', items: { type: 'string' }, description: 'ONLY citation prefixes from the channel files, e.g. ["w1","r3","hn2"] — no text; the orchestrator substitutes the spans from the channel files' },
         },
-        required: ['id', 'statement', 'channels', 'strength', 'loadBearing', 'claimType', 'evidencePrefixes'],
+        required: ['id', 'statement', 'channels', 'strength', 'importance', 'loadBearing', 'claimType', 'evidencePrefixes'],
       },
     },
+    candidates: { type: 'integer', description: 'how many candidate claims you wrote out in step 1 (critical + background, before any selection)' },
+    criticalTaken: { type: 'integer', description: 'how many critical claims are in claims[]' },
+    droppedByCap: { type: 'integer', description: `how many CRITICAL candidates you left out only because of the ${CLAIM_HARD_CAP}-claim ceiling (0 when all fit)` },
     interrupted: INTERRUPTED_PROP,
   },
-  required: ['claims', 'interrupted'],
+  required: ['claims', 'candidates', 'criticalTaken', 'droppedByCap', 'interrupted'],
+}
+
+// Technical roles of the ledger-on-disk path (2.9.0): write a JSON file verbatim; probe the workDir.
+const PERSIST_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    path: { type: 'string' },
+    bytes: { type: 'integer', description: 'size of the written file from wc -c (0 — not written)' },
+  },
+  required: ['path', 'bytes'],
+}
+const REUSE_PROBE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    files: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { path: { type: 'string' }, exists: { type: 'boolean' }, bytes: { type: 'integer' } },
+        required: ['path', 'exists', 'bytes'],
+      },
+    },
+    curated: { type: ['object', 'null'], description: 'the parsed content of _curated.json, every field verbatim; null — file missing or empty' },
+    ledger: { type: ['object', 'null'], description: 'the parsed content of _ledger.json, every field and array element verbatim; null — file missing or empty' },
+    note: { type: 'string' },
+  },
+  required: ['files', 'curated', 'ledger', 'note'],
 }
 
 const URLHEALTH_SCHEMA = {
@@ -398,7 +446,7 @@ RULES:
    E — interested party: marketing, sales, affiliation;
    F — cannot be judged.
    reliabilityWhy — one line: source type / author and their expertise / date / bias signals.
-4. Do NOT spawn sub-agents — do everything yourself. Write ALL output in ENGLISH (findings, context, counterarguments, the channel file) — EXCEPT the quotes field (see rule 6): the curator, 2×${CLAIM_HARD_CAP} verifiers and the analyst read these files, English tokenises ~1.5-2× cheaper than Cyrillic. Proper names, product names and numbers exactly as in the source.
+4. Do NOT spawn sub-agents — do everything yourself. Write ALL output in ENGLISH (findings, context, counterarguments, the channel file) — EXCEPT the quotes field (see rule 6): the curator, up to 2×${CLAIM_HARD_CAP} verifiers and the analyst read these files, English tokenises ~1.5-2× cheaper than Cyrillic. Proper names, product names and numbers exactly as in the source.
 5. SNAPSHOTS (schema v4, MANDATORY step): for the 3-5 MOST IMPORTANT sources (relevance HIGH) save the full extracted page text to ${WORK_DIR}/snapshots/${c.prefix}<N>.md (Write). FILE NAME = CITATION PREFIX (\`${c.prefix}3.md\`, not \`thread-42.md\`) — otherwise the orchestrator cannot link the snapshot to the citation. File header (first lines, then a \`---\` line and the full text): \`URL: <url>\`, \`Date: <YYYY-MM-DD>\`, \`Prefix: [${c.prefix}N]\`, \`Extractor: <defuddle|jina|exa-full|tavily|firecrawl|pdf-fetch|hn-fetch|substack-fetch|tg-preview|tgsearch|yt-transcript|feed-fetch|llm-mediated>\` (the ladder is in web-protocol.md Layer 3) — what really extracted the text (telemetry, be honest). This is the frozen evidence base for the verifiers — they read the same text, not different versions of the page. RULES: (a) a citation with relevance HIGH and NO snapshot is not allowed — could not get the full text (paywall/CAPTCHA/challenge) → do not write a snapshot, lower relevance to MEDIUM and mark "[no-snapshot: blocked]"; (b) a file shorter than ~${MIN_SNAPSHOT_CHARS} characters does NOT close the gate (snippet/stub/truncation is not content) — MEDIUM as well; (c) channels codexweb/grokweb/yandex have a MEDIUM ceiling regardless of the snapshot (the output is a model synthesis and you write the page snapshot after the fact; set HIGH only if you are sure the verifier will find the span in the snapshot, the gate will still lower it to MEDIUM — that is not an error). Return the written paths in the snapshots[] field (an empty array = an honest "none"). The orchestrator enforces the gate in code per citation: no-snapshot / llm-mediated / short-snapshot / quote-not-found → HIGH is lowered to MEDIUM; nothing is ever raised.
 6. EVIDENCE PACK (schema v3): every citation has a quotes field — 1-3 VERBATIM fragments of the source text (≤400 chars each), IN THE ORIGINAL LANGUAGE — the one exception to "everything in English": the spans are matched against the snapshot and the primary source character by character, translation destroys their value. The English summary goes into context. No verbatim text (search-engine snippet, reconstruction, unreachable page) → quotes: [] — never invent.
 
@@ -423,27 +471,32 @@ If the channel is unavailable after the fallbacks — return sourceQuality="LOW"
 ${INTERRUPT_NOTE}`
 }
 
-// ── Claim curator prompt ──
+// ── Claim curator prompt («as many as needed», 2.9.0) ──
 function curatorPrompt(files) {
-  return `You are the curator of cross-channel verification. Read the channel results and select the STRONGEST claims for live checking.
+  return `You are the curator of cross-channel verification. Read the channel results and select the claims that need live checking — as many as the decision needs, not a fixed number.
 
 QUERY: ${QUERY}
-${DECISION ? `USER'S DECISION: ${DECISION}` : ''}
+${DECISION ? `USER'S DECISION: ${DECISION}` : 'USER\'S DECISION: not given — judge importance against the most likely decision behind the query.'}
 
 Channel files (Read each):
 ${files.map(f => `- ${f}`).join('\n')}
 
 Task:
 1. Read all files.
-2. Select up to ${CLAIM_HARD_CAP} of the most important claims (priority to those repeated across channels OR load-bearing for the conclusions under the decision). The orchestrator keeps the first ${CLAIM_HARD_CAP} in "loadBearing → strength" order, so list the load-bearing claims first.
-3. For each: statement (checkable statement), channels (who supports it — use EXACTLY the channel keys: web, codexweb, grokweb, yandex, reddit, twitter, hackernews, substack, youtube, telegram, ja, zh, ko, eu; NOT file names), strength, loadBearing, claimType, evidencePrefixes.
+2. CANDIDATES: write out every checkable claim the channels make that matters for the topic (merge duplicates — one claim, all its channels and prefixes). Mark each importance:
+   critical — the user's decision would change if this claim turned out false (a number the choice depends on, a property that rules an option in or out, a risk, a cost, a deadline);
+   background — context that helps the reader but the decision does not depend on it.
+   Return the number of candidates in \`candidates\`.
+3. SELECTION: take ALL critical candidates (hard ceiling ${CLAIM_HARD_CAP} claims — a cost guard). Then add background candidates ONLY while each one is new (not a rephrasing, subset or split of a claim already taken) and checkable by a search. Do NOT pad the list to reach a number: 6 claims is a correct answer when only 6 matter; ${CLAIM_HARD_CAP} is a ceiling, never a target. More than ${CLAIM_HARD_CAP} critical candidates → keep the ${CLAIM_HARD_CAP} the decision depends on most and report how many critical ones you left out in \`droppedByCap\`. Return \`criticalTaken\` = critical claims in claims[].
+4. loadBearing=true ONLY for a claim a conclusion of the report will rest on — if it fell, a piece of advice or the verdict would change. Expect 3-8 such claims per run; a critical claim no conclusion rests on is loadBearing=false. List claims in the order: load-bearing → other critical → background (the orchestrator sorts the same way and cuts at ${CLAIM_HARD_CAP}).
+5. For each claim: statement (checkable statement), channels (who supports it — use EXACTLY the channel keys: web, codexweb, grokweb, yandex, reddit, twitter, hackernews, substack, youtube, telegram, ja, zh, ko, eu; NOT file names), strength, importance, loadBearing, claimType, evidencePrefixes.
    SOURCE FAMILIES: web/codexweb/grokweb/yandex are ENGINES over one open web (Yandex is another index, but the same web) = ONE family 'web'; reddit, twitter, hackernews, substack, youtube, telegram and the language layers ja/zh/ko/eu are separate families. strength=STRONG ONLY with support from 2+ DIFFERENT families (e.g. web+reddit); agreement between web engines only (w/cx/gw/y) is NOT independence — MODERATE at most.
    claimType: factual — checkable fact about the world (number, date, version, product property, event, price); experiential — generalisation of people's lived experience ("in practice X breaks under Y", "users massively complain about Z"). For experiential claims, first-person specifics from communities are full testimony, not "opinion".
    evidencePrefixes: ONLY citation prefixes from the channel files (e.g. ["w1","r3","hn2"] — NO brackets and NO text). You do NOT return the span text — the orchestrator substitutes quotes from the channel files by prefix. An unknown prefix is dropped; a claim without a single real prefix is marked evidenceless and cannot be STRONG. At least one prefix per claim, better 2-4 from different channels.
 
-4. ATOMICITY (schema v2): every statement is ONE checkable factual core WITHOUT a superlative/evaluative wrapper. Forbidden in a statement: "best/#1", "consensus", "unanimous", "bible/canon", ratings by hearsay. KEEP significant qualifiers (dates, versions, applicability conditions) — atomic does not mean truncated. Split a compound statement into separate claims or take only the load-bearing core. Write numbers/dates/versions in the statement as in the source (do not round).
+6. ATOMICITY (schema v2): every statement is ONE checkable factual core WITHOUT a superlative/evaluative wrapper. Forbidden in a statement: "best/#1", "consensus", "unanimous", "bible/canon", ratings by hearsay. KEEP significant qualifiers (dates, versions, applicability conditions) — atomic does not mean truncated. Split a compound statement into separate claims only when both parts matter for the decision; otherwise take only the load-bearing core. Write numbers/dates/versions in the statement as in the source (do not round).
 
-Every claim is a concrete statement that can be checked by web search or in communities. Not a matter of taste. Write the statement IN ENGLISH (proper names/terms/numbers as in the source). Return strictly by the schema.
+Every claim is a concrete statement that can be checked by web search or in communities. Not a matter of taste. Write the statement IN ENGLISH (proper names/terms/numbers as in the source). Return strictly by the schema: claims, candidates, criticalTaken, droppedByCap, interrupted.
 ${INTERRUPT_NOTE}`
 }
 
@@ -471,7 +524,11 @@ const BRAVE_TOOLS = 'mcp__plugin_jadlis-search_brave-search__brave_web_search,mc
 const HN_CMD = `\`${PLUGIN_ROOT}/scripts/hn-fetch.sh search "<query>" --tags story --limit 10\` and/or \`--tags comment\` (full comment texts right in the output; exit 3 = HN search unavailable → take Reddit)`
 // Native Telegram search from the owner's Premium account (telegram-protocol.md NATIVE mode); free commands only here.
 const TG_CMD = '`python3 "${TGSEARCH_PY:-$HOME/.claude/skills/telegram-search/scripts/tgsearch.py}" csearch -q <form1> -q <form2> --in @<peer> --in @<peer> --since=-365d --dedup --out=text` (free; 2-4 word forms, no morphology) and/or `comments @<channel> -q <word> --since=-365d` (free) — search peers OTHER than the evidence ones (`similar @<channel>` / `chats -q <audience>` to find them, free). NEVER `posts -q` (paid daily slot) and never `--pay-stars`; script missing or exit 2 → ToolSearch "select:' + BRAVE_TOOLS + '" → brave_web_search with site:t.me'
-const REDDIT_CMD = `ToolSearch "select:mcp__plugin_jadlis-search_reddit__execute_operation" → execute_operation(operation_id="discover_subreddits", parameters={query,limit:5,min_confidence:0.4}) → execute_operation(operation_id="search_subreddit", parameters={subreddit_name,query,sort:"relevance",time_filter:"all"}) — do NOT call discover_operations/get_operation_schema`
+// Reddit for verifiers (2.9.0, audit R1 R-reddit.md): discovery through reddit-alt's lexical
+// community search (the primary discover_subreddits is blind to exact names like r/mcp), search with
+// limit:25 (the default is 10 — 333 of 358 verifier calls ran without it), only operations that exist
+// (get_post_details / search_all → "Unknown operation"), never retry a subreddit that answered "banned".
+const REDDIT_CMD = `ToolSearch "select:mcp__plugin_jadlis-search_reddit-alt__reddit_search_communities,mcp__plugin_jadlis-search_reddit__execute_operation" → reddit_search_communities(q, limit:10) to find the subreddits → execute_operation(operation_id="search_subreddit", parameters={subreddit_name,query,sort:"relevance",time_filter:"all",limit:25}); a thread's comments, if needed → execute_operation(operation_id="fetch_comments", parameters={url,comment_limit:50}). The only primary operations are search_subreddit and fetch_comments (get_post_details / search_all do NOT exist); a "banned" reason → do not search that subreddit again; do NOT call discover_subreddits/discover_operations/get_operation_schema`
 
 function evidenceBlock(claim) {
   const ev = claim.evidence || []
@@ -516,14 +573,14 @@ TOOLS (the origin platform; ONE tool set):
 ${sameFamilyCommunityTools(chans).map(t => `- ${t}`).join('\n')}
 Judge by the platform's OWN picture: several independent people agree with the claim → CONFIRMED; the platform's consensus contradicts it → CHALLENGED; found only the original thread or nothing → UNCHECKED.`
   } else if (family === 'community') {
-    lens = `LENS "CROSS-TYPE" (family: community): the claim came from web engines → confirm or refute it against PRACTITIONER COMMUNITIES (people who tried it, not the docs). Preferably HackerNews (Bash, no ToolSearch): ${HN_CMD}. Alternative — Reddit via execute_operation DIRECTLY: ${REDDIT_CMD}.${experiential ? ' The claim is experiential: first person with specifics (Admiralty C — "X broke on my prod under Y") is FULL independent testimony.' : ' The claim is factual: people\'s experience supports or contradicts, the primary source decides — report what the practitioners say.'}`
+    lens = `LENS "CROSS-TYPE" (family: community): the claim came from web engines → confirm or refute it against PRACTITIONER COMMUNITIES (people who tried it, not the docs). Preferably HackerNews (Bash, no ToolSearch): ${HN_CMD}. Alternative — Reddit: ${REDDIT_CMD}.${experiential ? ' The claim is experiential: first person with specifics (Admiralty C — "X broke on my prod under Y") is FULL independent testimony.' : ' The claim is factual: people\'s experience supports or contradicts, the primary source decides — report what the practitioners say.'}`
   } else {
     lens = (webOrigin && communityOrigin)
       ? `LENS "CROSS-TYPE" (family: web): the claim is supported by both web and communities → check its CURRENCY and the PRIMARY SOURCE (official docs/changelog, "<topic> 2026") via ${braveTools} → 1-2 queries.`
       : `LENS "CROSS-TYPE" (family: web): the claim came from communities → check it against PRIMARY SOURCES on the open web: ${braveTools} → 1-2 queries like "<claim> official docs" / "<topic> changelog" / "<topic> benchmark". ${experiential ? 'The claim is experiential: absence of a mention in the official docs does NOT refute people\'s experience — CHALLENGED only if a primary source DIRECTLY contradicts it, otherwise UNCHECKED.' : 'The claim is factual: the primary source decides.'}`
   }
   lens += `
-BUDGET: ≤3 tool calls, load EXACTLY ONE tool set. You are the "${family}" family vote — do NOT switch to the other family when yours is silent (silence → UNCHECKED; the other verifier covers the other family). FORBIDDEN: Grok CLI (~/.grok/bin/grok) and mcp__grok-mcp__x_search — too slow/expensive for verification; Yandex (yandex-search.sh) — paid, not used in verification; Reddit discover_operations/get_operation_schema — call execute_operation directly.`
+BUDGET: ≤3 tool calls, load EXACTLY ONE tool set. You are the "${family}" family vote — do NOT switch to the other family when yours is silent (silence → UNCHECKED; the other verifier covers the other family). FORBIDDEN: Grok CLI (~/.grok/bin/grok) and mcp__grok-mcp__x_search — too slow/expensive for verification; Yandex (yandex-search.sh) — paid, not used in verification; Reddit discover_subreddits/discover_operations/get_operation_schema — use the Reddit route above as written.`
   const numericBlock = claim.numeric ? `
 NUMERIC CLAIM — normalisation rules (a difference in notation is NOT a substantive difference): "1 000" = "1000" = "1k"; "10 %" = "10%"; "$1.2B" = "1.2 billion USD"; rounding within ±2% — a match; different units — convert before comparing; a date in another format — the same date. CHALLENGED on a number ONLY if the number found differs IN SUBSTANCE (another order of magnitude, another year, another version). Return the number found VERBATIM in numberVerbatim (as written in the source).` : ''
   return `You are adversarial verifier #${idx + 1} — the "${family}" family vote (${sameFamily ? 'same family as the claim\'s origin' : 'the other family'}). Check the claim through an INDEPENDENT live search. Do not trust the original research.
@@ -582,7 +639,7 @@ Answer with EXACTLY one JSON object as the final message, no prose after it:
 2. Check the binary: Bash \`command -v codex >/dev/null && echo HAVE || echo NONE\`. NONE → return status="no-binary" (other fields: confirmsExclusion=false, verdictSuggested="UNCHECKED", reasoning="codex binary missing", urls=[], liveSearchEvents=0) and stop.
 
 3. ONE Bash call (parameter timeout: 300000; < /dev/null is mandatory):
-CODEX_HOME="$(bash ${PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m ${CODEX_MODEL} -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json -o "${lf}" "$(cat "${pf}")" < /dev/null > "${jf}" 2>"${WORK_DIR}/_codex-esc-${claim.id}.err"; echo "EXIT=$?"
+CODEX_HOME="$(bash ${PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m ${CODEX_MODEL} -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="${CODEX_SERVICE_TIER}" -c 'tools.web_search={mode="live"}' --json -o "${lf}" "$(cat "${pf}")" < /dev/null > "${jf}" 2>"${WORK_DIR}/_codex-esc-${claim.id}.err"; echo "EXIT=$?"
 
 4. Parsing:
    - EXIT≠0 and ${jf}/.err contains "usage limit" / "quota" / "rate limit" / 429 → status="quota". Bash timeout (call interrupted) → status="timeout".
@@ -613,7 +670,7 @@ STYLE EXAMPLE (Read): ${PLUGIN_ROOT}/skills/research/examples/sample-report.md �
 shows tone, density and layout. The binding contract is the format spec below; adapt structure and length to the topic, do not copy the example's skeleton literally.
 
 CROSS-VERIFICATION LEDGER (live checking of claims; each has verdict, credibility 1-6, vote vector votes[] as "family:verdict" (one vote from the web family, one from the community family), familyVotes, leadFamily/leadVerdict for FAMILY-SPLIT, searchedVia (the platforms the verifiers actually searched), claimType, loadBearing, evidence spans, ceilingCapped — all evidence of the claim was lowered to MEDIUM by the snapshot gate, escalation when escalated). Statements are in English — translate them into Russian in the report, numbers verbatim:
-${JSON.stringify(ledger.map(c => ({ id: c.id, statement: c.statement, channels: c.channels, strength: c.strength, claimType: c.claimType, loadBearing: c.loadBearing, verdict: c.verdict, votes: c.votes, voteCount: c.voteCount, familyVotes: c.familyVotes || null, leadFamily: c.leadFamily || null, leadVerdict: c.leadVerdict || null, searchedVia: c.searchedVia || [], credibility: c.credibility, evidence: c.verifierEvidence, urls: c.urls, evidenceRefs: (c.evidence || []).map(e => e.prefix), weakEvidence: !!c.weakEvidence, evidenceless: !!c.evidenceless, ceilingCapped: !!c.ceilingCapped, escalation: c.escalation ? { status: c.escalation.status, confirmsExclusion: c.escalation.confirmsExclusion, reasoning: c.escalation.reasoning } : null, escalationSkipped: c.escalationSkipped || null })), null, 2)}
+${JSON.stringify(ledger.map(c => ({ id: c.id, statement: c.statement, channels: c.channels, strength: c.strength, claimType: c.claimType, importance: c.importance || null, loadBearing: c.loadBearing, verdict: c.verdict, votes: c.votes, voteCount: c.voteCount, familyVotes: c.familyVotes || null, leadFamily: c.leadFamily || null, leadVerdict: c.leadVerdict || null, searchedVia: c.searchedVia || [], credibility: c.credibility, evidence: c.verifierEvidence, urls: c.urls, evidenceRefs: (c.evidence || []).map(e => e.prefix), weakEvidence: !!c.weakEvidence, evidenceless: !!c.evidenceless, ceilingCapped: !!c.ceilingCapped, escalation: c.escalation ? { status: c.escalation.status, confirmsExclusion: c.escalation.confirmsExclusion, reasoning: c.escalation.reasoning } : null, escalationSkipped: c.escalationSkipped || null })), null, 2)}
 
 LEDGER SUMMARY: ${JSON.stringify(stats)}
 
@@ -759,17 +816,195 @@ async function withClassifierRetry(role, label, prompt, opts, fallbackOpts) {
 }
 const classifierSummary = () => ({ classifierRetries: classifierStops.filter(s => s.retried).length, classifierBlocked: classifierStops.filter(s => !s.recovered).length })
 
+// ═══ Pure helpers (2.9.0) ═══
+// No closures over run state: everything comes in as arguments. tools/test-core-v290.mjs slices the
+// block between the BEGIN/END markers out of this file and tests it directly — keep it self-contained.
+// BEGIN PURE HELPERS
+const STRENGTH_RANK = { STRONG: 3, MODERATE: 2, WEAK: 1 }
+const IMPORTANCE_RANK = { critical: 2, background: 1 }
+// A curator answer without `importance` (pre-2.9.0 shape) falls back to loadBearing → critical.
+function importanceOf(c) {
+  return c && (c.importance === 'critical' || c.importance === 'background') ? c.importance : (c && c.loadBearing ? 'critical' : 'background')
+}
+// Curator «as many as needed»: order load-bearing → critical → background (strength, then the
+// curator's own order inside a group) and keep the first `cap`. The cap is a cost guard, not a target.
+function selectClaims(all, cap) {
+  const ranked = (all || []).map((c, i) => ({ c, i })).sort((a, b) =>
+    (Number(!!b.c.loadBearing) - Number(!!a.c.loadBearing)) ||
+    (IMPORTANCE_RANK[importanceOf(b.c)] - IMPORTANCE_RANK[importanceOf(a.c)]) ||
+    ((STRENGTH_RANK[b.c.strength] || 0) - (STRENGTH_RANK[a.c.strength] || 0)) ||
+    (a.i - b.i)).map(x => x.c)
+  return { kept: ranked.slice(0, cap), dropped: ranked.slice(cap) }
+}
+// Curation counters for the log, ledgerSummary and synthMeta. droppedByCap = critical candidates the
+// curator itself left out over the ceiling + every claim the orchestrator cut at the cap.
+function curationStats(curated, kept, dropped) {
+  const num = v => (Number.isInteger(v) && v >= 0 ? v : null)
+  const crit = c => importanceOf(c) === 'critical'
+  const reported = { candidates: num(curated && curated.candidates), criticalTaken: num(curated && curated.criticalTaken), droppedByCap: num(curated && curated.droppedByCap) }
+  const returned = kept.length + dropped.length
+  const criticalTaken = kept.filter(crit).length
+  return {
+    candidates: Math.max(reported.candidates || 0, returned),
+    returned,
+    taken: kept.length,
+    criticalTaken,
+    backgroundTaken: kept.length - criticalTaken,
+    loadBearing: kept.filter(c => c && c.loadBearing).length,
+    droppedByCap: (reported.droppedByCap || 0) + dropped.length,
+    criticalDroppedByCap: (reported.droppedByCap || 0) + dropped.filter(crit).length,
+    curatorReported: reported,
+  }
+}
+// reuseStages: what a rerun on the same workDir may skip. probe = { files: [{path, exists, bytes}],
+// curated, ledger } from the reuse:probe agent; channelPaths = the files of the selected channels.
+// Cascade: verification is skipped only with a valid _ledger.json, the curator only with a valid
+// _curated.json, and both also need the channel files the earlier run used (recorded in the file).
+// Channels alone are skipped when every selected channel file exists and is non-empty.
+function reuseDecision(probe, channelPaths, queryTitle) {
+  const out = { channels: false, curator: false, verification: false, channelPaths: [], curated: null, ledger: null, notes: [] }
+  if (!probe || !Array.isArray(probe.files)) { out.notes.push('probe gave no answer — every stage runs'); return out }
+  const size = p => { const f = probe.files.find(x => x && x.path === p); return f && f.exists ? (Number(f.bytes) || 0) : 0 }
+  const missing = paths => paths.filter(p => !(size(p) > 0))
+  const sameQuery = d => !!d && typeof d === 'object' && d.queryTitle === queryTitle
+  const filesOf = d => (Array.isArray(d.files) && d.files.length ? d.files.map(String) : null)
+  const led = probe.ledger
+  if (led) {
+    const valid = Array.isArray(led.claimLedger) && led.ledgerSummary && typeof led.ledgerSummary === 'object' && led.claimLedger.length === led.ledgerSummary.total && filesOf(led)
+    if (!sameQuery(led)) out.notes.push('_ledger.json is from another query — not reused')
+    else if (!valid) out.notes.push('_ledger.json incomplete (claimLedger ≠ ledgerSummary.total or no files) — not reused')
+    else if (missing(filesOf(led)).length) out.notes.push(`_ledger.json found, but channel files are missing/empty: ${missing(filesOf(led)).join(', ')} — not reused`)
+    else return Object.assign(out, { channels: true, curator: true, verification: true, channelPaths: filesOf(led), ledger: led, curated: probe.curated || null })
+  }
+  const cur = probe.curated
+  if (cur) {
+    const valid = cur.curator && Array.isArray(cur.curator.claims) && cur.curator.claims.length > 0 && filesOf(cur)
+    if (!sameQuery(cur)) out.notes.push('_curated.json is from another query — not reused')
+    else if (!valid) out.notes.push('_curated.json has no claims or no files — not reused')
+    else if (missing(filesOf(cur)).length) out.notes.push(`_curated.json found, but channel files are missing/empty: ${missing(filesOf(cur)).join(', ')} — not reused`)
+    else return Object.assign(out, { channels: true, curator: true, channelPaths: filesOf(cur), curated: cur })
+  }
+  const absent = missing(channelPaths || [])
+  if (channelPaths && channelPaths.length && !absent.length) return Object.assign(out, { channels: true, channelPaths: channelPaths.slice() })
+  out.notes.push(`channel files missing/empty: ${absent.join(', ') || '—'} — channels run again`)
+  return out
+}
+// Language layers (2.9.0): a requested language whose regional layer is not among the channels.
+// Only reported — the skill decides whether to add the layer.
+const LANGUAGE_LAYER_OF = { ja: 'ja', zh: 'zh', ko: 'ko', uk: 'eu', pl: 'eu', de: 'eu', es: 'eu' }
+function missingLanguageLayers(languages, selected) {
+  const out = []
+  for (const l of (languages || [])) {
+    if (l === 'ru' || l === 'en') continue
+    const layer = LANGUAGE_LAYER_OF[l] || null
+    if (!layer || !(selected || []).includes(layer)) out.push({ lang: l, layer })
+  }
+  return out
+}
+// END PURE HELPERS
+
+// ── Ledger-on-disk technical prompts (2.9.0). The workflow runner has no filesystem: a light
+//    agent writes the JSON and, with reuseStages, reads the stage files back. ──
+function persistPrompt(path, obj) {
+  return `You are a technical executor. No role work, no reasoning — two steps:
+1. With Write save to ${path} VERBATIM the text between the markers <<<JSON and JSON>>> (byte for byte: do not reformat, shorten or "fix" anything).
+2. ONE Bash call: \`wc -c < "${path}"\` → return by the schema: path="${path}", bytes (the number; 0 if the file is missing).
+Do NOT spawn sub-agents.
+
+<<<JSON
+${JSON.stringify(obj, null, 1)}
+JSON>>>`
+}
+// Starts the write and returns its promise — the caller does not wait; finish() collects the
+// outcomes before returning. A failed write never fails the run.
+function persistJson(kind, path, obj) {
+  return (async () => {
+    try {
+      const r = await agent(persistPrompt(path, obj), w({ label: `persist:${kind}`, phase: kind === 'ledger' ? 'Synthesize' : 'Verify', schema: PERSIST_SCHEMA, effort: 'low' }))
+      if (!r || !(r.bytes > 0)) { log(`⚠ ${path}: файл не записан (${r ? 'bytes=0' : 'нет ответа'}) — повтор с reuseStages эту стадию не пропустит.`); return { kind, path, ok: false } }
+      return { kind, path, ok: true, bytes: r.bytes }
+    } catch (e) {
+      log(`⚠ ${path}: запись упала (${String((e && e.message) || e).slice(0, 200)}).`)
+      return { kind, path, ok: false }
+    }
+  })()
+}
+function reuseProbePrompt(paths) {
+  return `You are the technical executor of the reuse probe (reuseStages:true). No role work, do NOT modify any file.
+1. ONE Bash call:
+for f in ${paths.map(p => `"${p}"`).join(' ')}; do if [ -f "$f" ]; then printf '%s\\t%s\\n' "$f" "$(wc -c < "$f" | tr -d ' ')"; else printf '%s\\tMISSING\\n' "$f"; fi; done
+2. files — one entry per printed line: {path, exists, bytes} (MISSING → exists=false, bytes=0).
+3. If ${LEDGER_FILE} exists with bytes > 0: Read it IN FULL (Read with offset/limit in chunks of 1500 lines until the end) and return the parsed JSON object in \`ledger\` — every field and every array element exactly as in the file, nothing shortened or summarised. Otherwise ledger=null.
+4. The same for ${CURATED_FILE} → \`curated\`; otherwise curated=null.
+5. note — one line (what exists). Do NOT spawn sub-agents.`
+}
+function channelRestorePrompt(key) {
+  const c = ALL_CHANNELS[key]
+  const f = `${WORK_DIR}/${c.file}`
+  return `You are a technical executor restoring a finished channel result from disk (reuseStages:true). No searches, no role work, do NOT modify any file.
+Read ${f} in full (the ${c.source} channel file of an earlier run of this research) and return it by the schema:
+- source="${c.source}"; findings — the bullets of «## Key findings»; counterarguments — the bullets of «## Counterarguments…»;
+- citations — one per «### [${c.prefix}N] …» block: prefix "[${c.prefix}N]", url = **Source:**, context = **Context:**, relevance = **Relevance:** as written (HIGH/MEDIUM/LOW), quotes = the «…» spans after **Quotes:** verbatim («—» or none → []), reliability = the letter after **Admiralty:** (none → "F"), reliabilityWhy = the text after that letter;
+- snapshots — Glob "${WORK_DIR}/snapshots/*.md", keep only files named exactly ${c.prefix}<digits>.md (case-insensitive) → their paths;
+- sourceQuality — the overall level if «## Source assessment» states one; otherwise HIGH with ≥1 HIGH citation, MEDIUM with any citation, LOW with none;
+- startedAt/finishedAt from the "Started: … / Finished: …" line (missing → ""); fileWritten="${f}"; interrupted="none".
+Copy text verbatim; never add a citation that is not in the file. Do NOT spawn sub-agents.`
+}
+
 // ═══ Phase 1 — Fan-out ═══
 phase('Fan-out')
-log(`Запускаю ${SELECTED.length} канальных исследователей: ${SELECTED.join(', ')}; языки: ${LANGUAGES.join(', ')}; providers off: ${[...PROVIDERS_OFF].join(', ') || 'нет'}`)
+// Language layers (2.9.0): only a note — the skill decides whether to add the layer.
+const languageLayerGaps = missingLanguageLayers(LANGUAGES, SELECTED)
+for (const g of languageLayerGaps) {
+  log(g.layer
+    ? `ℹ Язык ${g.lang} запрошен, но слоя «${g.layer}» нет среди каналов — ядро его не добавляет (решает скилл).`
+    : `ℹ Язык ${g.lang} запрошен, языкового слоя для него нет — поиск на нём идёт только в общих каналах.`)
+}
+
+// ── reuseStages (2.9.0): a rerun on the same workDir skips the stages whose files are on disk ──
+let reuse = { channels: false, curator: false, verification: false, channelPaths: [], curated: null, ledger: null, notes: [] }
+if (REUSE_STAGES) {
+  const channelPaths = SELECTED.map(k => `${WORK_DIR}/${ALL_CHANNELS[k].file}`)
+  let probe = null
+  try {
+    probe = await agent(reuseProbePrompt([...channelPaths, CURATED_FILE, LEDGER_FILE]),
+      w({ label: 'reuse:probe', phase: 'Fan-out', schema: REUSE_PROBE_SCHEMA, effort: 'low' }))
+  } catch (e) {
+    log(`⚠ reuse:probe упал (${String((e && e.message) || e).slice(0, 200)}) — все стадии заново.`)
+  }
+  reuse = reuseDecision(probe, channelPaths, QUERY_TITLE)
+  log(`reuseStages: каналы — ${reuse.channels ? `из файлов (${reuse.channelPaths.length})` : 'заново'}; куратор — ${reuse.curator ? 'из _curated.json' : 'заново'}; проверка — ${reuse.verification ? 'из _ledger.json' : 'заново'}${reuse.notes.length ? `. ${reuse.notes.join('; ')}` : ''}`)
+}
+const reusedStages = REUSE_STAGES ? { channels: reuse.channels, curator: reuse.curator, verification: reuse.verification, notes: reuse.notes } : null
+const reusedOut = reusedStages ? { reusedStages } : {}
+const sourceSettingsOut = { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED }
+
+// Verification already on disk → straight to synthesis over the stored ledger.
+if (reuse.verification) {
+  const L = reuse.ledger
+  return await finish({
+    files: L.files, claimLedger: L.claimLedger, ledgerSummary: L.ledgerSummary, completeness: L.completeness || 'complete',
+    channelsAnswered: Number.isInteger(L.channelsAnswered) ? L.channelsAnswered : L.files.length,
+    channelStatus: L.channelStatus || [], failedChannels: L.failedChannels || [], answeredFamilies: L.answeredFamilies || [],
+    timing: L.timing || [], evidenceHealth: L.evidenceHealth || 'skipped', urlhealthSummary: L.urlhealthSummary || null,
+    snapshotGate: L.snapshotGate || null, escalationStats: L.escalationStats || null, curation: L.curation || null, writes: [],
+  })
+}
 
 const channelStops = {}
-const channelResults = (await parallel(SELECTED.map(key => async () => {
-  const { r, stop } = await withClassifierRetry('channel', key, channelPrompt(key),
-    w({ label: key, phase: 'Fan-out', schema: CHANNEL_SCHEMA }), opus48w({ phase: 'Fan-out', schema: CHANNEL_SCHEMA }))
-  if (stop) channelStops[key] = stop
-  return r ? Object.assign({ channelKey: key }, r) : null
-}))).filter(Boolean)
+const reuseKeys = reuse.channels ? SELECTED.filter(k => reuse.channelPaths.includes(`${WORK_DIR}/${ALL_CHANNELS[k].file}`)) : []
+const channelResults = reuse.channels
+  // channel files on disk → one light agent per file restores the channel schema (no searches)
+  ? (await parallel(reuseKeys.map(key => async () => {
+    const r = await agent(channelRestorePrompt(key), w({ label: `reuse:${key}`, phase: 'Fan-out', schema: CHANNEL_SCHEMA, effort: 'low' }))
+    return r ? Object.assign({ channelKey: key }, r) : null
+  }))).filter(Boolean)
+  : (await parallel(SELECTED.map(key => async () => {
+    const { r, stop } = await withClassifierRetry('channel', key, channelPrompt(key),
+      w({ label: key, phase: 'Fan-out', schema: CHANNEL_SCHEMA }), opus48w({ phase: 'Fan-out', schema: CHANNEL_SCHEMA }))
+    if (stop) channelStops[key] = stop
+    return r ? Object.assign({ channelKey: key }, r) : null
+  }))).filter(Boolean)
 
 const files = channelResults.map(r => r.fileWritten).filter(Boolean)
 // Channel success = non-LOW sourceQuality AND non-empty valid citations (with URLs).
@@ -844,7 +1079,7 @@ log(`Каналов успешно: ${okResults.length}/${SELECTED.length} (уп
 // one succeeded, there will be no triangulation. A deliberate web-only run (1 family) is fine.
 if (okResults.length < 2 || (selectedFamilies.length >= 2 && answeredFamilies.length < 2)) {
   log(`Недостаточно независимых источников (успешных каналов: ${okResults.length}, семей: ${answeredFamilies.length}) — отдаю что есть, без синтеза.`)
-  return { workDir: WORK_DIR, status: 'insufficient-sources', ledgerSchemaVersion: 5, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], classifierStops, sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED } }
+  return { workDir: WORK_DIR, status: 'insufficient-sources', ledgerSchemaVersion: 5, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], classifierStops, sourceSettings: sourceSettingsOut, ...reusedOut }
 }
 
 // ═══ Phase 2 — Verify (per-claim live counter-search) ═══
@@ -856,18 +1091,26 @@ phase('Verify')
 // write a report whose conclusions looked verified while nothing was checked.
 // 2.7.8: a classifier stop gets its one retry on Opus 4.8 (inside withClassifierRetry) instead of the
 // same-model retry below, which would most likely be stopped the same way.
-let { r: curated, stop: curatorStop } = await withClassifierRetry('curator', 'curator', curatorPrompt(files),
-  o({ label: 'curator', phase: 'Verify', schema: CURATOR_SCHEMA }), opus48w({ phase: 'Verify', schema: CURATOR_SCHEMA }))
-if (!curatorStop && (!curated || !Array.isArray(curated.claims) || !curated.claims.length)) {
-  log('Curator не вернул claims — один повтор.')
-  curated = await agent(curatorPrompt(files), o({ label: 'curator-retry', phase: 'Verify', schema: CURATOR_SCHEMA }))
+let curated = null
+let curatorStop = null
+if (reuse.curator) {
+  curated = reuse.curated.curator
+  log(`reuseStages: куратор не запускаю — ${curated.claims.length} claims из ${CURATED_FILE}.`)
+} else {
+  const first = await withClassifierRetry('curator', 'curator', curatorPrompt(files),
+    o({ label: 'curator', phase: 'Verify', schema: CURATOR_SCHEMA }), opus48w({ phase: 'Verify', schema: CURATOR_SCHEMA }))
+  curated = first.r
+  curatorStop = first.stop
+  if (!curatorStop && (!curated || !Array.isArray(curated.claims) || !curated.claims.length)) {
+    log('Curator не вернул claims — один повтор.')
+    curated = await agent(curatorPrompt(files), o({ label: 'curator-retry', phase: 'Verify', schema: CURATOR_SCHEMA }))
+  }
 }
 if (!curated || !Array.isArray(curated.claims) || !curated.claims.length) {
   log('⚠ Curator не вернул claims и после повтора — синтез не запускаю: отчёт без проверки выдал бы непроверенное за проверенное. Материалы каналов в workDir.')
-  return { workDir: WORK_DIR, status: 'curation-failed', ledgerSchemaVersion: 5, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], classifierStops, sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED } }
+  return { workDir: WORK_DIR, status: 'curation-failed', ledgerSchemaVersion: 5, languages: LANGUAGES, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, files, channelResults, claimLedger: [], classifierStops, sourceSettings: sourceSettingsOut, ...reusedOut }
 }
 
-const STRENGTH_RANK = { STRONG: 3, MODERATE: 2, WEAK: 1 }
 const NUMERIC_RE = /\d/
 const allClaims = curated.claims.map((c, i) => {
   const prefixes = Array.isArray(c.evidencePrefixes) ? c.evidencePrefixes.map(normPrefix).filter(Boolean) : []
@@ -876,13 +1119,27 @@ const allClaims = curated.claims.map((c, i) => {
   const evidenceless = evidence.length === 0
   let strength = c.strength || 'WEAK'
   if (evidenceless && strength === 'STRONG') strength = 'MODERATE'
-  return { ...c, id: c.id || `c${i + 1}`, strength, loadBearing: !!c.loadBearing, claimType: c.claimType === 'experiential' ? 'experiential' : 'factual', numeric: NUMERIC_RE.test(String(c.statement || '')), evidence, evidenceOrphans, evidenceless }
+  return { ...c, id: c.id || `c${i + 1}`, strength, importance: importanceOf(c), loadBearing: !!c.loadBearing, claimType: c.claimType === 'experiential' ? 'experiential' : 'factual', numeric: NUMERIC_RE.test(String(c.statement || '')), evidence, evidenceOrphans, evidenceless }
 })
-allClaims.sort((a, b) => (Number(b.loadBearing) - Number(a.loadBearing)) || ((STRENGTH_RANK[b.strength] || 0) - (STRENGTH_RANK[a.strength] || 0)))
-const claims = allClaims.slice(0, CLAIM_HARD_CAP)
-const claimsDroppedByCap = allClaims.length - claims.length
+// «As many as needed» (2.9.0): order load-bearing → critical → background, cut at the cost guard.
+const { kept: claims, dropped: cutClaims } = selectClaims(allClaims, CLAIM_HARD_CAP)
+const claimsDroppedByCap = cutClaims.length
+const curation = curationStats(curated, claims, cutClaims)
 const orphanTotal = claims.reduce((n, c) => n + c.evidenceOrphans.length, 0)
-log(`Куратор выделил ${allClaims.length} claims → на live-проверку ${claims.length} (кап ${CLAIM_HARD_CAP}, отброшено ${claimsDroppedByCap}); несущих: ${claims.filter(c => c.loadBearing).length}, experiential: ${claims.filter(c => c.claimType === 'experiential').length}, без evidence: ${claims.filter(c => c.evidenceless).length}, неизвестных префиксов: ${orphanTotal}`)
+log(`Куратор: кандидатов ${curation.candidates}, вернул ${allClaims.length} → на live-проверку ${claims.length} (потолок ${CLAIM_HARD_CAP}): критичных ${curation.criticalTaken}, фоновых ${curation.backgroundTaken}, несущих ${curation.loadBearing}; отброшено потолком ${curation.droppedByCap} (из них критичных ${curation.criticalDroppedByCap}); experiential: ${claims.filter(c => c.claimType === 'experiential').length}, без evidence: ${claims.filter(c => c.evidenceless).length}, неизвестных префиксов: ${orphanTotal}`)
+if (curation.criticalDroppedByCap > 0) log(`⚠ Потолок ${CLAIM_HARD_CAP} срезал ${curation.criticalDroppedByCap} критичных тезисов — они не проверены.`)
+if (curation.loadBearing > 8) log(`⚠ Несущих тезисов ${curation.loadBearing} (ожидается 3-8) — куратор, похоже, метит несущими почти всё.`)
+
+// _curated.json (2.9.0): the curator's own answer + what the orchestrator did with it. Written in the
+// background (the run does not wait); a rerun with reuseStages re-resolves the evidence from it.
+const writes = []
+if (!reuse.curator) {
+  writes.push(persistJson('curated', CURATED_FILE, {
+    kind: 'full-research-curated', version: 1, queryTitle: QUERY_TITLE, date: DATE, channelsSelected: SELECTED, files,
+    curator: { claims: curated.claims, candidates: curated.candidates, criticalTaken: curated.criticalTaken, droppedByCap: curated.droppedByCap },
+    curation,
+  }))
+}
 
 // ── urlhealth (A2): only the evidence URLs of the selected claims; a failure of the step does not fail the run ──
 let evidenceHealth = 'skipped'
@@ -1078,98 +1335,136 @@ const evidencelessN = claimLedger.filter(c => c.evidenceless).length
 const credVals = claimLedger.filter(c => c.verdict !== 'UNCHECKED' && c.verdict !== 'UNVERIFIED').map(c => c.credibility).sort((a, b) => a - b)
 const credibilityMedian = credVals.length ? (credVals.length % 2 ? credVals[(credVals.length - 1) / 2] : (credVals[credVals.length / 2 - 1] + credVals[credVals.length / 2]) / 2) : null
 const ceilingCappedN = claimLedger.filter(c => c.ceilingCapped).length
-const ledgerSummary = { total: claimLedger.length, confirmed, confirmedSplit, challenged, outdated, unchecked, disputed, familySplit, escalated: escalationStats.escalated, escalationSkipped: Object.values(escalationStats.skipped).reduce((a, b) => a + b, 0), weakEvidence, evidenceless: evidencelessN, ceilingCapped: ceilingCappedN, credibilityMedian, claimsDroppedByCap, votesLaunched: wave.votesLaunched, votesReturned: wave.votesReturned, votesLost: wave.votesLost, unverified: wave.unverified, ...classifierSummary() }
+const ledgerSummary = { total: claimLedger.length, confirmed, confirmedSplit, challenged, outdated, unchecked, disputed, familySplit, escalated: escalationStats.escalated, escalationSkipped: Object.values(escalationStats.skipped).reduce((a, b) => a + b, 0), weakEvidence, evidenceless: evidencelessN, ceilingCapped: ceilingCappedN, credibilityMedian, claimsDroppedByCap, votesLaunched: wave.votesLaunched, votesReturned: wave.votesReturned, votesLost: wave.votesLost, unverified: wave.unverified, curation, ...classifierSummary() }
 log(`Ledger v5: CONFIRMED=${confirmed} (split: ${confirmedSplit}), FAMILY-SPLIT=${familySplit}, DISPUTED=${disputed}, CHALLENGED=${challenged}, OUTDATED=${outdated}, UNCHECKED=${unchecked}; эскалаций ${escalationStats.escalated}, пропущено ${ledgerSummary.escalationSkipped}; weakEvidence=${weakEvidence}; ceilingCapped=${ceilingCappedN}; медиана credibility=${credibilityMedian}`)
 
+const snapshotGate = {
+  minChars: MIN_SNAPSHOT_CHARS,
+  llmMediatedChannels: [...LLM_MEDIATED_CHANNELS],
+  demotedTotal: Object.values(demotedBy).reduce((n, d) => n + sumDemoted(d), 0),
+  byReason: Object.values(demotedBy).reduce((acc, d) => { for (const k of Object.keys(d)) acc[k] = (acc[k] || 0) + d[k]; return acc }, { noSnapshot: 0, shortSnapshot: 0, llmMediated: 0, quoteNotFound: 0 }),
+  byChannel: demotedBy,
+  ceilingCapped: claimLedger.filter(c => c.ceilingCapped).length,
+}
+const timing = channelResults.map(r => ({ channel: r.channelKey, startedAt: r.startedAt || null, finishedAt: r.finishedAt || null }))
+
+// _ledger.json (2.9.0): the full verification stage — written in the background while the analyst runs.
+writes.push(persistJson('ledger', LEDGER_FILE, {
+  kind: 'full-research-ledger', version: 1, ledgerSchemaVersion: 5, queryTitle: QUERY_TITLE, date: DATE,
+  channelsSelected: SELECTED, files, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, timing,
+  completeness, claimLedger: claimLedger.map(({ rawVotes, ...c }) => c), ledgerSummary, escalationStats, snapshotGate,
+  evidenceHealth, urlhealthSummary, curation,
+}))
+
+return await finish({
+  files, claimLedger, ledgerSummary, completeness, channelsAnswered: channelResults.length, channelStatus, failedChannels,
+  answeredFamilies, timing, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, curation, writes,
+})
+
 // ═══ Phase 3 — Synthesize ═══
-phase('Synthesize')
+// A function (2.9.0): the normal path and the reuseStages path over a stored _ledger.json both end here.
+// x = { files, claimLedger, ledgerSummary, completeness, channelsAnswered, channelStatus, failedChannels,
+//       answeredFamilies, timing, evidenceHealth, urlhealthSummary, snapshotGate, escalationStats, curation, writes }
+async function finish(x) {
+  phase('Synthesize')
+  const { files, claimLedger, ledgerSummary, completeness } = x
+  // Background stage-file writes: their outcome goes into the result (stageFiles); never fails the run.
+  const settleWrites = async () => {
+    const done = (await Promise.all(x.writes || [])).filter(Boolean)
+    const ok = done.filter(d => d.ok).map(d => `${d.path} (${d.bytes} B)`)
+    if (ok.length) log(`Записано на диск: ${ok.join(', ')}`)
+    return done.length ? done : null
+  }
 
-// Options are assembled explicitly, NOT through o()/w(): a caller-supplied orchOpts.model would
-// survive the merge and beat the agent frontmatter (per-invocation model wins).
-const synthOpts = (label, agentType) => ({ label, phase: 'Synthesize', schema: ANALYST_SCHEMA, agentType })
+  // Options are assembled explicitly, NOT through o()/w(): a caller-supplied orchOpts.model would
+  // survive the merge and beat the agent frontmatter (per-invocation model wins).
+  const synthOpts = (label, agentType) => ({ label, phase: 'Synthesize', schema: ANALYST_SCHEMA, agentType })
 
-// Ledger out — without raw votes (rawVotes duplicate evidence/urls)
-const ledgerOut = claimLedger.map(({ rawVotes, ...c }) => c)
+  // Ledger out — without raw votes (rawVotes duplicate evidence/urls)
+  const ledgerOut = claimLedger.map(({ rawVotes, ...c }) => c)
 
-// 2.7.8: a null analyst (the usual shape of a classifier stop on synth-*) or interrupted=safety-classifier
-// → ONE retry on synth-opus48 (Opus 4.8, Read/Write/Glob) with ai_model claude-opus-4-8 in the prompt.
-const analystFor = model => analystPrompt(files, claimLedger, ledgerSummary, model || AI_MODEL)
-let { r: report, stop: analystStop, fromRetry: synthBy48 } = await withClassifierRetry('analyst',
-  FABLE_SYNTH ? 'analyst→fable' : 'analyst', analystFor,
-  synthOpts(FABLE_SYNTH ? 'analyst→fable' : 'analyst', SYNTH_AGENT), synthOpts(undefined, OPUS48_SYNTH.agentType))
+  // 2.7.8: a null analyst (the usual shape of a classifier stop on synth-*) or interrupted=safety-classifier
+  // → ONE retry on synth-opus48 (Opus 4.8, Read/Write/Glob) with ai_model claude-opus-4-8 in the prompt.
+  const analystFor = model => analystPrompt(files, claimLedger, ledgerSummary, model || AI_MODEL)
+  let { r: report, stop: analystStop, fromRetry: synthBy48 } = await withClassifierRetry('analyst',
+    FABLE_SYNTH ? 'analyst→fable' : 'analyst', analystFor,
+    synthOpts(FABLE_SYNTH ? 'analyst→fable' : 'analyst', SYNTH_AGENT), synthOpts(undefined, OPUS48_SYNTH.agentType))
 
-// Last resort, both branches: the OTHER synth-* role (synth-opus → synth-fable and back; both Opus 5.5
-// since 2.7.1, labels keep the old names) — only when Opus 4.8 gave nothing either or the retry cap
-// was spent: a null that is not a classifier stop (network drop, session limit) still gets a fresh try.
-// synthFellBack = this retry ran AND produced the report.
-let synthFellBack = false
-if (!report) {
-  log(`analyst (${SYNTH_FIRST.name}${analystStop && analystStop.retried ? `, затем ${OPUS48_SYNTH.name}` : ''}) вернул null — последняя попытка на ${SYNTH_RETRY.name}.`)
-  report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL_RETRY),
-    synthOpts(FABLE_SYNTH ? 'analyst→opus-retry' : 'analyst→fable-retry', SYNTH_RETRY.agentType))
-  synthFellBack = !!report
-}
-Object.assign(ledgerSummary, classifierSummary())
-if (!report) {
-  log(`Синтез не удался (${SYNTH_FIRST.name}${analystStop && analystStop.retried ? `, ${OPUS48_SYNTH.name}` : ''}, затем ${SYNTH_RETRY.name}). Материалы собраны, отчёт не написан.`)
-  return { workDir: WORK_DIR, status: 'synthesis-failed', completeness, claimLedger: ledgerOut, classifierStops, synthMeta: { ledgerSummary } }
-}
-// The model that actually wrote the report: Opus 4.8 after a classifier retry, the other synth-*
-// role after the last-resort retry, else the first one.
-const aiModelActual = synthBy48 ? OPUS48 : synthFellBack ? AI_MODEL_RETRY : AI_MODEL
+  // Last resort, both branches: the OTHER synth-* role (synth-opus → synth-fable and back; both Opus 5.5
+  // since 2.7.1, labels keep the old names) — only when Opus 4.8 gave nothing either or the retry cap
+  // was spent: a null that is not a classifier stop (network drop, session limit) still gets a fresh try.
+  // synthFellBack = this retry ran AND produced the report.
+  let synthFellBack = false
+  if (!report) {
+    log(`analyst (${SYNTH_FIRST.name}${analystStop && analystStop.retried ? `, затем ${OPUS48_SYNTH.name}` : ''}) вернул null — последняя попытка на ${SYNTH_RETRY.name}.`)
+    report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL_RETRY),
+      synthOpts(FABLE_SYNTH ? 'analyst→opus-retry' : 'analyst→fable-retry', SYNTH_RETRY.agentType))
+    synthFellBack = !!report
+  }
+  Object.assign(ledgerSummary, classifierSummary())
+  const stageFiles = await settleWrites()
+  const extra = Object.assign({}, reusedOut, stageFiles ? { stageFiles } : {})
+  if (!report) {
+    log(`Синтез не удался (${SYNTH_FIRST.name}${analystStop && analystStop.retried ? `, ${OPUS48_SYNTH.name}` : ''}, затем ${SYNTH_RETRY.name}). Материалы собраны, отчёт не написан.`)
+    return { workDir: WORK_DIR, status: 'synthesis-failed', completeness, claimLedger: ledgerOut, classifierStops, synthMeta: { ledgerSummary, curation: x.curation }, ...extra }
+  }
+  // The model that actually wrote the report: Opus 4.8 after a classifier retry, the other synth-*
+  // role after the last-resort retry, else the first one.
+  const aiModelActual = synthBy48 ? OPUS48 : synthFellBack ? AI_MODEL_RETRY : AI_MODEL
 
-return {
-  workDir: WORK_DIR,
-  status: 'ok',
-  // 'partial' = at least one verifier vote was lost (see waveStats); Phase C says so in the summary.
-  completeness,
-  // Version of the ledger/verdict schema: bump when VERIFY_SCHEMA/aggregation changes —
-  // telemetry segments the confirmed trends by this version (compare only within one).
-  // v2 (2026-08-15): UNCHECKED + vote vector + atomic curator + snapshots.
-  // v3 (2026-09-01): curator evidence prefixes + urlhealth + W2 lens + Codex escalation +
-  //   DISPUTED + numberVerbatim + 16-claim cap + snapshot gate in code.
-  // v4 (2026-09-05): per-citation snapshot gate (no-snapshot / llm-mediated / short-snapshot /
-  //   quote-not-found → MEDIUM ceiling), ceilingCapped, snapshotChars in evidence, snapshotGate.
-  // v5 (2026-09-17): one vote per macro-family (web / community) — verifier #1 same-family
-  //   refutation on the claim's own platform, #2 cross-type; votes[] as "family:verdict",
-  //   familyVotes/leadFamily/leadVerdict/searchedVia; CONFIRMED-vs-excluded across families →
-  //   FAMILY-SPLIT (no Codex), Codex only for a single exclusion against UNCHECKED.
-  ledgerSchemaVersion: 5,
-  languages: LANGUAGES,
-  channelsAnswered: channelResults.length,
-  channelsSelected: SELECTED,
-  // What the user's source settings did to this run (Phase C reports it; telemetry segments by it).
-  sourceSettings: { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED },
-  channelStatus,
-  failedChannels,
-  // 2.7.8: every safety-classifier stop of the run and what the Opus 4.8 retry did about it
-  classifierStops,
-  aiModelActual,
-  answeredFamilies,
-  timing: channelResults.map(r => ({ channel: r.channelKey, startedAt: r.startedAt || null, finishedAt: r.finishedAt || null })),
-  files,
-  claimLedger: ledgerOut,
-  evidenceHealth,
-  urlhealthSummary,
-  snapshotGate: {
-    minChars: MIN_SNAPSHOT_CHARS,
-    llmMediatedChannels: [...LLM_MEDIATED_CHANNELS],
-    demotedTotal: Object.values(demotedBy).reduce((n, d) => n + sumDemoted(d), 0),
-    byReason: Object.values(demotedBy).reduce((acc, d) => { for (const k of Object.keys(d)) acc[k] = (acc[k] || 0) + d[k]; return acc }, { noSnapshot: 0, shortSnapshot: 0, llmMediated: 0, quoteNotFound: 0 }),
-    byChannel: demotedBy,
-    ceilingCapped: claimLedger.filter(c => c.ceilingCapped).length,
-  },
-  escalationStats,
-  // draft.md, not report.md: CC 2.1.276+ blocks subagent Write to ^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$
-  reportPath: report.reportPath || `${WORK_DIR}/draft.md`,
-  queryRu: report.queryRu,
-  relatedCandidates: report.relatedCandidates || [],
-  synthMeta: {
-    mainConclusion: report.mainConclusion,
-    droppedClaims: report.droppedClaims || [],
-    disputedClaims: report.disputedClaims || [],
-    familySplitClaims: report.familySplitClaims || [],
-    gaps: report.gaps || [],
-    ledgerSummary,
-  },
+  return {
+    workDir: WORK_DIR,
+    status: 'ok',
+    // 'partial' = at least one verifier vote was lost (see waveStats); Phase C says so in the summary.
+    completeness,
+    // Version of the ledger/verdict schema: bump when VERIFY_SCHEMA/aggregation changes —
+    // telemetry segments the confirmed trends by this version (compare only within one).
+    // v2 (2026-08-15): UNCHECKED + vote vector + atomic curator + snapshots.
+    // v3 (2026-09-01): curator evidence prefixes + urlhealth + W2 lens + Codex escalation +
+    //   DISPUTED + numberVerbatim + 16-claim cap + snapshot gate in code.
+    // v4 (2026-09-05): per-citation snapshot gate (no-snapshot / llm-mediated / short-snapshot /
+    //   quote-not-found → MEDIUM ceiling), ceilingCapped, snapshotChars in evidence, snapshotGate.
+    // v5 (2026-09-17): one vote per macro-family (web / community) — verifier #1 same-family
+    //   refutation on the claim's own platform, #2 cross-type; votes[] as "family:verdict",
+    //   familyVotes/leadFamily/leadVerdict/searchedVia; CONFIRMED-vs-excluded across families →
+    //   FAMILY-SPLIT (no Codex), Codex only for a single exclusion against UNCHECKED.
+    // 2.9.0 keeps v5: the curator adds importance (critical/background) and the cap becomes 32 —
+    //   selection changed, verification and aggregation did not.
+    ledgerSchemaVersion: 5,
+    languages: LANGUAGES,
+    // Requested languages whose regional layer was not selected (2.9.0) — the skill decides.
+    languageLayerGaps,
+    channelsAnswered: x.channelsAnswered,
+    channelsSelected: SELECTED,
+    // What the user's source settings did to this run (Phase C reports it; telemetry segments by it).
+    sourceSettings: sourceSettingsOut,
+    channelStatus: x.channelStatus,
+    failedChannels: x.failedChannels,
+    // 2.7.8: every safety-classifier stop of the run and what the Opus 4.8 retry did about it
+    classifierStops,
+    aiModelActual,
+    answeredFamilies: x.answeredFamilies,
+    timing: x.timing,
+    files,
+    claimLedger: ledgerOut,
+    evidenceHealth: x.evidenceHealth,
+    urlhealthSummary: x.urlhealthSummary,
+    snapshotGate: x.snapshotGate,
+    escalationStats: x.escalationStats,
+    // draft.md, not report.md: CC 2.1.276+ blocks subagent Write to ^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$
+    reportPath: report.reportPath || `${WORK_DIR}/draft.md`,
+    queryRu: report.queryRu,
+    relatedCandidates: report.relatedCandidates || [],
+    synthMeta: {
+      mainConclusion: report.mainConclusion,
+      droppedClaims: report.droppedClaims || [],
+      disputedClaims: report.disputedClaims || [],
+      familySplitClaims: report.familySplitClaims || [],
+      gaps: report.gaps || [],
+      ledgerSummary,
+      // curator «as many as needed» (2.9.0): candidates, criticalTaken, droppedByCap, …
+      curation: x.curation,
+    },
+    ...extra,
+  }
 }
