@@ -441,6 +441,29 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
    Publish uses this property as the page URL, so a Cyrillic file name no longer turns into a long
    percent-encoded link.
 
+2c. **Citation pass (deterministic, before the vault write).** One Bash call on the draft from step 2:
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/research/scripts/citation-check.py" "{reportPath}" "{WORK_DIR}" --apply
+   ```
+   The script maps every badge `[prefix·Badge](URL)` to `{WORK_DIR}/snapshots/<prefix>.md`, checks
+   each quoted span («…», "…") of 3+ words verbatim against the snapshot of the badge cluster that
+   follows it (NFKC, quote and dash forms, whitespace, case; `…` and `[…]` split the span), and checks
+   numbers in the line the same way. `--apply` does two things and nothing else: appends the line
+   `Проверка цитат: N ссылок, M цитат сверено, K не найдено в снимке, L ссылок без снимка.` plus up
+   to 10 not-found quotes to the «Методология и проверка» callout, and appends
+   «(⚠ цитата не найдена в снимке)» to a conclusion line (above «📚 Контекст и находки») that has a
+   not-found quote. Re-running is idempotent. Exit code is always 0; an `error` output means skip
+   the step and say so in the final summary.
+   - **NEVER rewrite, replace or delete a citation or its text** because of this pass — auto-correction
+     replaced correct citations with wrong ones in practice (research «Формат отчёта для решения»,
+     r5/ss10). The pass only reports and marks.
+   - A quote in Russian against a foreign-language snapshot counts as «в переводе» — a string check
+     cannot verify it, so it is neither matched nor not-found. A source without a snapshot is
+     «без снимка», not «не найдено».
+   - `Контроль чекера: FAIL` (the built-in positive/negative control on a real snapshot of this run
+     failed) → the script leaves the draft untouched; do not trust the counts, report the failure.
+   - Show the summary line and the not-found list to the user in the final summary of the run.
+
 3. **Pre-write dedup.** Order from the shared contract: (1) MCP `qmd` `query` by payload
    (lex+vec over `relatedCandidates`, if the server is connected) → (2) deterministic
    `command grep -rIl "{key}" "{VAULT_RESEARCH_DIR}"` → (3) `obsidian search` only as a fallback
