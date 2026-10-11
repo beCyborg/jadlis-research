@@ -26,6 +26,10 @@ Exit: 0 ok (including found=0) · 2 no key (ENV `YC_SEARCH_API_KEY`) · 3 API er
 
 ## Protocol (4-6 async calls ≈ 0,10-0,15 ₽)
 
+Reality (telemetry v5, 72 runs, Fan-out phase, 13 agents): median 32 tool calls per agent. The live
+runs of 2026-09-19 made 7-13 Yandex queries (median 10); since 2026-09-21 the API answers 403/504 and
+the channel makes 5-8 calls, all failed. Median 475 s (p90 652 s).
+
 ### Layer 1 — Broad RU query (1-2 calls)
 
 ```bash

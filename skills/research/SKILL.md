@@ -1,6 +1,6 @@
 ---
 name: research
-description: "Full topic research: web (Brave, Codex, Grok) + communities (Reddit, X, HN, Substack, YouTube, Telegram) via workflow, per-claim verification → vault note. Triggers: full research, deep research, what do people think. RU triggers: полный ресерч, глубокий ресерч, все источники, в соцсетях, что говорят люди. Do NOT use for: web search → /search; papers → /search-paper; docs → Context7; settings → /jadlis-research:research-settings."
+description: "Full topic research: web (Brave, Exa, Codex) + communities (Reddit, X, HN, Substack, YouTube, Telegram) via workflow, per-claim verification → vault note. Triggers: full research, deep research, what do people think. RU triggers: полный ресерч, глубокий ресерч, все источники, в соцсетях, что говорят люди. Do NOT use for: web search → /search; papers → /search-paper; docs → Context7; settings → /jadlis-research:research-settings."
 allowed-tools:
   - Read
   - Write
@@ -363,7 +363,7 @@ platform actually searched). Web and communities disagree (CONFIRMED vs CHALLENG
 `FAMILY-SPLIT`: no Codex (a web tie-breaker would only side with the web), the lead family
 follows the claim type (factual → web, experiential → communities), credibility no better than 3,
 BOTH stories go to the report. A single exclusion against UNCHECKED → the third vote comes from
-Codex (GPT-6 Astra, live search; cap 8 escalations; `codexModel: "gpt-5.6-sol"` in args —
+Codex (GPT-6.1 Sol, live search; cap 8 escalations; `codexModel: "gpt-6-astra"` in args —
 rollback); an unconfirmed exclusion → `DISPUTED` (disputed, not part of the conclusions). Dropped claims are
 **filtered** (not merely annotated with criticism), then the analyst writes the draft report to
 `{WORK_DIR}/draft.md` (in Russian). Wait for the `<task-notification>` (then tick the Phase B line

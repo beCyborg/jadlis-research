@@ -7,9 +7,9 @@ marketing/sales, local topics (Warsaw) — per the SKILL.md tree, NOT default.
 
 | Tool | Purpose | Cost |
 |---|---|---|
-| `mcp__brave-search__brave_web_search` with `site:youtube.com` | Video discovery — PRIMARY | free (plan) |
-| `mcp__youtube__searchVideos` | Precise search via the YouTube API | **100 units/call out of the 10k/day quota — hard cap ≤3 calls/run** |
-| `mcp__youtube__getVideoDetails` | Metadata: views, date, channel | 1 unit — cheap |
+| `mcp__plugin_jadlis-search_brave-search__brave_web_search` with `site:youtube.com` | Video discovery — PRIMARY | free (plan) |
+| `mcp__plugin_jadlis-search_youtube__searchVideos` | Precise search via the YouTube API | **100 units/call out of the 10k/day quota — hard cap ≤3 calls/run** |
+| `mcp__plugin_jadlis-search_youtube__getVideoDetails` | Metadata: views, date, channel | 1 unit — cheap |
 | `{PLUGIN_ROOT}/scripts/yt-transcript.py` | FULL video transcript (wrapper: transcript-api → yt-dlp) | free; works over VPN too (verified 2026-08-26) |
 
 ## Protocol
@@ -29,7 +29,7 @@ first (native-term dictionary).
 
 Only if Brave returned no relevant videos (niche topic, very recent material):
 ```json
-mcp__youtube__searchVideos({ "query": "<TOPIC>", "maxResults": 10 })
+mcp__plugin_jadlis-search_youtube__searchVideos({ "query": "<TOPIC>", "maxResults": 10 })
 ```
 **Gate:** the youtube MCP comes up only when `YOUTUBE_API_KEY` is set (the plugin's userConfig).
 No key → Layer 2 is SKIPPED entirely, the channel runs on Brave + transcripts.
@@ -99,6 +99,9 @@ transcripts from dissenters.
   source drops to MEDIUM. A HIGH source without a snapshot → MEDIUM + `[no-snapshot: blocked]`.
 
 ## Budget: 6-12 calls (of which ≤3 — youtube API search)
+
+Reality (telemetry v5, 72 runs, Fan-out phase, 34 agents): median 35 tool calls per agent — Brave 11
+instead of 3-5, plus 4-12 calls to parse the wrapper's JSON. Median 487 s (p90 636 s).
 
 ## Fallback
 

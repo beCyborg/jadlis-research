@@ -24,7 +24,7 @@ own terms (`個人開発 収益`, `個人開発 売上 報告`, `月間売上`, 
 ```bash
 python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source qiita "<ja query>" --limit 20 --filter "<topic regex>"
 python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source hatena "<ja query>" --limit 20
-python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source zenn "<topic slug, e.g. 個人開発 → kojinkaihatsu or the Zenn topic id>" --limit 20
+python3 {PLUGIN_ROOT}/scripts/feed-fetch.py source zenn "<Zenn topic as written on zenn.dev/topics, e.g. 個人開発 or mcp; a romanised slug such as kojinkaihatsu → HTTP 404>" --limit 20
 ```
 Qiita: exactly ONE anchor query per run (60 req/h per IP is shared with everything else on this
 machine). Hatena: page 2 only if page 1 gave ≥5 relevant entries (`--page 2`). Zenn topic feeds
@@ -61,6 +61,8 @@ Output section: `## Counterarguments (found on Japan layer)`.
 - Not more than 3 citations from one author; mark translator/school posts as E.
 
 ## Budget: 8-12 calls
+
+Reality: no telemetry — the layer ran in 0 of 72 runs of schema v5 (2026-09-18 – 2026-10-11).
 
 ## Fallback
 

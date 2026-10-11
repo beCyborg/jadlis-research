@@ -59,6 +59,8 @@ Brave: `<zh query> 失败 OR 放弃 OR 亏损` (failure / gave up / loss); V2EX 
 
 ## Budget: 8-12 calls (Juejin ≤3)
 
+Reality: no telemetry — the layer ran in 0 of 72 runs of schema v5 (2026-09-18 – 2026-10-11).
+
 ## Fallback
 
 V2EX feed exit 2 → Brave `site:v2ex.com` in Chinese; nothing anywhere → `sourceQuality=LOW`.
