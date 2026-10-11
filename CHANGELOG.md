@@ -5,6 +5,10 @@
 
 ## [Unreleased]
 
+### For agents
+
+- Fixed: `tools/sync-shared.sh` no longer replaces `scripts/` wholesale — it copies jadlis-search's scripts over ours and lists the research-only ones it kept (`codex-home.sh`, `tg-channels.py`); the old version deleted them.
+
 ## [2.9.0] — 2026-10-12 — куратор «сколько нужно», ledger на диске, проход по цитатам, Codex GPT-6.1 Sol, протоколы по аудиту / curator takes what the decision needs, ledger on disk, citation pass, Codex GPT-6.1 Sol, protocols per the audit
 
 Основание: замеры плана «drifting-starlight» (сводка «Замеры jadlis-research — итоги 2026-10», аудит «Аудит канальных протоколов — 2026-10», ресёрчи «Формат отчёта для решения» и «Остановка поиска по насыщению»).

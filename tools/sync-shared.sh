@@ -9,8 +9,12 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 git clone -q --depth 1 --branch "$TAG" "$REPO" "$TMP"
 SHA="$(git -C "$TMP" rev-parse HEAD)"
-rm -rf "$ROOT/scripts"
-cp -R "$TMP/scripts" "$ROOT/scripts"
+# Copy search's scripts over ours WITHOUT deleting anything: scripts/ also holds research-only files
+# (codex-home.sh, tg-channels.py — the core and the protocols call them). A wholesale replace deleted them.
+mkdir -p "$ROOT/scripts"
+cp -R "$TMP/scripts/." "$ROOT/scripts/"
+extra=$(cd "$ROOT/scripts" && for f in *; do [ -e "$TMP/scripts/$f" ] || echo "$f"; done)
+[ -n "$extra" ] && echo "kept research-only scripts: $(echo $extra | tr '\n' ' ')"
 mkdir -p "$ROOT/shared"
 cp "$TMP/shared/obsidian-write-contract.md" "$ROOT/shared/obsidian-write-contract.md"
 printf 'jadlis-search %s %s\n' "$TAG" "$SHA" > "$ROOT/SHARED_FROM.txt"
