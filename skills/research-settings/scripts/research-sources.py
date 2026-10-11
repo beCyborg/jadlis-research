@@ -43,18 +43,36 @@ PLUGIN_ROOT = SCRIPT.parents[3]
 CATALOGUE_PATH = SCRIPT.parents[1] / "sources.json"
 SECRET_SH = PLUGIN_ROOT / "scripts" / "secret.sh"
 TWITTERAPI_SH = PLUGIN_ROOT / "scripts" / "twitterapi.sh"
+CODEX_HOME_SH = PLUGIN_ROOT / "scripts" / "codex-home.sh"
+YANDEX_SH = PLUGIN_ROOT / "scripts" / "yandex-search.sh"
 
 SETTINGS_NAME = "source-settings.json"
 CACHE_NAME = "probe-cache.json"
 LOCK_NAME = "source-settings.lock"
 DATA_DIR_LEAF = "jadlis-research-jadlis"
 
-PROBE_TTL = {"grok-402": 6 * 3600, "codex-quota": 2 * 3600, "twitterapi-balance": 3600}
+PROBE_TTL = {"grok-402": 6 * 3600, "codex-quota": 2 * 3600, "twitterapi-balance": 3600,
+             "yandex-access": 2 * 3600}
 GLOBAL_DEADLINE = 90.0
 KEY_TIMEOUT = 15
 GROK_TIMEOUT = 40
-CODEX_TIMEOUT = 60
+CODEX_TIMEOUT = 80
+CODEX_HOME_TIMEOUT = 15
 TWITTERAPI_TIMEOUT = 30
+YANDEX_TIMEOUT = 30
+
+# The probe uses the same model, tier, isolated home and live-search pin as the codexweb channel,
+# so a dead web-search tool (e.g. the code-mode host failure, exit 0 with no search) fails the probe.
+CODEX_PROBE_MODEL = "gpt-6.1-sol"
+CODEX_PROBE_PROMPT = (
+    'Run exactly one live web search for "Codex CLI release notes" and reply with the title of '
+    "the first result only. Do not answer from memory."
+)
+CODEX_HOST_FAIL = "timed out negotiating with the code-mode host"
+YANDEX_403_DETAIL = "403 PermissionDenied: у сервисного аккаунта нет роли search-api.webSearch.user"
+YANDEX_501_DETAIL = "501 unknown service: API не принимает async-поиск (WebSearchAsyncService), канал работает только через него"
+TELEGRAM_STARS_OPTION = "telegram-stars"
+OPTIONS = {TELEGRAM_STARS_OPTION: ("free", "paid")}  # first value = default
 
 START = time.monotonic()
 _PENDING_THREADS = False
@@ -71,6 +89,7 @@ ACCESS_RU = {
     "no-binary": "нет бинарника",
     "down": "нет баланса",
     "quota": "квота",
+    "fail": "поиск не работает",
     "unknown": "неизвестно",
     "n/a": "—",
 }
@@ -79,7 +98,7 @@ STATE_RU = {
     "disabled-by-settings": "выключено в настройках",
     "no-access": "нет доступа",
 }
-BAD_ACCESS = ("no-key", "no-binary", "down", "quota")
+BAD_ACCESS = ("no-key", "no-binary", "down", "quota", "fail")
 
 GROK_OFF_NOTE = (
     "{cause}. Do NOT run ~/.grok/bin/grok, do NOT load mcp__grok-mcp__* or "
@@ -181,7 +200,7 @@ def resolve_data_dir(arg):
 
 
 def default_settings():
-    return {"version": 1, "updated": None, "providers": {}, "channels": {}}
+    return {"version": 1, "updated": None, "providers": {}, "channels": {}, "options": {}}
 
 
 def load_catalogue():
@@ -223,6 +242,11 @@ def load_settings(data_dir):
             for name, state in block.items():
                 if state in ("auto", "off"):
                     settings[section][str(name)] = state
+    options = data.get("options")
+    if isinstance(options, dict):
+        for name, value in options.items():
+            if name in OPTIONS and value in OPTIONS[name]:
+                settings["options"][name] = value
     settings["updated"] = data.get("updated")
     return settings, False
 
@@ -411,40 +435,190 @@ def probe_grok():
     return _result("ok", "exit %s" % proc.returncode)
 
 
+def codex_home():
+    """→ (path, error). Runs scripts/codex-home.sh — the isolated CODEX_HOME of the research channel."""
+    if not CODEX_HOME_SH.exists():
+        return None, "codex-home.sh not found"
+    try:
+        proc = subprocess.run(
+            ["bash", str(CODEX_HOME_SH)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=budget(CODEX_HOME_TIMEOUT),
+        )
+    except subprocess.TimeoutExpired:
+        return None, "codex-home.sh timeout"
+    except OSError as exc:
+        return None, trim(exc, 60)
+    path = first_line(proc.stdout.decode("utf-8", "replace"))
+    if proc.returncode != 0 or not path:
+        err = first_line(proc.stderr.decode("utf-8", "replace"))
+        return None, "codex-home.sh exit %s: %s" % (proc.returncode, trim(err, 80))
+    return path, ""
+
+
+def codex_probe_cmd(binary):
+    return [
+        binary, "exec", "-m", CODEX_PROBE_MODEL, "-s", "read-only", "--skip-git-repo-check",
+        "-c", 'model_reasoning_effort="low"', "-c", 'service_tier="priority"',
+        "-c", 'tools.web_search={mode="live"}', "--json", CODEX_PROBE_PROMPT,
+    ]
+
+
+def count_web_search(stdout_text):
+    """Completed web_search items in `codex exec --json` output.
+
+    Falls back to the channel's own gate (lines containing `"web_search`) when the event shape
+    is not the expected one, so a renamed event type does not read as "no search".
+    """
+    completed = 0
+    loose = 0
+    for line in str(stdout_text or "").splitlines():
+        if '"web_search' not in line:
+            continue
+        loose += 1
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        item = event.get("item") if isinstance(event, dict) else None
+        if event.get("type") == "item.completed" and isinstance(item, dict) \
+                and item.get("type") == "web_search":
+            completed += 1
+    return completed if completed else loose
+
+
+def codex_error_text(stdout_text):
+    """Error messages carried by `error` / `turn.failed` events of the JSONL stream."""
+    parts = []
+    for line in str(stdout_text or "").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or event.get("type") not in ("error", "turn.failed"):
+            continue
+        msg = event.get("message")
+        if not msg and isinstance(event.get("error"), dict):
+            msg = event["error"].get("message")
+        if msg:
+            parts.append(str(msg))
+    return "\n".join(parts)
+
+
+def classify_codex(returncode, stdout_text, stderr_text, elapsed, timed_out=False):
+    """Pure verdict of the Codex probe → (state, detail). Unit-tested."""
+    errors = codex_error_text(stdout_text)
+    if CODEX_HOST_FAIL in stderr_text or CODEX_HOST_FAIL in errors:
+        return "fail", "веб-поиск Codex не работает: %s" % CODEX_HOST_FAIL
+    diag = stderr_text + "\n" + errors
+    if CODEX_QUOTA_RE.search(diag):
+        line = ""
+        for candidate in diag.splitlines():
+            if CODEX_QUOTA_RE.search(candidate):
+                line = candidate.strip()
+                break
+        return "quota", line or "usage limit"
+    if timed_out:
+        return "unknown", "timeout %.0fs" % elapsed
+    searches = count_web_search(stdout_text)
+    if returncode == 0 and searches >= 1:
+        return "ok", "exit 0, %d web_search, %.1fs" % (searches, elapsed)
+    if returncode == 0:
+        return "fail", "0 событий web_search — Codex ответил без живого поиска"
+    head = first_line(errors) or first_line(stderr_text)
+    return "unknown", "exit %s: %s" % (returncode, trim(head, 60))
+
+
 def probe_codex():
     binary = shutil.which("codex")
     if not binary:
         return _result("no-binary", "бинарник codex не найден")
-    cmd = [
-        binary, "exec", "-m", "gpt-6-astra", "-s", "read-only",
-        "--skip-git-repo-check", "-c", 'service_tier="default"', "ok",
-    ]
+    home, err = codex_home()
+    if not home:
+        state = "no-key" if "auth.json" in err else "unknown"
+        return _result(state, err)
+    env = os.environ.copy()
+    env["CODEX_HOME"] = home
     started = time.monotonic()
     codex_timeout = budget(CODEX_TIMEOUT)
     try:
         proc = subprocess.run(
-            cmd,
-            stdin=subprocess.DEVNULL,
+            codex_probe_cmd(binary),
+            stdin=subprocess.DEVNULL,  # codex exec waits for stdin EOF otherwise
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             timeout=codex_timeout,
+            env=env,
         )
-    except subprocess.TimeoutExpired:
-        return _result("unknown", "timeout %.0fs" % codex_timeout)
+    except subprocess.TimeoutExpired as exc:
+        out = (exc.stdout or b"").decode("utf-8", "replace")
+        err_text = (exc.stderr or b"").decode("utf-8", "replace")
+        state, detail = classify_codex(None, out, err_text, codex_timeout, timed_out=True)
+        return _result(state, detail)
     except OSError as exc:
         return _result("unknown", trim(exc, 60))
-    text = proc.stdout.decode("utf-8", "replace")
     elapsed = time.monotonic() - started
-    if CODEX_QUOTA_RE.search(text):
-        line = ""
-        for candidate in text.splitlines():
-            if CODEX_QUOTA_RE.search(candidate):
-                line = candidate.strip()
-                break
-        return _result("quota", line or "usage limit")
-    if proc.returncode == 0:
-        return _result("ok", "exit 0, %.1fs" % elapsed)
-    return _result("unknown", "exit %s: %s" % (proc.returncode, trim(first_line(text), 60)))
+    state, detail = classify_codex(
+        proc.returncode,
+        proc.stdout.decode("utf-8", "replace"),
+        proc.stderr.decode("utf-8", "replace"),
+        elapsed,
+    )
+    return _result(state, detail)
+
+
+def classify_yandex(returncode, stdout_text, stderr_text):
+    """Pure verdict of the Yandex probe → (state, detail). Never echoes the key."""
+    blob = "%s\n%s" % (stdout_text, stderr_text)
+    if returncode == 0 and "operation_id=" in stdout_text:
+        return "ok", "async submit принят"
+    if returncode == 2:
+        return "no-key", "ключ YC_SEARCH_API_KEY не заведён"
+    if re.search(r"HTTP 403\b", blob) or "PermissionDenied" in blob:
+        return "fail", YANDEX_403_DETAIL
+    if re.search(r"HTTP 401\b", blob):
+        return "fail", "401 Unauthorized: ключ YC_SEARCH_API_KEY отклонён"
+    if re.search(r"HTTP 501\b", blob) or "unknown service" in blob:
+        return "fail", YANDEX_501_DETAIL
+    if returncode == 0:
+        return "unknown", "exit 0 без operation_id"
+    head = ""
+    for line in stderr_text.splitlines():
+        if line.startswith("[error]"):
+            head = line
+            break
+    return "unknown", "exit %s: %s" % (returncode, trim(head or first_line(blob), 60))
+
+
+def probe_yandex():
+    """One async submit without polling: 0.0305 ₽ when it is accepted, auth errors are not billed."""
+    if check_key("YC_SEARCH_API_KEY").get("state") == "no-key":
+        res = _result("no-key", "ключ YC_SEARCH_API_KEY не заведён")
+        res["checked"] = None  # not cached: a key added later must be probed at once
+        return res
+    if not YANDEX_SH.exists():
+        return _result("unknown", "yandex-search.sh not found")
+    ya_timeout = budget(YANDEX_TIMEOUT)
+    try:
+        proc = subprocess.run(
+            ["bash", str(YANDEX_SH), "тест", "--no-wait", "--num", "1", "--no-log"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=ya_timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return _result("unknown", "timeout %.0fs" % ya_timeout)
+    except OSError as exc:
+        return _result("unknown", trim(exc, 60))
+    state, detail = classify_yandex(
+        proc.returncode,
+        proc.stdout.decode("utf-8", "replace"),
+        proc.stderr.decode("utf-8", "replace"),
+    )
+    return _result(state, detail)
 
 
 def _find_credits(obj):
@@ -509,6 +683,7 @@ PROBE_FUNCS = {
     "grok-402": probe_grok,
     "codex-quota": probe_codex,
     "twitterapi-balance": probe_twitterapi,
+    "yandex-access": probe_yandex,
 }
 
 
@@ -586,6 +761,26 @@ def plan_probes(wanted, cache, mode):
     return to_run, resolved
 
 
+TELEGRAM_FREE_NOTE = (
+    "STARS: FREE SLOTS ONLY (source settings, telegram-stars=free). Never pass --pay-stars and never "
+    "pay Stars this run, whatever the protocol's Stars budget says. Paid `posts -q` phrases run only "
+    "while `limits` shows free slots (remains > 0); exit 4 (no free slots) or BALANCE_TOO_LOW → stop "
+    "global post search for this run and continue with the free commands (csearch, comments, chats, "
+    "similar, read, hashtag). Record in the channel file how many phrases used free slots."
+)
+
+
+def yandex_verdict(probes):
+    """→ (drop_detail or None, warning or None) from the yandex-access probe."""
+    res = probes.get("yandex-access") or {}
+    if res.get("state") == "fail":
+        return res.get("detail") or YANDEX_403_DETAIL, None
+    if res.get("state") == "unknown" and res.get("detail") not in (None, "", "not probed"):
+        return None, ("yandex: проверка доступа не дала ответа (%s) — канал оставлен"
+                      % trim(res.get("detail"), 60))
+    return None, None
+
+
 # ── state assembly ───────────────────────────────────────────────────────────
 def provider_info(name, pdef, settings, probes):
     setting = settings["providers"].get(name, "auto")
@@ -640,7 +835,7 @@ def telegram_mode():
     return "превью t.me + Brave (нет сессии tgsearch.py)"
 
 
-def channel_access(key, cdef, settings, keys, providers):
+def channel_access(key, cdef, settings, keys, providers, probes=None):
     """→ (access, detail). Channel-level view used by both status and resolve."""
     if settings["channels"].get(key, "auto") == "off":
         return "n/a", "выключен в настройках"
@@ -665,14 +860,20 @@ def channel_access(key, cdef, settings, keys, providers):
     for req in cdef.get("requires", []) or []:
         if req.get("drop_without_key") and keys.get(req["key"], {}).get("state") == "no-key":
             return "no-key", "нет %s" % req["key"]
+    if key == "yandex" and probes:
+        drop, _ = yandex_verdict(probes)
+        if drop:
+            return "fail", drop
     return "ok", ""
 
 
 def how_to_get_for_channel(catalogue, key, cdef, access, keys, providers):
     if access == "no-binary" and cdef.get("provider"):
         return catalogue["providers"][cdef["provider"]].get("how_to_get", "")
-    if access in ("down", "quota") and cdef.get("provider"):
+    if access in ("down", "quota", "fail") and cdef.get("provider"):
         return catalogue["providers"][cdef["provider"]].get("how_to_get", "")
+    if access == "fail" and key == "yandex":
+        return catalogue["keys"].get("YC_SEARCH_API_KEY", {}).get("how_to_get", "")
     if access == "no-key":
         for req in cdef.get("requires", []) or []:
             if keys.get(req["key"], {}).get("state") == "no-key":
@@ -720,6 +921,8 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
             wanted_probes.add(pdef["probe"])
     if "twitter" in requested:
         wanted_probes.add("twitterapi-balance")
+    if "yandex" in requested and settings["channels"].get("yandex", "auto") != "off":
+        wanted_probes.add("yandex-access")
 
     cache = load_cache(data_dir)
     to_run, resolved = plan_probes(wanted_probes, cache, mode)
@@ -822,6 +1025,16 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
                 )
             continue
 
+        # 4b. yandex liveness: a key without the search role answers 403 on every call
+        if key == "yandex":
+            drop, warn = yandex_verdict(probes)
+            if drop:
+                dropped.append({"channel": key, "reason": "no-access", "detail": drop})
+                state[key] = "no-access"
+                continue
+            if warn:
+                warnings.append(warn)
+
         kept.append(key)
         state[key] = "ok"
 
@@ -839,6 +1052,8 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
                 "(mcp__plugin_jadlis-search_reddit-alt__*) is unavailable — use the standard "
                 "Reddit MCP only and do not retry through the alt server."
             )
+        if key == "telegram" and settings["options"].get(TELEGRAM_STARS_OPTION, "free") == "free":
+            notes[key] = TELEGRAM_FREE_NOTE
         if key == "eu" and keys.get("WYKOP_API_KEY", {}).get("state") != "present":
             notes[key] = (
                 "No WYKOP_API_KEY: feed-fetch.py returns exit 3 for the wykop source — cover "
@@ -952,6 +1167,11 @@ def cmd_status(args, catalogue, data_dir, settings, corrupt):
 
     cache = load_cache(data_dir)
     to_run, resolved = plan_probes(wanted_probes, cache, mode)
+    # the Yandex probe is a billed submit: status shows the cached verdict, runs it only with --probe
+    if settings["channels"].get("yandex", "auto") != "off":
+        ya_run, ya_resolved = plan_probes({"yandex-access"}, cache, "force" if args.probe else "never")
+        to_run |= ya_run
+        resolved.update(ya_resolved)
 
     keys_wanted = needed_keys(catalogue)
     for ldef in catalogue["layers"].values():
@@ -969,7 +1189,7 @@ def cmd_status(args, catalogue, data_dir, settings, corrupt):
 
     channels = {}
     for key, cdef in catalogue["channels"].items():
-        access, detail = channel_access(key, cdef, settings, keys, providers)
+        access, detail = channel_access(key, cdef, settings, keys, providers, probes)
         channels[key] = {
             "setting": settings["channels"].get(key, "auto"),
             "access": access,
@@ -1049,7 +1269,7 @@ def cmd_status(args, catalogue, data_dir, settings, corrupt):
     payload = {
         "data_dir": str(data_dir),
         "settings": {"providers": settings["providers"], "channels": settings["channels"],
-                     "updated": settings.get("updated")},
+                     "options": settings["options"], "updated": settings.get("updated")},
         "providers": providers,
         "channels": channels,
         "layers": layers,
@@ -1137,6 +1357,10 @@ def cmd_status(args, catalogue, data_dir, settings, corrupt):
                 item["kind"], item["name"], ACCESS_RU.get(item["access"], item["access"]),
                 detail, item["how_to_get"] or "см. /jadlis-search:keys"))
         print("")
+    stars = settings["options"].get(TELEGRAM_STARS_OPTION, OPTIONS[TELEGRAM_STARS_OPTION][0])
+    print("Telegram Stars: %s (telegram-stars=%s)" % (
+        "только бесплатные слоты" if stars == "free" else "ресерч может платить Stars", stars))
+    print("")
     for warning in warnings:
         print("! %s" % warning)
     if warnings:
@@ -1150,6 +1374,8 @@ def cmd_set(args, catalogue, data_dir, settings, corrupt):
     kind = args.kind
     name = args.name
     state = args.state
+    if kind == "option":
+        return set_option(args, data_dir, corrupt)
     if state not in ("auto", "off"):
         sys.stderr.write("unknown state %r (expected auto|off)\n" % state)
         finish(EXIT_USAGE)
@@ -1181,6 +1407,37 @@ def cmd_set(args, catalogue, data_dir, settings, corrupt):
         else:
             print("%s «%s» (%s) → auto: доступ решает probe на каждом прогоне."
                   % ("Провайдер" if kind == "provider" else "Канал", label, name))
+        if corrupt:
+            print("! файл настроек был повреждён, бэкап *.bad, остальные переопределения сброшены")
+    return EXIT_SETTINGS if corrupt else EXIT_OK
+
+
+def set_option(args, data_dir, corrupt):
+    name, value = args.name, args.state
+    if name not in OPTIONS:
+        sys.stderr.write("unknown option %r (known: %s)\n" % (name, ", ".join(sorted(OPTIONS))))
+        finish(EXIT_USAGE)
+    if value not in OPTIONS[name]:
+        sys.stderr.write("unknown value %r for %s (expected %s)\n" % (value, name, "|".join(OPTIONS[name])))
+        finish(EXIT_USAGE)
+
+    def mutate(current):
+        current.setdefault("options", {})
+        if value == OPTIONS[name][0]:
+            current["options"].pop(name, None)
+        else:
+            current["options"][name] = value
+
+    corrupt = update_settings(data_dir, mutate) or corrupt
+    if args.as_json:
+        out_json({"ok": True, "kind": "option", "name": name, "state": value,
+                  "data_dir": str(data_dir), "settings_corrupt": bool(corrupt)})
+    else:
+        print("data dir: %s" % data_dir)
+        if name == TELEGRAM_STARS_OPTION and value == "free":
+            print("Telegram: только бесплатные слоты поиска, Stars ресерч не тратит.")
+        elif name == TELEGRAM_STARS_OPTION:
+            print("Telegram: ресерч может платить Stars по бюджету протокола (≤ 60 Stars за прогон).")
         if corrupt:
             print("! файл настроек был повреждён, бэкап *.bad, остальные переопределения сброшены")
     return EXIT_SETTINGS if corrupt else EXIT_OK
@@ -1246,8 +1503,8 @@ def build_parser():
     resolve.add_argument("--table", action="store_true")
     add_common(resolve)
 
-    setter = sub.add_parser("set", help="set provider|channel <name> <auto|off>")
-    setter.add_argument("kind", choices=["provider", "channel"])
+    setter = sub.add_parser("set", help="set provider|channel <name> <auto|off> | set option telegram-stars free|paid")
+    setter.add_argument("kind", choices=["provider", "channel", "option"])
     setter.add_argument("name")
     setter.add_argument("state")
     add_common(setter)
