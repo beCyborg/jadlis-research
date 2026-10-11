@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+## [2.8.0] — 2026-10-12 — интейк с брифом и подвопросами / intake brief with sub-questions
+
+### Для человека
+
+- Каналы получают не пересказ вопроса в 1–3 предложения, а бриф: твой вопрос дословно, список условий (C1…), 2–5 независимых подвопросов (S1…) с привязкой к условиям и 1–3 рабочие гипотезы с тем, что их опровергнет. Раньше условия вопроса терялись при пересказе.
+- На шаге запуска ты видишь подвопросы и условия и можешь их поправить.
+- Уточняющие вопросы интервью приходят одной пачкой.
+- Основание — ресёрч «Интейк с подвопросами» (2026-10-11). Выигрыш измерен в литературе только для частей интейка (+6…8 пунктов полноты из 100); на своём пайплайне сравнение не проводилось — владелец решил внедрить без замера.
+
+### For agents
+
+- Changed: `skills/research/SKILL.md` step 4 — one AskUserQuestion batch; `REFINED_QUERY` is now a brief (ВОПРОС (дословно) / УСЛОВИЯ / ПОДВОПРОСЫ / ГИПОТЕЗЫ / ВОЗВРАТ, English labels for an English query, ≤1800 chars); step 7 gate shows the sub-questions and conditions.
+- Changed: `workflows/full-research-core.js` — channel file headers use `QUERY_TITLE` (first line of the brief without its label, quotes replaced) instead of the whole multi-line `QUERY`; every prompt still receives the full brief.
+- Changed: version 2.7.9 → 2.8.0.
+
 ## [2.7.9] — 2026-10-08 — репозиторий переехал на GitLab / repository moved to GitLab
 
 ### Для человека

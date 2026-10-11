@@ -55,6 +55,8 @@ if (!DRY_RUN) {
 }
 
 const QUERY = A.refinedQuery || 'Compare local AI coding assistants in 2026: privacy vs capability'
+// The intake brief (2.8.0) is multi-line; file headers take its first meaningful line only.
+const QUERY_TITLE = (String(QUERY).split('\n').map(l => l.trim()).find(Boolean) || '').replace(/^(ВОПРОС \(дословно\)|QUESTION \(verbatim\)):\s*/i, '').replace(/"/g, "'").slice(0, 200)
 const DECISION = A.decisionContext || ''
 const DATE = A.date || 'DRYRUN-DATE'
 const WORK_DIR = A.workDir || '.full-research/dryrun'
@@ -405,7 +407,7 @@ BEFORE the first search run Bash \`date '+%Y-%m-%d %H:%M:%S'\` → this is start
 
 SAVING:
 With Write save the result to ${WORK_DIR}/${c.file} in this format:
-# ${c.source} — results for "${QUERY}"
+# ${c.source} — results for "${QUERY_TITLE}"
 Started: {startedAt} / Finished: {finishedAt}
 ## Key findings
 ## Citations

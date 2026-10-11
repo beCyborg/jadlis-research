@@ -195,15 +195,40 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
    **Substack handle extraction:** if "substack" is among the channels — parse URLs of the form
    `<handle>.substack.com` from the Brave results → the array `SUBSTACK_HANDLES`.
 
-4. **Interview (ALWAYS, no skip).** Through AskUserQuestion, in Russian:
+4. **Interview (ALWAYS, no skip).** ONE AskUserQuestion call (all questions in one batch, one dimension per
+   question — a single question gets «не знаю» far more often than two or three), in Russian:
    - Mandatory first question: «Какое решение ты будешь принимать на основе этого ресёрча?» —
      form the hypothesis options from the recon. The answer → `DECISION_CONTEXT` (1-2 sentences:
      what the person will do/choose based on the result).
    - 1-3 more questions based on the recon: which aspect matters; context/use case; time
      horizon/recency. If the query is already narrow these may be skipped, but the decision
      question is always asked.
-   Form `REFINED_QUERY` (1-3 sentences). Language of REFINED_QUERY: the language of the user's
-   query (usually Russian) — the channel agents receive it as is and search in `LANGUAGES`.
+   Form `REFINED_QUERY` as a **brief** (plugin 2.8.0; research «Интейк с подвопросами», 2026-10-11:
+   a sub-agent sees only its task text, so a 1-3 sentence retelling drops the question's conditions).
+   Every channel, the curator, the verifiers and the analyst receive the whole brief as is. Write it in
+   the language of the user's query (usually Russian; the core detects the language from this text, so
+   the labels follow the query language too), ≤1800 characters, exactly these parts:
+
+   ```
+   ВОПРОС (дословно): <the user's question word for word, typos fixed only — never "improved">
+   УСЛОВИЯ:
+   C1. <a condition or constraint stated or implied by the question and the interview: scope,
+       jurisdiction, time, who acts, budget, what is already decided>
+   C2. …
+   ПОДВОПРОСЫ:
+   S1. <an independent main sub-question, answerable on its own> [C1, C3]
+   S2. …
+   ГИПОТЕЗЫ:
+   H1. <a working hypothesis> — опровергнет: <what evidence would refute it>
+   ВОЗВРАТ: помечай каждую находку id подвопроса, на который она отвечает ([S1] … или [other]).
+   ```
+   (English query → the same parts with the labels QUESTION (verbatim) / CONDITIONS / SUB-QUESTIONS /
+   HYPOTHESES / RETURN.) Rules: as many sub-questions as the question needs (2-5) — never pad to a fixed
+   number; sub-questions must not depend on each other's answers (a chained decomposition loses the
+   entity of the early step); 1-3 hypotheses, each with its refuter (an early hypothesis without one
+   pulls the evidence its way); do not split sub-questions between channels — channels differ by
+   platform, not by topic. The launch gate (step 7) shows the sub-questions to the user — agent-made
+   decompositions miss more than human-checked ones.
 
 5. **Language slot.** `LANGUAGES` = the languages the channels must search in. Default = the
    language of the query (the core detects ru/en/ja/zh/ko itself). Set it explicitly when the
@@ -232,7 +257,8 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
    `VAULT_RESEARCH_DIR = {VAULT_PATH}/Знания/Ресерчи`; `PLUGIN_ROOT = ${CLAUDE_PLUGIN_ROOT}`.
 
 7. **Brief → launch gate.** One AskUserQuestion, in Russian, header «Запуск». The question
-   restates the whole proposal so it reads without scrolling back: `REFINED_QUERY`, the channels
+   restates the whole proposal so it reads without scrolling back: the brief `REFINED_QUERY` (its
+   sub-questions and conditions in full, the verbatim question may be shortened), the channels
    that will run (`SELECTED_CHANNELS`, their number) and `LANGUAGES`, plus dropped channels with a
    short reason if there are any — e.g. «Запускаю полный ресёрч так? Формулировка: «…». Каналы (6):
    web, codexweb, reddit, twitter, hackernews, substack; grokweb выключен в настройках. Языки: ru.»
