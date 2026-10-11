@@ -58,6 +58,8 @@ Output section: `## Counterarguments (found on Korea layer)`.
 
 ## Budget: 8-12 calls
 
+Reality: no telemetry — the layer ran in 0 of 72 runs of schema v5 (2026-09-18 – 2026-10-11).
+
 ## Fallback
 
 Feed exit 2 → Brave `site:` in Korean; nothing anywhere → `sourceQuality=LOW`.

@@ -1,8 +1,9 @@
 # Language layers — native-term dictionary and platform map
 
 Source: the source-pool plan «Реестр источников» (2026-09-03) and the tool audit 2026-09.
-Mandatory Read for the web / codexweb / grokweb channels and for the ja / zh / ko / eu
-channels whenever `languages` contains anything beyond ru/en. A query on the wrong term
+Mandatory Read for the web / codexweb / twitter channels (and every community channel that
+points here) and for the ja / zh / ko / eu channels whenever `languages` contains anything
+beyond ru/en. A query on the wrong term
 kills the whole layer: translators, course sellers and content farms answer it, practitioners
 do not.
 

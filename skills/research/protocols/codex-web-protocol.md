@@ -1,37 +1,43 @@
-# Web (Codex/GPT-6 Astra) — search protocol for the agent
+# Web (Codex/GPT-6.1 Sol) — search protocol for the agent
 
 ## Tool: Codex CLI (via Bash)
 
-Web search via **Codex CLI** (`codex exec`) with web search enabled. Billing — ChatGPT subscription → marginal cost ≈ $0. The model, the reasoning effort and the tier are pinned directly in the commands: `gpt-6-astra`, effort `high`, `service_tier="priority"` (Fast) for the two channel calls and `service_tier="default"` for the escalation — the channel does not depend on the global default in `~/.codex/config.toml`. When the model generation changes, update the pin here (all commands below, escalation included), the `CODEX_MODEL` constant and the source signature in `{PLUGIN_ROOT}/workflows/full-research-core.js`, the probe in `SKILL.md` and the channel line in `README.md`.
+Web search via **Codex CLI** (`codex exec`) with web search enabled. Billing — ChatGPT subscription → marginal cost ≈ $0. The model, the reasoning effort and the tier are pinned directly in the commands: `gpt-6.1-sol`, effort `high`, `service_tier="priority"` (Fast) for the two channel calls AND for the escalation — the channel does not depend on the global default in `~/.codex/config.toml`. When the model generation changes, update the pin here (all commands below, escalation included), the `CODEX_MODEL` constant and the source signature in `{PLUGIN_ROOT}/workflows/full-research-core.js`, the availability probe in `{PLUGIN_ROOT}/skills/research-settings/scripts/research-sources.py` and the channel line in `README.md`.
 
-> [!note] `service_tier="priority"` ("Fast" in the Codex UI) — ON for the two channel calls since 2026-09-30, OFF for the escalation
-> **Decision 2026-09-30 (owner):** Fast for Call 1 and Call 2 only. A/B the same day, Astra high, isolated home, both tiers run concurrently on the 3 benchmark prompts: 693→334 s, 1042→618 s, 319→277 s (median ×1.7, up to ×2.1 on long prompts), the same number of searches and opened pages (71/113 → 71/107, 70/214 → 72/192, 38/72 → 34/89) — Fast speeds up generation, not the amount of work. Cost: ≈2.5× subscription-usage rate for Astra per third-party write-ups of OpenAI's pricing docs (the catalog says only "2x speed, increased usage"). codexweb is the last channel to finish, so it gates the whole run; the escalation (up to 8 calls, pool shared with `/verif`) stays on `service_tier="default"`. Rollback — `priority` → `default` in Call 1/Call 2 and the base command.
-> History (superseded): the name `gpt-5.6-sol-fast` does not exist in the API (HTTP 400 "not supported when using Codex with a ChatGPT account" — verified 2026-08-15). The "Fast" setting in the Codex UI = `service_tier="priority"`: officially "1.5x speed, increased usage", by the user's estimate ≈2.5× the quota burn for −15% of the time (A/B 2026-08-15: sol-high 177 s → 151 s, live searches the same — 11). Decision 2026-09-05: the priority is quota spent on evidence, not speed → an explicit `service_tier="default"` in every command (the global `~/.codex/config.toml` is on `default` too, so that a call without the flag does not inherit priority).
-> **The channel model is `gpt-6-astra` as of 2026-09-05** (the user's decision; part B of Plan 1, "astra vs sol", has been dropped as a gate — the comparison of live searches happens after the fact, on the first escalation of tranche 1 of Plan 2). Effort `high` explicitly: Astra's default is `medium`, and search depth is the whole point of the channel. Do not use Luna/Terra: the luna-high measurement gave −43% of the time, but half as many live searches (5 vs 11). **Rollback** — `gpt-5.6-sol` (alive in the CLI catalog, priority 6): if the first escalation yields < 5 live `web_search` calls against the Sol benchmark of 11 (measurement 2026-08-15) — restore the literals here and `CODEX_MODEL` in the core in a single commit.
-> **Re-checked 2026-09-30 against GPT-6.1 Sol — Astra high stays.** Blind A/B on 3 real channel prompts (Porsche diagnostics, supplements, B2B-mobile counter-arguments), Opus grader with URL spot-checks: Astra high 7.7/10 (isolated home) and 7.7 (old global config), Sol 6.1 high 7.7 but 2× slower (median 1199 s vs ≈830 s), Sol 6.1 medium 7.0 (a stale bulletin revision on the Porsche prompt) at 2–4× fewer input tokens and not consistently faster (415/1064/496 s). No fabricated citations in any arm. Re-test when Sol 6.1 Ultrafast ships in Codex.
+> [!note] Model and tier — decision 2026-10-12 (owner): `gpt-6.1-sol`, effort `high`, `service_tier="priority"` everywhere
+> - **Model.** GPT-6.1 Sol replaces GPT-6 Astra for the channel and for the third verification voice. Mini A/B 2026-10-12 (both arms priority, effort high, isolated home): q1 — Sol 198 s / 44 searches / 18 sources vs Astra 155 s / 42 / 15; q7 — Sol 251 s / 44 / 15 vs Astra 169 s / 38 / 16. Sol is 28–49 % slower, runs slightly more searches, finds as many sources. Effort stays `high` (the owner rejected `medium` on 2026-10-12): search depth is the whole point of the channel. Ultrafast is not supported for 6.1 Sol. **Rollback** — `gpt-6-astra` in every command here and in `CODEX_MODEL`, one commit.
+> - **Tier.** `service_tier="priority"` ("Fast" in the Codex UI) speeds up generation, not the amount of work (A/B 2026-09-30 on Astra: median ×1.7 faster, the same number of searches and opened pages). It burns the subscription quota faster. Since 2026-10-12 the escalation runs on priority too. Rollback — `priority` → `default` in the commands.
+> - History, short: 2026-08-15 `gpt-5.6-sol`; 2026-09-05 `gpt-6-astra` high on `default`; 2026-09-30 priority for the two channel calls; 2026-10-12 `gpt-6.1-sol` on priority everywhere. The name `gpt-5.6-sol-fast` does not exist (HTTP 400 on a ChatGPT account) — the tier is set only by `service_tier`.
 
 > [!warning] Isolated Codex home — every call goes through `scripts/codex-home.sh` (since 2026-09-30)
 > A bare `codex exec` inherits the user's `~/.codex`: `model_instructions_file` (replaces the Codex base prompt), the global `AGENTS.md`, memories, plugins and MCP servers. Measured 2026-09-30: a global "answer in Russian" rule turned 7 of 8 English research prompts into 63–75% Cyrillic answers — quotes got translated and could no longer be matched against the source pages. `codex-home.sh` keeps a separate `CODEX_HOME` (`~/.claude/research-homes/codex`, login symlinked from `~/.codex/auth.json`) with its own search-worker `AGENTS.md` (answer in the prompt's language, verbatim quotes, URL + date per claim, batched queries) and prints its path. `--ignore-user-config` is not enough: it still loads the global `AGENTS.md`.
 
-Base command (Bash, `timeout: 300000` ms per call):
+Base command (Bash, `timeout: 600000` ms per call):
 
 ```bash
-CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json '<PROMPT>' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json '<PROMPT>' < /dev/null
 ```
 
 > [!warning] `< /dev/null` is MANDATORY in every call — without it the channel hangs until timeout
 > `codex exec` reads stdin (when a prompt is passed, the pipe is appended as a `<stdin>` block), and
 > the Bash tool does not close stdin → Codex waits for EOF forever. Symptom: **0 bytes of stdout, exit 143
 > (SIGTERM on timeout), `Reading additional input from stdin...` in stderr**. This is NOT an
-> authorization problem and NOT a transient. A/B verified 2026-08-06 on codex-cli 0.146.0: without the redirect —
-> killed by timeout, 0 bytes; with `< /dev/null` — exit 0 in 6 s on a trivial prompt, 156 s on
-> a real one. The likely reason codexweb is the slowest channel in the telemetry
-> (median 1078 s ≈ hangs + retries).
+> authorization problem and NOT a transient. Since the fix there are no hangs (0 of 69 channel agents,
+> audit 2026-10-11). The line `Reading additional input from stdin...` is printed even with the
+> redirect — with exit 0 it is harmless.
 
-- The `--search` flag does NOT exist (checked on codex-cli 0.146.0, verified 2026-08-06) — web search is enabled only via `-c`.
-- **`tools.web_search={mode="live"}` — a MANDATORY pin (checked on 0.147.0, 2026-08-15).** A bare `true` may return the OpenAI index CACHE (cached mode: snippets from the cache, and when the network is unavailable — fabrication without an error). `{mode="live"}` is valid and produces live web_search events (probe: 2 live searches, the current HN top). The value `"live"` as a string is an invalid config — only the object `{mode="live"}`.
+> [!note] Why the channel is slow (audit 2026-10-11, 69 agents on Astra)
+> The channel agent's median is 1244 s (p90 1800 s). The cause is the depth of each call, not hangs:
+> Codex runs ~34 search turns per call, so one channel call takes a median of 525 s (p90 808 s).
+> Sol was 28–49 % slower than Astra in the 2026-10-12 mini A/B — expect longer calls.
+> A call that outlives the 600 s Bash timeout is moved to the background ("Command did not complete
+> within its 600s timeout and was moved to the background") — wait for its notification, do NOT
+> relaunch it.
+
+- The `--search` flag does NOT exist (re-checked on codex-cli 0.162.1, 2026-10-11) — web search is enabled only via `-c`.
+- **`tools.web_search={mode="live"}` — a MANDATORY pin (re-checked on 0.162.1).** A bare `true` may return the OpenAI index CACHE (cached mode: snippets from the cache, and when the network is unavailable — fabrication without an error). The value `"live"` as a string is an invalid config — only the object `{mode="live"}`.
 - `-s read-only` is mandatory: the user's global config is `danger-full-access`, which is not needed for search.
-- `--json` — JSONL events in stdout (checked on 0.146.0, verified 2026-08-06). The agent's final text:
+- `--json` — JSONL events in stdout (re-checked on 0.162.1). The agent's final text:
   ```bash
   ... --json | jq -rs '[.[] | select(.type == "item.completed" and .item.type == "agent_message")] | last | .item.text'
   ```
@@ -59,20 +65,25 @@ Query language: whenever `languages` is not ru/en only, both `codex exec` prompt
 ### Call 1 — Broad overview (mandatory)
 
 ```bash
-CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json 'Research the web for: <expanded query — topic, aspects, what decision is being made>. Use ONLY the web search tool - run real searches, do NOT answer from memory. Every claim MUST have a source URL and publication date; omit claims without URLs. Prefer 2024-2026 sources. Open and READ THE FULL PAGE of every key source before citing it - do NOT cite from search-result snippets alone; quote specifics that only appear in the page body. Return: key findings (bulleted, each with URL), notable numbers/quotes with URLs, and a final Sources section listing all URLs.' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json 'Research the web for: <expanded query — topic, aspects, what decision is being made>. Use ONLY the web search tool - run real searches, do NOT answer from memory. Every claim MUST have a source URL and publication date; omit claims without URLs. Prefer sources from the last 24 months (today is <DATE from the orchestrator prompt>). Open and READ THE FULL PAGE of every key source before citing it - do NOT cite from search-result snippets alone; quote specifics that only appear in the page body. Return: key findings (bulleted, each with URL), notable numbers/quotes with URLs, and a final Sources section listing all URLs.' < /dev/null
 ```
 
 ### Call 2 — Counter-arguments (mandatory)
 
 ```bash
-CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json 'Search the web for criticism, problems, failures and counter-arguments about: <topic>. Use ONLY the web search tool - real searches, NOT memory; every claim needs a source URL. Who disagrees and why? Known issues, regressions, negative experience reports. Open and READ THE FULL PAGE of key sources before citing - do NOT cite from snippets alone. Return bulleted findings with URLs + Sources section.' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json 'Search the web for criticism, problems, failures and counter-arguments about: <topic>. Use ONLY the web search tool - real searches, NOT memory; every claim needs a source URL. Who disagrees and why? Known issues, regressions, negative experience reports. Open and READ THE FULL PAGE of key sources before citing - do NOT cite from snippets alone. Return bulleted findings with URLs + Sources section.' < /dev/null
 ```
 
-Launch both calls in ONE message (two Bash calls in parallel), each with a `timeout` of ~300000 ms.
+Launch both calls in ONE message (two Bash calls in parallel), each with a `timeout` of 600000 ms.
 `< /dev/null` at the end of every command is mandatory (see the warning above), otherwise both calls
-will burn out on timeout for nothing. The time margin is narrow: with the fix, one high-effort call = 156 s.
+will burn out on timeout for nothing. One high-effort call takes a median of 525 s (p90 808 s, Astra,
+audit 2026-10-11); a call past 600 s moves to the background — wait for its notification.
 
 ## Budget: 2 calls
+
+Reality (telemetry v5, 72 runs, Fan-out phase): median 2 `codex exec` calls per agent — the budget
+holds; 14 of 69 agents made more (retries and diagnostics after failures). The agent's median of 29
+tool calls is mostly snapshot fetching (defuddle, pdf-fetch) and the file write, not Codex.
 
 ## Processing the result
 
@@ -93,6 +104,13 @@ Diagnostics:
   this is NOT authorization and NOT a rate limit, but an unclosed stdin under the Bash tool. Cured by `< /dev/null`
   at the end of the command; a retry without the redirect will hang in exactly the same way and burn a second timeout.
 - `codex login status` — an expired ChatGPT authorization.
+- **`ERROR codex_core::tools::router: error=timed out negotiating with the code-mode host` in stderr, exit 0** —
+  the web-search tool inside Codex could not start; the answer says "Sources: None retrieved" or has no
+  URLs, and the JSONL has 0 completed `web_search` events. Seen in 3 of 69 channel agents
+  (2026-09-21, 2026-10-11); the same command worked again hours later (cause unconfirmed — likely a
+  transient failure of the local code-mode host). Handle it as a failed call: ONE retry, then
+  Degradation. Do NOT spend turns on `--disable code_mode_host`, `standalone_web_search` or sandbox
+  changes — agents tried them, none helped.
 - Messages in stderr about web search being disabled — the `tools.web_search` config key has been renamed
   (check `codex exec --help` and `~/.codex/config.toml`).
 
@@ -103,7 +121,7 @@ Besides serving as a channel, Codex is used by the `full-research-core` workflow
 The call (made by a lightweight subagent bridge, the `escalationPrompt` prompt in core.js):
 
 ```bash
-CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6-astra -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="default" -c 'tools.web_search={mode="live"}' --json -o "<workDir>/_codex-esc-<claimId>-last.md" "$(cat "<workDir>/_codex-esc-<claimId>-prompt.md")" < /dev/null > "<workDir>/_codex-esc-<claimId>.jsonl"
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json -o "<workDir>/_codex-esc-<claimId>-last.md" "$(cat "<workDir>/_codex-esc-<claimId>-prompt.md")" < /dev/null > "<workDir>/_codex-esc-<claimId>.jsonl"
 ```
 
 - **Live-search gate:** the JSONL must contain ≥1 `web_search` event (`grep -c '"web_search'`); 0 → the voice does not count (`escalationSkipped: 'no-live-search'`) — Codex was answering from memory.
@@ -118,7 +136,7 @@ The ChatGPT-subscription quota is one finite pool for the codexweb channel (auto
 Replacement, same OpenAI web_search backend (Bing index + OAI-SearchBot), ≈30–80 s per question, `agent_message.text` = JSON matching the schema:
 
 ```bash
-CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-5.6-sol -s read-only --skip-git-repo-check -c 'tools.web_search={mode="live"}' --json --output-schema schema.json '<PROMPT>' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c 'tools.web_search={mode="live"}' --json --output-schema schema.json '<PROMPT>' < /dev/null
 ```
 
 `web_search` events show the queries (but not the list of opened sources — only the cited ones). Priority inside the pool: `/verif` > codexweb > everything else. Before a mass run make one probe API call (the 429 arrives immediately) and one `codex exec ... 'ok' < /dev/null` probe; a usage-limit answer means the channel goes off. Any script built on the Responses API must ship with a `codex exec` fallback.

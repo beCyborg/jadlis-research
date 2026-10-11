@@ -113,6 +113,10 @@ A separate section in the output file:
 
 ## Budget: 9-15 calls
 
+Reality (telemetry v5, 72 runs, Fan-out phase, 59 agents): median 38 tool calls per agent — Brave 12
+instead of 2-3, `post` 5 instead of 2-3, `archive` 1 instead of 4-7 (agents work post-first, not
+author-first). Median 340 s (p90 502 s).
+
 | Layer | Calls |
 |---|---|
 | Layer 0 — discovery | 0 (handles from the orchestrator) or 2-3 |

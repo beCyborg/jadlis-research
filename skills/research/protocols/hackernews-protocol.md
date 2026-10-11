@@ -115,6 +115,9 @@ Condition: the handle appeared ≥2 times in the Layer 3 comments AND its thesis
 
 ## Budget: 8-14 calls
 
+Reality (telemetry v5, 72 runs, Fan-out phase, 61 agents): median 31 tool calls per agent, of them
+14 searches instead of 5 by layers. Median 404 s (p90 512 s).
+
 ## Fallback
 
 `hn-fetch.sh` is unavailable/broken (no `jq`, no network, `exit 3` = HN search unavailable) →

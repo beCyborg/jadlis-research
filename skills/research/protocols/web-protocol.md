@@ -1,4 +1,4 @@
-# Web — search protocol for the agent (Brave Search)
+# Web — search protocol for the agent (Brave + Exa)
 
 ## MCP tools
 
@@ -9,7 +9,7 @@
 | `mcp__plugin_jadlis-search_brave-search__brave_llm_context` | **Default for research**: returns the EXTRACTED CONTENT of pages for a query (not just links) — covers most needs without scraping |
 | `mcp__plugin_jadlis-search_brave-search__brave_web_search` | Keyword-based discovery of sources — when you need the LINKS THEMSELVES / coverage (+`extra_snippets`) |
 | `defuddle parse <url> --md` (Bash, CLI 0.19.3) | **Default snapshot writer**: the full text of ONE page verbatim, 0 credits (extraction ladder — Layer 3) |
-| `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape` | Anti-bot / JS pages — the LAST rung of the ladder; never for PDFs and x.com (the plugin hook denies it) |
+| `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape` | Anti-bot / JS pages — the LAST rung of the ladder; for PDFs only as the last PDF rung (`parsers:["pdf"]`), never for x.com (the plugin hook denies it) |
 
 **CRITICAL:** Before using any tool — load it via ToolSearch if it is unavailable.
 **RATE LIMIT:** Brave (Search plan): 50 req/s — **parallel calls are OK** (several tool calls in one message). Firecrawl scrape: 1 req/s. On 429 — wait 1 s, retry (max 2x).
@@ -71,16 +71,22 @@ QUERY PHRASING RULES:
   integrator blogs + rankings). This gap is closed by the optional yandex channel
   (`yandex-protocol.md`), not by tweaking Brave's parameters.
 
-### Layer 1b — Semantic pass (Exa, 1 call, after the Brave layer)
+### Layer 1b — Semantic pass (Exa, 1 call)
 
-Exa is an embedding index: it catches pages that keyword-Brave does not find (A/B 08–09.2026: overlap of the top-5 domains between the engines ≈0.23; a tie on quality, but different sets of sources). The query = **a description of the target page** as a natural phrase, without operators or quotes:
+Exa is an embedding index: it catches pages that keyword-Brave does not find (overlap of the top-5 domains between the engines ≈0.23 in 09.2026 and again in 10.2026). The query = **a description of the target page** as a natural phrase, without operators or quotes.
+
+**Order by intent (blind re-test R3, 2026-10, 48 queries, two judges):**
+- **Product / company / people topics → Exa FIRST** (launch it in the same message as the Brave pair, or before it): Exa won 7 : 0 on English product/company/people queries.
+- **Russian-language research → Exa first as well** (Exa 6 : 3).
+- English research → both engines, order does not matter (7 : 6).
 
 ```bash
 python3 {PLUGIN_ROOT}/scripts/websearch.py exa "<description of the target page: e.g. practitioner blog post explaining how X works in production>" --tag research -n 8 --out json
 ```
 
 - **Key gate:** `exit 2` = no `EXA_API_KEY` anywhere (env, `~/.config/exa/key`, Keychain via `scripts/secret.sh`) → SKIP the layer silently (not a fallback, not a channel error).
-- RU topic → add `--type keyword` (auto/fast drift toward English-language sources).
+- **RU topic → keep the default `--type auto`; never `--type keyword`.** R3: auto beat keyword 14 : 0 on Russian queries — keyword returned fewer results (6.5 vs 10), less Cyrillic (79 % vs 96 %) and older pages (median 425 vs 217 days); the script itself warns that `keyword` is a legacy type.
+- **Output shape (`--out json`):** an envelope, not a list — `{"_meta": {"engine", "mode", "http", "latency_ms", "cost_usd", "cost_src", "n_res", "err"}, "response": {"results": [{"url", "title", "publishedDate", "author", "highlights": [...]}, ...]}}`. Take the list from `.response.results` (`r[:8]` on the top level fails with `KeyError`); e.g. `... --out json | jq -r '.response.results[] | [.publishedDate[0:10], .url, .title] | @tsv'`. Highlights run up to ~8 KB per result. URLs only → `--out urls`.
 - The results go into the same Layer 2 candidate pool marked with the source `exa`; URL duplicates against the Brave results are collapsed. Exa-only candidates go through the same selection and full-text fetch (Layer 3), and their reliability badge is no higher than the rest.
 - Budget: 1 call (2 for a narrow topic with different angles); $0.007/call.
 
@@ -109,7 +115,12 @@ the page (body ≥ ~1 000 characters, not challenge markup) → do not go furthe
 into the snapshot header: `Extractor: <pdf-fetch|defuddle|jina|exa-full|tavily|firecrawl>`.
 There is no `timeout` utility on macOS — set the time limit with the Bash tool's `timeout` parameter.
 
-1. **PDF URL** (`.pdf`/`/TXT/PDF/`/`?format=pdf`) → ONLY `out=$(bash {PLUGIN_ROOT}/scripts/pdf-fetch.sh "<url>")` → `Read "$out"` (0 cr). `exit 2` (PDF_UNREACHABLE/PDF_EMPTY — JS gate, scan, paywall) → a scientific article by DOI → an Unpaywall OA link → `pdf-fetch.sh` again; as a last resort — `firecrawl_scrape` with `parsers:["pdf"]` AND `pdfOptions.maxPages ≤ 20` (the plugin hook lets nothing else through). Without escalation — cite from the snippets with the mark "(reconstructed)".
+1. **PDF URL** (`.pdf`/`/TXT/PDF/`/`?format=pdf`) — its own ladder, in this order:
+   1. `out=$(bash {PLUGIN_ROOT}/scripts/pdf-fetch.sh "<url>")` → `Read "$out"` (0 cr). `exit 2` (PDF_UNREACHABLE/PDF_EMPTY — JS gate, 403 behind Akamai, scan, paywall) → next rung. A scientific article with a DOI → try its Unpaywall OA link with `pdf-fetch.sh` first.
+   2. `curl -s --max-time 45 "https://r.jina.ai/<url>"` (keyless, 0 cr).
+   3. `python3 {PLUGIN_ROOT}/scripts/websearch.py contents "<url>" --full` (~$0.001).
+   4. Last resort — `firecrawl_scrape` with `parsers:["pdf"]` AND `pdfOptions.maxPages ≤ 20` (the plugin hook lets nothing else through; a 17-page PDF cost 17 credits).
+   Probe 2026-10-11 on an NSA PDF: `pdf-fetch.sh` → 403 / `PDF_EMPTY`; `r.jina.ai` (40 KB) and `contents --full` (39 KB, $0.001) both returned the full text with the quote; Firecrawl returned the same for 17 credits. Nothing worked → cite from the snippets with the mark "(reconstructed)".
 2. **HTML — the default:** `defuddle parse "<url>" --md` (Bash, `timeout: 60000`; on 403 — `-u "<browser User-Agent>"`) → stdout = clean markdown of the main content (it strips navigation itself; probe 2026-09-06: a Cloudflare doc → 1.1 KB of clean text versus 18 KB from Reader with menus). Empty / < 1 000 characters / challenge text → rung 3.
 3. **CSR / JS render:** `curl -s --max-time 45 "https://r.jina.ai/<url>"` (Reader, keyless; probe 2026-09-06 — 200, 18 KB; the timeout is mandatory — it hangs on heavy pages). Empty → rung 4.
    Local alternative for the same rung (no external service): Crawl4AI 0.9.3 in `~/.cache/crawl4ai-venv` — `~/.cache/crawl4ai-venv/.venv/bin/python -c 'import asyncio,sys;from crawl4ai import AsyncWebCrawler
@@ -118,7 +129,7 @@ async def m():
 asyncio.run(m())' "<url>"` (bake-off 2026-09-06: 3/3 URLs, quote matched, <2 s each; output keeps navigation like Reader does). Venv missing → skip.
 4. **URL-exact index:** `python3 {PLUGIN_ROOT}/scripts/websearch.py contents "<url>" --full` (Exa contents, ~$0.001/page; **always `--full`** — the default truncates to 8 000 characters, and a truncated piece does not close the gate).
 5. **Tavily extract — only with the key `TAVILY_API_KEY`** (resolve it first: `eval "$(bash "{PLUGIN_ROOT}/scripts/secret.sh" --export TAVILY_API_KEY)"` — env, then the macOS Keychain; there is NO keyless mode: without a key `POST /extract` → 401 "missing or invalid API key", checked 2026-09-06): `curl -s --max-time 30 -X POST https://api.tavily.com/extract -H "Authorization: Bearer $TAVILY_API_KEY" -H 'Content-Type: application/json' -d '{"urls":["<url>"]}'` → `.results[0].raw_content`. No key → the rung is skipped silently.
-6. **Anti-bot — the last rung:** `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape(url, formats=["markdown"], onlyMainContent=true)`; on failure → retry with `waitFor: 5000`. **Never** for PDFs (rung 1) and x.com/twitter.com (an AI retelling for 30 credits, the hook denies it; tweets — the twitter channel). Behind a login — Playwright MCP only.
+6. **Anti-bot — the last rung:** `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape(url, formats=["markdown"], onlyMainContent=true)`; on failure → retry with `waitFor: 5000`. **Never** for PDFs outside the PDF ladder (rung 1) and never for x.com/twitter.com (an AI retelling for 30 credits, the hook denies it; tweets — the twitter channel). Behind a login — Playwright MCP only.
 
 No rung produced a body → mark the URL `[SOURCE UNAVAILABLE]`, the citation — MEDIUM at most, "[no-snapshot: blocked]".
 
@@ -167,6 +178,10 @@ a review aggregator, usually C; the venue's own site = A/E depending on context)
 and prices must be CROSS-CHECKED against the venue's site — cards go stale.
 
 ## Budget: 5-10 calls (+1 Exa, +0-3 place layer for local topics)
+
+Reality (telemetry v5, 72 runs, Fan-out phase, 71 agents): median 34 tool calls per agent — Brave
+16 (p90 23), Exa 1, text extraction 11; median 9 snapshots per run instead of "3-5". Median 389 s
+(p90 577 s).
 
 | Layer | Calls | Mandatory |
 |-------|---------|-------------|

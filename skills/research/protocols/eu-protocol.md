@@ -39,6 +39,13 @@ Menéame answers 403 to some networks without a message → exit 2, skip silentl
 
 ### Layer 1 — Brave in the platform language (2-4 calls)
 
+This layer searches the PLATFORM SITES, not the open web: every Brave query carries
+`site:<platform>` (dou.ua, wykop.pl, golem.de, heise.de, xataka.com, meneame.net). Open-web pages —
+laws, government portals, vendors, media — belong to the `web` channel: in the three real runs most
+`eu` citations came from such sites (lexlege.pl, mos.cudzoziemcy.gov.pl, …), and the core counted
+them as the community family — a false second source. `site:wykop.pl` on a technical topic returns
+profiles and tags, not threads — drop it there.
+
 ```json
 { "query": "site:dou.ua <uk query>", "count": 10 }
 { "query": "site:wykop.pl <pl query>", "count": 10 }
@@ -62,6 +69,9 @@ for practitioner chatter. Output section: `## Counterarguments (found on EU laye
   comment — D; Wykop — C.
 
 ## Budget: 8-12 calls
+
+Reality (telemetry v5, 72 runs, Fan-out phase): 3 agents, median 40 tool calls — Brave 14-23 per run,
+mostly open-web queries without `site:` (see Layer 1). Median 374 s.
 
 ## Fallback
 
