@@ -391,11 +391,18 @@ the last two = Opus 4.8 retries and roles still stopped, 2.7.8);
 `{minChars, llmMediatedChannels, demotedTotal, byReason: {noSnapshot, shortSnapshot, llmMediated,
 quoteNotFound}, byChannel, ceilingCapped}` — how many HIGH citations were lowered to MEDIUM and why
 (`args.channelCeiling: {codexweb: "HIGH"}` — the explicit escape of a channel ceiling, no automation).
-Progress — in `/workflows`. **Stages on disk (2.9.0):** the core writes `{WORK_DIR}/_curated.json` and `{WORK_DIR}/_ledger.json`
-(`result.stageFiles` says whether the writes succeeded). Re-running Phase B with the SAME args plus
+Progress — in `/workflows`. **Stages on disk (2.9.0):** the core writes `{WORK_DIR}/_curated.json`
+(`result.stageFiles` says whether the write succeeded); `{WORK_DIR}/_ledger.json` is written by THIS
+skill in Phase C step 0 from the workflow output file — a model cannot copy a 100+ KB ledger verbatim, so
+the core no longer tries. Re-running Phase B with the SAME args plus
 `reuseStages: true` skips what is already there — ledger → curator → channels — and only synthesises
-again (≈0.3M tokens instead of a full run); `result.reusedStages` names what was reused. Use it when the
+again (≈0.3M tokens instead of a full run); `result.reusedStages` names what was reused. The reuse probe
+only checks the ledger (python3: same query title, claim count = `ledgerSummary.total`, channel files
+non-empty) and the analyst Reads `_ledger.json` itself; that result has `claimLedger: []` plus
+`ledgerFromDisk: "{WORK_DIR}/_ledger.json"` and no `channelStatus`/`escalationStats`/`snapshotGate` — Phase C
+loads them from the file. A `_curated.json` over 40 KB is not reused (the curator runs again). Use it when the
 analyst failed or the report must be rewritten; never across a changed query. New result fields:
+`queryTitle`, `date` (for the ledger writer),
 `synthMeta.curation` / `ledgerSummary.curation` = `{candidates, taken, criticalTaken, backgroundTaken, loadBearing, droppedByCap, criticalDroppedByCap}`
 (the curator takes every claim critical for the decision, cap 32, and adds background claims only while
 they are new — `criticalDroppedByCap > 0` means the cap cut critical claims; say so in the summary), and
@@ -408,6 +415,23 @@ never pass it in a real run.
 ## Phase C — WRITE (vault contract, main session)
 
 The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contract.md`.
+
+0. **Ledger on disk (deterministic, first, for `status: "ok"` and `"synthesis-failed"`).** The
+   `<task-notification>` names the workflow output file (a JSON envelope; the result object is under
+   `result`). One Bash call:
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/research/scripts/write-ledger.py" "{output file}" "{WORK_DIR}"
+   ```
+   It writes `{WORK_DIR}/_ledger.json` (claimLedger without rawVotes, `synthMeta.ledgerSummary`,
+   `synthMeta.curation`, escalationStats, snapshotGate, channelStatus, failedChannels, timing,
+   completeness, files, queryTitle; `indent=1`, so the analyst of a reuse run can Read it in chunks),
+   re-reads it as JSON and prints `write-ledger: ok: <path> — <bytes> B, <N> claims`. Exit 1 prints the
+   reason (no claimLedger, claim count ≠ `ledgerSummary.total`, unreadable output file) and writes
+   nothing — say so in the summary (a later `reuseStages` run will verify again) and go on. `skip` = the run
+   reused `ledgerFromDisk`; nothing to write. Check: `python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(len(d['claimLedger']))" "{WORK_DIR}/_ledger.json"`.
+   **Reuse run (`ledgerFromDisk` set, `claimLedger: []`):** load `claimLedger`, `channelStatus`,
+   `failedChannels`, `escalationStats`, `snapshotGate`, `timing` from that file and use them wherever the
+   steps below say «from the workflow object» (canonical sections in 2a, the summary in 7).
 
 1. **Partial result.** If `status: "insufficient-sources"` (<2 channels),
    `status: "curation-failed"` (the curator returned no claims twice — nothing was verified, the

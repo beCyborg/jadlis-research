@@ -3,7 +3,7 @@ export const meta = {
   description: 'Ядро full-research: N канальных исследователей → curator (evidence-префиксы) → urlhealth → per-claim верификация (2 линзы: та же семья + другая семья, по голосу от веба и от сообществ) → веб и сообщества разошлись = FAMILY-SPLIT (без Codex) → одиночное исключение → третий голос Codex → analyst пишет отчёт в workDir. Vault-контракт — в скилле.',
   phases: [
     { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты; обрыв защитным фильтром у любой роли → один повтор на Opus 4.8 (лимит classifierRetryCap)' },
-    { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims «сколько нужно» (все критичные + новый проверяемый фон, потолок 32) с evidence-префиксами → _curated.json → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5) → _ledger.json; reuseStages:true пропускает стадии, чьи файлы уже в workDir' },
+    { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims «сколько нужно» (все критичные + новый проверяемый фон, потолок 32) с evidence-префиксами → _curated.json → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5) → результат (_ledger.json из него пишет скилл, scripts/write-ledger.py); reuseStages:true пропускает стадии, чьи файлы уже в workDir' },
     { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию, Opus 5.5 high при fableBridge:true; null или обрыв защитным фильтром → один повтор на Opus 4.8 (synth-opus48), затем последний — на другой роли synth-*) пишет отчёт: три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
@@ -85,8 +85,9 @@ const ESCALATION_CAP = Number.isFinite(A.escalationCap) ? A.escalationCap : 8
 const CODEX_MODEL = A.codexModel || 'gpt-6.1-sol'
 const CODEX_LABEL = A.codexModel ? `Codex/${A.codexModel}` : 'Codex/GPT-6.1 Sol'
 const CODEX_SERVICE_TIER = 'priority'
-// Ledger on disk (2.9.0): after curation the core writes ${WORK_DIR}/_curated.json, after aggregation
-// ${WORK_DIR}/_ledger.json. With args.reuseStages === true a rerun on the same workDir skips the stages
+// Ledger on disk (2.9.0): after curation the core writes ${WORK_DIR}/_curated.json; ${WORK_DIR}/_ledger.json
+// is written by the skill in Phase C from this run's output file (deterministic, no model copies it).
+// With args.reuseStages === true a rerun on the same workDir skips the stages
 // whose files are there (see reuseDecision). Without the flag nothing is read back.
 const REUSE_STAGES = A.reuseStages === true
 const CURATED_FILE = `${WORK_DIR}/_curated.json`
@@ -309,11 +310,32 @@ const REUSE_PROBE_SCHEMA = {
         required: ['path', 'exists', 'bytes'],
       },
     },
-    curated: { type: ['object', 'null'], description: 'the parsed content of _curated.json, every field verbatim; null — file missing or empty' },
-    ledger: { type: ['object', 'null'], description: 'the parsed content of _ledger.json, every field and array element verbatim; null — file missing or empty' },
+    curated: { type: ['object', 'null'], description: 'the "curated" value printed by the probe script, verbatim (null when it printed null)' },
+    curatedBytes: { type: 'integer', description: 'the "curatedBytes" value printed by the probe script' },
+    // 2.9.0 ledger fix: never the ledger contents — only what a deterministic python3 check printed.
+    ledger: {
+      type: 'object',
+      additionalProperties: false,
+      description: 'the "ledger" object printed by the probe script, verbatim',
+      properties: {
+        exists: { type: 'boolean' },
+        bytes: { type: 'integer' },
+        queryTitleMatch: { type: 'boolean' },
+        claimCount: { type: 'integer' },
+        lengthMatchesTotal: { type: 'boolean' },
+        ledgerSummary: { type: ['object', 'null'] },
+        completeness: { type: ['string', 'null'] },
+        files: {
+          type: 'array',
+          items: { type: 'object', additionalProperties: false, properties: { path: { type: 'string' }, bytes: { type: 'integer' } }, required: ['path', 'bytes'] },
+        },
+        error: { type: 'string' },
+      },
+      required: ['exists', 'bytes', 'queryTitleMatch', 'claimCount', 'lengthMatchesTotal', 'ledgerSummary', 'completeness', 'files', 'error'],
+    },
     note: { type: 'string' },
   },
-  required: ['files', 'curated', 'ledger', 'note'],
+  required: ['files', 'curated', 'curatedBytes', 'ledger', 'note'],
 }
 
 const URLHEALTH_SCHEMA = {
@@ -656,7 +678,12 @@ ROLE_PROMPT>>>`
 
 // ── Analyst prompt (decision-first report: conclusions and actions for the reader; process → callout/frontmatter).
 //    Instructions are in English; the REPORT ITSELF is written in Russian — it becomes the vault note as is. ──
-function analystPrompt(files, ledger, stats, aiModel) {
+function ledgerFileNote(ledgerPath) {
+  return `Read the CROSS-VERIFICATION LEDGER from ${ledgerPath} (field claimLedger) completely before writing — Read it in chunks with offset/limit (800 lines each) until the end; never write from a partial read. In the file each claim carries the fields above under their own names: verifierEvidence = the verifiers' evidence, evidence = the cited spans {prefix, url, quotes, …}, escalation/escalationSkipped as stored. Use every claim; ledgerSummary.total below is how many there are.`
+}
+// ledgerPath (2.9.0 ledger fix, reuseStages over _ledger.json): the inline LEDGER JSON block is replaced
+// by an instruction to Read the file; everything else in the prompt stays identical.
+function analystPrompt(files, ledger, stats, aiModel, ledgerPath) {
   return `You are the analyst. Read the channel results, cross-validate them and write the final report IN RUSSIAN in the DECISION-FIRST + CONTEXT format: on top — conclusions and advice for the decision (what the reader sees first); below — a separate section «📚 Контекст и находки» with the researched substance of the topic. The collapsed callout «Методология» takes ONLY the meta-process (how you searched, what was dropped), NOT the substantive context of the subject. IMPORTANT: claims with verdict CHALLENGED/OUTDATED go neither into the conclusions nor into the context — filter, do not append criticism. DISPUTED claims go into a separate subsection «Спорные факты» and are not part of the conclusions. FAMILY-SPLIT claims (the web and the communities tell DIFFERENT stories) go into a separate subsection «Веб и сообщества расходятся» with BOTH stories rendered; they may support a conclusion only with an explicit divergence marker (rules below) — never silently pick a side.
 
 QUERY: ${QUERY}
@@ -670,7 +697,7 @@ STYLE EXAMPLE (Read): ${PLUGIN_ROOT}/skills/research/examples/sample-report.md �
 shows tone, density and layout. The binding contract is the format spec below; adapt structure and length to the topic, do not copy the example's skeleton literally.
 
 CROSS-VERIFICATION LEDGER (live checking of claims; each has verdict, credibility 1-6, vote vector votes[] as "family:verdict" (one vote from the web family, one from the community family), familyVotes, leadFamily/leadVerdict for FAMILY-SPLIT, searchedVia (the platforms the verifiers actually searched), claimType, loadBearing, evidence spans, ceilingCapped — all evidence of the claim was lowered to MEDIUM by the snapshot gate, escalation when escalated). Statements are in English — translate them into Russian in the report, numbers verbatim:
-${JSON.stringify(ledger.map(c => ({ id: c.id, statement: c.statement, channels: c.channels, strength: c.strength, claimType: c.claimType, importance: c.importance || null, loadBearing: c.loadBearing, verdict: c.verdict, votes: c.votes, voteCount: c.voteCount, familyVotes: c.familyVotes || null, leadFamily: c.leadFamily || null, leadVerdict: c.leadVerdict || null, searchedVia: c.searchedVia || [], credibility: c.credibility, evidence: c.verifierEvidence, urls: c.urls, evidenceRefs: (c.evidence || []).map(e => e.prefix), weakEvidence: !!c.weakEvidence, evidenceless: !!c.evidenceless, ceilingCapped: !!c.ceilingCapped, escalation: c.escalation ? { status: c.escalation.status, confirmsExclusion: c.escalation.confirmsExclusion, reasoning: c.escalation.reasoning } : null, escalationSkipped: c.escalationSkipped || null })), null, 2)}
+${ledgerPath ? ledgerFileNote(ledgerPath) : JSON.stringify(ledger.map(c => ({ id: c.id, statement: c.statement, channels: c.channels, strength: c.strength, claimType: c.claimType, importance: c.importance || null, loadBearing: c.loadBearing, verdict: c.verdict, votes: c.votes, voteCount: c.voteCount, familyVotes: c.familyVotes || null, leadFamily: c.leadFamily || null, leadVerdict: c.leadVerdict || null, searchedVia: c.searchedVia || [], credibility: c.credibility, evidence: c.verifierEvidence, urls: c.urls, evidenceRefs: (c.evidence || []).map(e => e.prefix), weakEvidence: !!c.weakEvidence, evidenceless: !!c.evidenceless, ceilingCapped: !!c.ceilingCapped, escalation: c.escalation ? { status: c.escalation.status, confirmsExclusion: c.escalation.confirmsExclusion, reasoning: c.escalation.reasoning } : null, escalationSkipped: c.escalationSkipped || null })), null, 2)}
 
 LEDGER SUMMARY: ${JSON.stringify(stats)}
 
@@ -857,27 +884,37 @@ function curationStats(curated, kept, dropped) {
   }
 }
 // reuseStages: what a rerun on the same workDir may skip. probe = { files: [{path, exists, bytes}],
-// curated, ledger } from the reuse:probe agent; channelPaths = the files of the selected channels.
-// Cascade: verification is skipped only with a valid _ledger.json, the curator only with a valid
-// _curated.json, and both also need the channel files the earlier run used (recorded in the file).
+// curated, curatedBytes, ledger } from the reuse:probe agent; channelPaths = the files of the selected
+// channels. Cascade: verification is skipped only with a valid _ledger.json, the curator only with a
+// valid _curated.json, and both also need the channel files the earlier run used (recorded in the file).
 // Channels alone are skipped when every selected channel file exists and is non-empty.
+// 2.9.0 ledger fix: probe.ledger is NOT the ledger — it is the verdict of a deterministic python3
+// check {exists, bytes, queryTitleMatch, claimCount, lengthMatchesTotal, ledgerSummary, completeness,
+// files: [{path, bytes}], error}; the analyst then reads _ledger.json itself. A _curated.json over
+// CURATED_REUSE_MAX_BYTES is not reused: its claims travel through the probe's answer.
+const CURATED_REUSE_MAX_BYTES = 40 * 1024
 function reuseDecision(probe, channelPaths, queryTitle) {
   const out = { channels: false, curator: false, verification: false, channelPaths: [], curated: null, ledger: null, notes: [] }
   if (!probe || !Array.isArray(probe.files)) { out.notes.push('probe gave no answer — every stage runs'); return out }
   const size = p => { const f = probe.files.find(x => x && x.path === p); return f && f.exists ? (Number(f.bytes) || 0) : 0 }
-  const missing = paths => paths.filter(p => !(size(p) > 0))
+  const missing = (paths, sz = size) => paths.filter(p => !(sz(p) > 0))
   const sameQuery = d => !!d && typeof d === 'object' && d.queryTitle === queryTitle
   const filesOf = d => (Array.isArray(d.files) && d.files.length ? d.files.map(String) : null)
   const led = probe.ledger
-  if (led) {
-    const valid = Array.isArray(led.claimLedger) && led.ledgerSummary && typeof led.ledgerSummary === 'object' && led.claimLedger.length === led.ledgerSummary.total && filesOf(led)
-    if (!sameQuery(led)) out.notes.push('_ledger.json is from another query — not reused')
+  if (led && led.exists && Number(led.bytes) > 0) {
+    const lfiles = Array.isArray(led.files) && led.files.length ? led.files.map(f => String(f && f.path)) : null
+    const lsize = p => { const f = (led.files || []).find(x => x && x.path === p); return f ? (Number(f.bytes) || 0) : size(p) }
+    const sum = led.ledgerSummary
+    const valid = led.lengthMatchesTotal === true && sum && typeof sum === 'object' && Number.isInteger(led.claimCount) && led.claimCount > 0 && led.claimCount === sum.total && lfiles
+    if (led.error) out.notes.push(`_ledger.json unreadable (${String(led.error).slice(0, 120)}) — not reused`)
+    else if (led.queryTitleMatch !== true) out.notes.push('_ledger.json is from another query — not reused')
     else if (!valid) out.notes.push('_ledger.json incomplete (claimLedger ≠ ledgerSummary.total or no files) — not reused')
-    else if (missing(filesOf(led)).length) out.notes.push(`_ledger.json found, but channel files are missing/empty: ${missing(filesOf(led)).join(', ')} — not reused`)
-    else return Object.assign(out, { channels: true, curator: true, verification: true, channelPaths: filesOf(led), ledger: led, curated: probe.curated || null })
+    else if (missing(lfiles, lsize).length) out.notes.push(`_ledger.json found, but channel files are missing/empty: ${missing(lfiles, lsize).join(', ')} — not reused`)
+    else return Object.assign(out, { channels: true, curator: true, verification: true, channelPaths: lfiles, ledger: { ledgerSummary: sum, completeness: led.completeness || null, files: lfiles, bytes: Number(led.bytes) } })
   }
   const cur = probe.curated
-  if (cur) {
+  if (Number(probe.curatedBytes) > CURATED_REUSE_MAX_BYTES) out.notes.push(`_curated.json is ${probe.curatedBytes} B (> ${CURATED_REUSE_MAX_BYTES}) — too big to pass through the probe, the curator runs again`)
+  else if (cur) {
     const valid = cur.curator && Array.isArray(cur.curator.claims) && cur.curator.claims.length > 0 && filesOf(cur)
     if (!sameQuery(cur)) out.notes.push('_curated.json is from another query — not reused')
     else if (!valid) out.notes.push('_curated.json has no claims or no files — not reused')
@@ -903,8 +940,11 @@ function missingLanguageLayers(languages, selected) {
 }
 // END PURE HELPERS
 
-// ── Ledger-on-disk technical prompts (2.9.0). The workflow runner has no filesystem: a light
-//    agent writes the JSON and, with reuseStages, reads the stage files back. ──
+// ── Ledger-on-disk technical prompts (2.9.0). The workflow runner has no filesystem. A light agent
+//    writes _curated.json (≈10 KB — small enough to copy through a model). _ledger.json (100+ KB) is
+//    NOT written here: an agent cannot reproduce it verbatim (smoke run 12.10: persist:ledger failed),
+//    so the skill writes it deterministically in Phase C (scripts/write-ledger.py from the workflow
+//    output file). With reuseStages the probe runs a python3 check and never returns the ledger. ──
 function persistPrompt(path, obj) {
   return `You are a technical executor. No role work, no reasoning — two steps:
 1. With Write save to ${path} VERBATIM the text between the markers <<<JSON and JSON>>> (byte for byte: do not reformat, shorten or "fix" anything).
@@ -920,7 +960,7 @@ JSON>>>`
 function persistJson(kind, path, obj) {
   return (async () => {
     try {
-      const r = await agent(persistPrompt(path, obj), w({ label: `persist:${kind}`, phase: kind === 'ledger' ? 'Synthesize' : 'Verify', schema: PERSIST_SCHEMA, effort: 'low' }))
+      const r = await agent(persistPrompt(path, obj), w({ label: `persist:${kind}`, phase: 'Verify', schema: PERSIST_SCHEMA, effort: 'low' }))
       if (!r || !(r.bytes > 0)) { log(`⚠ ${path}: файл не записан (${r ? 'bytes=0' : 'нет ответа'}) — повтор с reuseStages эту стадию не пропустит.`); return { kind, path, ok: false } }
       return { kind, path, ok: true, bytes: r.bytes }
     } catch (e) {
@@ -929,14 +969,57 @@ function persistJson(kind, path, obj) {
     }
   })()
 }
+// A JS value as a python3 expression that survives the prompt, the shell and python quoting: ASCII-only
+// JSON (non-ASCII and ' as \uXXXX) inside a raw single-quoted literal, decoded by json.loads.
+function pyJson(v) {
+  const ascii = JSON.stringify(v).replace(/[\u007f-￿']/g, ch => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'))
+  return `json.loads(r'${ascii}')`
+}
+// The deterministic check behind reuse:probe: file sizes, a VERDICT on _ledger.json (never its claims)
+// and _curated.json itself only while it is ≤ CURATED_REUSE_MAX_BYTES. Prints one JSON line.
+function reuseProbeScript(paths) {
+  return `import json, os
+paths = ${pyJson(paths)}
+ledger_path = ${pyJson(LEDGER_FILE)}
+curated_path = ${pyJson(CURATED_FILE)}
+title = ${pyJson(QUERY_TITLE)}
+cap = ${CURATED_REUSE_MAX_BYTES}
+def size(p):
+    return os.path.getsize(p) if os.path.isfile(p) else -1
+files = [{"path": p, "exists": size(p) >= 0, "bytes": max(size(p), 0)} for p in paths]
+led = {"exists": size(ledger_path) >= 0, "bytes": max(size(ledger_path), 0), "queryTitleMatch": False, "claimCount": 0, "lengthMatchesTotal": False, "ledgerSummary": None, "completeness": None, "files": [], "error": ""}
+if led["bytes"] > 0:
+    try:
+        with open(ledger_path, encoding="utf-8") as fh:
+            d = json.load(fh)
+        cl, sm = d.get("claimLedger"), d.get("ledgerSummary")
+        led["queryTitleMatch"] = d.get("queryTitle") == title
+        led["claimCount"] = len(cl) if isinstance(cl, list) else 0
+        led["lengthMatchesTotal"] = isinstance(cl, list) and isinstance(sm, dict) and len(cl) == sm.get("total")
+        led["ledgerSummary"] = sm if isinstance(sm, dict) else None
+        led["completeness"] = d.get("completeness") if isinstance(d.get("completeness"), str) else None
+        led["files"] = [{"path": str(f), "bytes": max(size(str(f)), 0)} for f in (d.get("files") or [])]
+    except Exception as e:
+        led["error"] = (type(e).__name__ + ": " + str(e))[:200]
+cb = max(size(curated_path), 0)
+cur = None
+if 0 < cb <= cap:
+    try:
+        with open(curated_path, encoding="utf-8") as fh:
+            cur = json.load(fh)
+    except Exception:
+        cur = None
+print(json.dumps({"files": files, "curatedBytes": cb, "curated": cur, "ledger": led}, ensure_ascii=False))`
+}
 function reuseProbePrompt(paths) {
-  return `You are the technical executor of the reuse probe (reuseStages:true). No role work, do NOT modify any file.
-1. ONE Bash call:
-for f in ${paths.map(p => `"${p}"`).join(' ')}; do if [ -f "$f" ]; then printf '%s\\t%s\\n' "$f" "$(wc -c < "$f" | tr -d ' ')"; else printf '%s\\tMISSING\\n' "$f"; fi; done
-2. files — one entry per printed line: {path, exists, bytes} (MISSING → exists=false, bytes=0).
-3. If ${LEDGER_FILE} exists with bytes > 0: Read it IN FULL (Read with offset/limit in chunks of 1500 lines until the end) and return the parsed JSON object in \`ledger\` — every field and every array element exactly as in the file, nothing shortened or summarised. Otherwise ledger=null.
-4. The same for ${CURATED_FILE} → \`curated\`; otherwise curated=null.
-5. note — one line (what exists). Do NOT spawn sub-agents.`
+  return `You are the technical executor of the reuse probe (reuseStages:true). No role work, do NOT modify any file, do NOT Read any file.
+1. ONE Bash call, the command exactly as below (a quoted heredoc — copy it character for character):
+python3 - <<'PY'
+${reuseProbeScript(paths)}
+PY
+2. It prints ONE JSON line {files, curatedBytes, curated, ledger}. Return those four values by the schema VERBATIM — every field and array element exactly as printed, nothing added, shortened or summarised; note — one line (what exists).
+3. The command failed or printed nothing → files=[], curatedBytes=0, curated=null, ledger={exists:false, bytes:0, queryTitleMatch:false, claimCount:0, lengthMatchesTotal:false, ledgerSummary:null, completeness:null, files:[], error:"<the error, ≤200 chars>"}.
+Do NOT spawn sub-agents.`
 }
 function channelRestorePrompt(key) {
   const c = ALL_CHANNELS[key]
@@ -979,15 +1062,16 @@ const reusedStages = REUSE_STAGES ? { channels: reuse.channels, curator: reuse.c
 const reusedOut = reusedStages ? { reusedStages } : {}
 const sourceSettingsOut = { providersOff: [...PROVIDERS_OFF], notes: Object.keys(CHANNEL_NOTES), dropped: SOURCE_DROPPED }
 
-// Verification already on disk → straight to synthesis over the stored ledger.
+// Verification already on disk → straight to synthesis. The ledger never passes through a model:
+// the analyst Reads ${LEDGER_FILE} itself; the result carries claimLedger: [] + ledgerFromDisk, and
+// Phase C of the skill loads claimLedger, channelStatus, escalationStats, snapshotGate … from the file.
 if (reuse.verification) {
   const L = reuse.ledger
   return await finish({
-    files: L.files, claimLedger: L.claimLedger, ledgerSummary: L.ledgerSummary, completeness: L.completeness || 'complete',
-    channelsAnswered: Number.isInteger(L.channelsAnswered) ? L.channelsAnswered : L.files.length,
-    channelStatus: L.channelStatus || [], failedChannels: L.failedChannels || [], answeredFamilies: L.answeredFamilies || [],
-    timing: L.timing || [], evidenceHealth: L.evidenceHealth || 'skipped', urlhealthSummary: L.urlhealthSummary || null,
-    snapshotGate: L.snapshotGate || null, escalationStats: L.escalationStats || null, curation: L.curation || null, writes: [],
+    files: L.files, claimLedger: [], ledgerFromDisk: LEDGER_FILE, ledgerSummary: L.ledgerSummary, completeness: L.completeness || 'complete',
+    channelsAnswered: L.files.length, channelStatus: [], failedChannels: [], answeredFamilies: [], timing: [],
+    evidenceHealth: 'from-disk', urlhealthSummary: null, snapshotGate: null, escalationStats: null,
+    curation: L.ledgerSummary.curation || null, writes: [],
   })
 }
 
@@ -1348,13 +1432,8 @@ const snapshotGate = {
 }
 const timing = channelResults.map(r => ({ channel: r.channelKey, startedAt: r.startedAt || null, finishedAt: r.finishedAt || null }))
 
-// _ledger.json (2.9.0): the full verification stage — written in the background while the analyst runs.
-writes.push(persistJson('ledger', LEDGER_FILE, {
-  kind: 'full-research-ledger', version: 1, ledgerSchemaVersion: 5, queryTitle: QUERY_TITLE, date: DATE,
-  channelsSelected: SELECTED, files, channelsAnswered: channelResults.length, channelStatus, failedChannels, answeredFamilies, timing,
-  completeness, claimLedger: claimLedger.map(({ rawVotes, ...c }) => c), ledgerSummary, escalationStats, snapshotGate,
-  evidenceHealth, urlhealthSummary, curation,
-}))
+// _ledger.json is NOT written here (2.9.0 ledger fix): the skill writes it in Phase C from the
+// workflow output file (skills/research/scripts/write-ledger.py) — no model copies 100+ KB verbatim.
 
 return await finish({
   files, claimLedger, ledgerSummary, completeness, channelsAnswered: channelResults.length, channelStatus, failedChannels,
@@ -1368,6 +1447,8 @@ return await finish({
 async function finish(x) {
   phase('Synthesize')
   const { files, claimLedger, ledgerSummary, completeness } = x
+  // reuseStages over _ledger.json: claimLedger is [] here and the analyst reads the file itself.
+  const ledgerPath = x.ledgerFromDisk || null
   // Background stage-file writes: their outcome goes into the result (stageFiles); never fails the run.
   const settleWrites = async () => {
     const done = (await Promise.all(x.writes || [])).filter(Boolean)
@@ -1385,7 +1466,7 @@ async function finish(x) {
 
   // 2.7.8: a null analyst (the usual shape of a classifier stop on synth-*) or interrupted=safety-classifier
   // → ONE retry on synth-opus48 (Opus 4.8, Read/Write/Glob) with ai_model claude-opus-4-8 in the prompt.
-  const analystFor = model => analystPrompt(files, claimLedger, ledgerSummary, model || AI_MODEL)
+  const analystFor = model => analystPrompt(files, claimLedger, ledgerSummary, model || AI_MODEL, ledgerPath)
   let { r: report, stop: analystStop, fromRetry: synthBy48 } = await withClassifierRetry('analyst',
     FABLE_SYNTH ? 'analyst→fable' : 'analyst', analystFor,
     synthOpts(FABLE_SYNTH ? 'analyst→fable' : 'analyst', SYNTH_AGENT), synthOpts(undefined, OPUS48_SYNTH.agentType))
@@ -1397,13 +1478,13 @@ async function finish(x) {
   let synthFellBack = false
   if (!report) {
     log(`analyst (${SYNTH_FIRST.name}${analystStop && analystStop.retried ? `, затем ${OPUS48_SYNTH.name}` : ''}) вернул null — последняя попытка на ${SYNTH_RETRY.name}.`)
-    report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL_RETRY),
+    report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL_RETRY, ledgerPath),
       synthOpts(FABLE_SYNTH ? 'analyst→opus-retry' : 'analyst→fable-retry', SYNTH_RETRY.agentType))
     synthFellBack = !!report
   }
   Object.assign(ledgerSummary, classifierSummary())
   const stageFiles = await settleWrites()
-  const extra = Object.assign({}, reusedOut, stageFiles ? { stageFiles } : {})
+  const extra = Object.assign({ queryTitle: QUERY_TITLE, date: DATE }, reusedOut, stageFiles ? { stageFiles } : {}, ledgerPath ? { ledgerFromDisk: ledgerPath } : {})
   if (!report) {
     log(`Синтез не удался (${SYNTH_FIRST.name}${analystStop && analystStop.retried ? `, ${OPUS48_SYNTH.name}` : ''}, затем ${SYNTH_RETRY.name}). Материалы собраны, отчёт не написан.`)
     return { workDir: WORK_DIR, status: 'synthesis-failed', completeness, claimLedger: ledgerOut, classifierStops, synthMeta: { ledgerSummary, curation: x.curation }, ...extra }
