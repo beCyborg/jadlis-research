@@ -1,11 +1,12 @@
 {
   "version": 1,
-  "updated": "2026-09-14",
+  "updated": "2026-10-12",
   "comment": "Catalogue of research sources: model providers, 14 channels, key layers and binaries. Data only — probes, TTL and the resolve rules live in scripts/research-sources.py. Keys are English identifiers, human-facing strings are Russian.",
   "probe_ids": [
     "grok-402",
     "codex-quota",
-    "twitterapi-balance"
+    "twitterapi-balance",
+    "yandex-access"
   ],
   "providers": {
     "grok": {
@@ -25,7 +26,7 @@
       "cost": "баланс подписки Grok Build; probe бесплатный"
     },
     "codex": {
-      "label": "Codex CLI (gpt-6-astra)",
+      "label": "Codex CLI (gpt-6.1-sol)",
       "kind": "subscription",
       "binary": "codex",
       "probe": "codex-quota",
@@ -37,7 +38,7 @@
       ],
       "how_to_get": "подписка ChatGPT/Codex → `codex login`; квота общая с /jadlis-verif (verif имеет приоритет)",
       "degrade": "codexweb выпадает; расхождения верификаторов не эскалируются в третий голос",
-      "cost": "квота подписки Codex (скользящее 5-часовое окно), probe ≈6 с"
+      "cost": "квота подписки Codex (скользящее 5-часовое окно); probe — один живой веб-поиск через изолированный CODEX_HOME (gpt-6.1-sol, priority), ≈10 с"
     }
   },
   "channels": {
@@ -163,6 +164,7 @@
       "family": "web",
       "default_set": false,
       "provider": null,
+      "probe": "yandex-access",
       "requires": [
         {
           "key": "YC_SEARCH_API_KEY",
@@ -174,8 +176,8 @@
       "tools": [
         "jq"
       ],
-      "degrade": "без ключа канал не предлагается; если всё-таки выбран — yandex-search.sh отдаёт exit 2 и канал деградирует (sourceQuality=LOW)",
-      "cost": "платный, ≈0,1–0,15 ₽ за тему"
+      "degrade": "без ключа канал не предлагается; ключ без роли search-api.webSearch.user (HTTP 403 PermissionDenied) — канал выпадает ещё в resolve, проба кэшируется на 2 ч",
+      "cost": "платный, ≈0,12–0,18 ₽ за тему; проба доступа — один async-запрос без ожидания (≈0,03 ₽, ошибки авторизации не тарифицируются)"
     },
     "youtube": {
       "label": "YouTube",
@@ -201,7 +203,7 @@
       "optional_keys": [],
       "tools": [],
       "degrade": "без сессии tgsearch.py (отдельный Premium-аккаунт, скилл /telegram-search) — превью t.me + дорки через Brave",
-      "cost": "нативный режим: глобальный поиск по постам — 10 бесплатных фраз в день на Premium, сверх — Stars (10 за фразу на 19.09.2026); ресёрч берёт ≤3 фраз за прогон, платит Stars только при цене ≤20 (≤60 Stars за прогон); чаты, комментарии и поиск внутри каналов бесплатны. Запасной режим бесплатен"
+      "cost": "нативный режим: глобальный поиск по постам — 10 бесплатных фраз в день на Premium, сверх — Stars (10 за фразу на 19.09.2026); ресёрч берёт ≤3 фраз за прогон и по умолчанию только из бесплатных слотов (telegram-stars=free); Stars — только после `set option telegram-stars paid`, при цене ≤20 (≤60 Stars за прогон); чаты, комментарии и поиск внутри каналов бесплатны. Запасной режим бесплатен"
     },
     "ja": {
       "label": "Япония (Qiita / Hatena / Zenn / note)",
