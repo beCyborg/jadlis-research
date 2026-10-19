@@ -5,8 +5,16 @@
 
 ## [Unreleased]
 
+## [2.9.1] — 2026-10-19 — дневной лимит поиска выключается / daily search cap can be turned off
+
+### Для человека
+
+- Дневной лимит расходов на поиск ($2) в ресёрче теперь выключается переменной `JADLIS_SEARCH_DAILY_CAP_USD=0`, как в jadlis-search 2.2.4. Без переменной всё как раньше.
+
 ### For agents
 
+- Added: `scripts/websearch.py` reads `JADLIS_SEARCH_DAILY_CAP_USD` (`0`/`off` → no daily soft cap; a number → that cap in USD; unset → $2 as before), same change as jadlis-search 2.2.4.
+- Changed: `.claude-plugin/plugin.json` version 2.9.0 → 2.9.1.
 - Fixed: `tools/sync-shared.sh` no longer replaces `scripts/` wholesale — it copies jadlis-search's scripts over ours and lists the research-only ones it kept (`codex-home.sh`, `tg-channels.py`); the old version deleted them.
 
 ## [2.9.0] — 2026-10-12 — куратор «сколько нужно», ledger на диске, проход по цитатам, Codex GPT-6.1 Sol, протоколы по аудиту / curator takes what the decision needs, ledger on disk, citation pass, Codex GPT-6.1 Sol, protocols per the audit
