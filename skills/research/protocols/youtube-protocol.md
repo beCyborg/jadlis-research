@@ -1,7 +1,21 @@
 # YouTube — search protocol for the agent
 
-Channel added 2026-08-15 (council verdict + a package of refinements). Routing: tech/AI,
-marketing/sales, local topics (Warsaw) — per the SKILL.md tree, NOT default.
+Channel added 2026-08-15 (council verdict + a package of refinements). **Narrowed 2026-11:** the
+channel runs only for PRACTICAL topics — gadgets, cars, repair, games, app interfaces and how-to —
+per the SKILL.md tree, NOT default.
+
+> [!warning] What a video is worth (audit 2026-11, 78 runs with YouTube, `phase3d/youtube-value.md`)
+> Of 84 claims that rested on YouTube or got their second family from it, **1** was new knowledge,
+> 6 were the author's own test of an already known fact, 69 retold a text source (docs, an article, a
+> study, the author's own post on X or a blog), 8 were opinion or error. In **60 of 72** "rescued"
+> STRONG claims the video retold the same primary source as the web — false independence.
+> Rules that follow:
+> - **A video is an independent source family only when its author shows their own test or
+>   first-hand result** (measured it, drove it, repaired it, played it, clicked through the interface).
+> - **A retelling of a web or primary source is NOT a second family.** Find and cite the original
+>   (the description often links it); the video may stay as a pointer, never as confirmation.
+> - **Comments under videos are not evidence** — do not cite them.
+> State in `context` of every [yt] citation which of the two it is: "own test: …" or "retells <source>".
 
 ## Tools
 

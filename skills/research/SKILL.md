@@ -97,9 +97,11 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
       threads are in its index). Complementary local channel skills outside the workflow (if the
       user has them installed): the CIS forum index (`/cis-forums`), zelenka/lolz
       (`/zelenka-research`) — suggest them for custdev / grey-market topics.
-   2. **Technical / AI topic?** → `hackernews` ON (for RU topics branch 1 has priority);
-      `youtube` — offer as opt-in (strong clusters: tech/AI tutorials and reviews, marketing/sales;
-      transcripts are free from the home IP).
+   2. **Technical / AI topic?** → `hackernews` ON (for RU topics branch 1 has priority).
+   2b. **Practical hands-on topic?** (gadgets, cars, repair, games, app interfaces, how-to — "how does
+      the thing behave in hand") → `youtube` — offer as opt-in. ONLY here: an audit of 78 runs
+      (2026-11) found new knowledge in 1 of 84 YouTube-backed claims — elsewhere videos retell text
+      sources and fake a second family. Not for tech/AI, marketing/sales or place topics.
       `codexweb` — in ALL topics (default set). Do NOT probe Codex here: the Codex subscription
       quota is a shared pool with the verifier `/verif` (verif has priority), and step 2a decides
       availability — a missing binary, an exhausted quota or the provider switched off in the
@@ -108,8 +110,8 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
       full-research).
    4. **Local / everyday topic (places)?** («найди/выбери заведение, клинику, сервис, секцию в
       Варшаве/городе») → the `web` channel gets the place layer (section "Place layer" in
-      web-protocol.md: places-fetch.sh → Brave Place); the channels `youtube` (place reviews) and
-      `telegram` (local chats) — offer as opt-in. places-fetch gate: the key
+      web-protocol.md: places-fetch.sh → Brave Place); the channel `telegram` (local chats) — offer
+      as opt-in. places-fetch gate: the key
       `GOOGLE_PLACES_API_KEY` (no key → the script degrades to Brave Place by itself, that is
       normal). Default region PL, overridden by the variable `PLACES_REGION`.
    5. **Asian / EU market topic, or query language ∉ {ru, en}?** (Plan 2, tranche 3 — language

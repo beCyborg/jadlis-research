@@ -317,6 +317,8 @@ await aside(`${WD}/reddit.md`, async () => {
   const cp = prompts['curator'] || ''
   check(cp.includes('critical') && cp.includes('background') && cp.includes('Do NOT pad') && cp.includes('Expect 3-8') && cp.includes('hard ceiling 32') && cp.includes('evidencePrefixes: ONLY citation prefixes'),
     'curator prompt: critical/background, no padding, 3-8 load-bearing, ceiling 32, evidencePrefixes rules intact')
+  check(cp.includes('YOUTUBE FAMILY RULE') && cp.includes('own test or first-hand result') && cp.includes('Comments under videos are not evidence'),
+    'curator prompt: a YouTube retelling is not a second source family')
 }
 console.log(failures ? `\n${failures} FAILED` : '\nALL OK')
 process.exit(failures ? 1 : 0)
