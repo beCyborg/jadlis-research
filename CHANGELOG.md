@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+## [2.10.3] — 2026-11-04 — текст страниц через Jina с ключом / page text via Jina with a key
+
+### Для человека
+
+- Каналы снимают текст страниц скриптом `jina-read.sh`: он берёт ключ Jina из Связки ключей (500 запросов в минуту), поэтому параллельные каналы не упираются в лимит и реже уходят в платный Firecrawl.
+
+### For agents
+
+- Changed: `protocols/web-protocol.md` (tool table, PDF rung 2, HTML rung 2) and `protocols/yandex-protocol.md` call `bash {PLUGIN_ROOT}/scripts/jina-read.sh "<url>"` instead of a bare `curl https://r.jina.ai/…`; exit 3 → next rung.
+- Changed: `scripts/` re-vendored from `jadlis-search--v2.4.0` (adds `jina-read.sh`); `sources.json` lists `JINA_API_KEY`.
+- Changed: `plugin.json` version 2.10.2 → 2.10.3.
+
 ## [2.10.2] — 2026-11-04 — канал Яндекса переживает пустую выдачу Bright Data / Yandex channel survives an empty Bright Data page
 
 ### Для человека

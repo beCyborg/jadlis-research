@@ -17,7 +17,7 @@ news queries) and the content layer `brave_llm_context`. Domain scoping goes thr
 | `python3 {PLUGIN_ROOT}/scripts/websearch.py exa "<page description>" --tag research` (Bash) | **Default discovery** (type `lite` by default): an embedding index — the query is a description of the target page |
 | `mcp__plugin_jadlis-search_brave-search__brave_llm_context` | Content layer: returns the EXTRACTED CONTENT of pages for a query (not just links); always with `maximum_number_of_tokens` |
 | `mcp__plugin_jadlis-search_brave-search__brave_web_search` | **News / freshness** (`freshness="pw"`/`"pm"`) and keyword top-ups (+`extra_snippets`) |
-| `curl -sL --max-time 60 "https://r.jina.ai/<url>"` (Bash) | **Default snapshot writer** for HTML: the full text of ONE page (extraction ladder — Layer 3) |
+| `bash {PLUGIN_ROOT}/scripts/jina-read.sh "<url>"` (Bash; r.jina.ai with `JINA_API_KEY` from the Keychain, 500 req/min) | **Default snapshot writer** for HTML: the full text of ONE page (extraction ladder — Layer 3) |
 | `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape` | Anti-bot / JS pages — the LAST HTML rung (`proxy:"auto"`); for PDFs only as the last PDF rung (`parsers:["pdf"]`), never for x.com (the plugin hook denies it) |
 
 **CRITICAL:** Before using any tool — load it via ToolSearch if it is unavailable.
@@ -150,13 +150,13 @@ The old «≥ ~1 000 chars» rule let through a base64 loader GIF, a zh-CN copy 
 
 1. **PDF URL** (`.pdf`/`/TXT/PDF/`/`?format=pdf`) — its own ladder, in this order:
    1. `out=$(bash {PLUGIN_ROOT}/scripts/pdf-fetch.sh "<url>")` → `Read "$out"` (0 cr). `exit 2` (PDF_UNREACHABLE/PDF_EMPTY — JS gate, 403 behind Akamai, scan, paywall) → next rung. A scientific article with a DOI → try its Unpaywall OA link with `pdf-fetch.sh` first.
-   2. `curl -sL --max-time 60 "https://r.jina.ai/<url>"` (same rules as rung 2 below; 5 of 6 PDFs in the bench).
+   2. `bash {PLUGIN_ROOT}/scripts/jina-read.sh "<url>"` (same rules as rung 2 below; 5 of 6 PDFs in the bench).
    3. Last resort — `firecrawl_scrape` with `parsers:["pdf"]` AND `pdfOptions.maxPages ≤ 20` (the plugin hook lets nothing else through; a 17-page PDF cost 17 credits).
    Key numbers may sit only inside raster figures — `pdftotext` then returns the captions without the values; read the cached original `.pdf` with the `pages` parameter. Nothing worked → cite from the snippets with the mark "(reconstructed)".
 2. **HTML — the default: r.jina.ai** (renders JS in a browser; 52 of 57 alone, 0 false accepts):
    ```bash
    eval "$(bash {PLUGIN_ROOT}/scripts/secret.sh --export JINA_API_KEY 2>/dev/null)"   # once per agent; no key is fine
-   curl -sL --max-time 60 ${JINA_API_KEY:+-H "Authorization: Bearer $JINA_API_KEY"} "https://r.jina.ai/<url>"
+   bash {PLUGIN_ROOT}/scripts/jina-read.sh "<url>"   # key from the Keychain; exit 3 = Jina or the target refused → rung 3
    ```
    Bash `timeout: 90000`. **Keyless = ~20 requests/minute per IP**, and the parallel channels share
    the IP: pause 3–4 s between your Jina calls (`sleep 3` before the next one), never fire them in

@@ -360,6 +360,10 @@
     "BRIGHTDATA_ZONE": {
       "class": "B",
       "how_to_get": "имя SERP-зоны в кабинете Bright Data (Web Access → My APIs)"
+    },
+    "JINA_API_KEY": {
+      "class": "B",
+      "how_to_get": "https://jina.ai/reader → API key (бесплатный: 10 млн токенов, некоммерческий; 500 запросов/мин). Без ключа r.jina.ai даёт ~20/мин на IP"
     }
   },
   "tools": {

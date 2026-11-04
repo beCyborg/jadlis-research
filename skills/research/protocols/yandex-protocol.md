@@ -112,7 +112,7 @@ if Layer 2 already gave counter-arguments, this call can be skipped.
 - Take the nature of the unique layer into account: dzen.ru and corporate blogs are more often C-E (content marketing),
   business media (incrussia.ru, secrets.tbank.ru) — B-C. Do not pass SEO listicles off as expertise.
 - Snippets from `--out json` are enough for most citations; the full page text — only when necessary,
-  via the page-text ladder (`curl -sL https://r.jina.ai/<url>` → `firecrawl_scrape` with `proxy:"auto"`), NOT via Yandex.
+  via the page-text ladder (`bash {PLUGIN_ROOT}/scripts/jina-read.sh "<url>"` → `firecrawl_scrape` with `proxy:"auto"`), NOT via Yandex.
 
 ## Degradation (NO fallback to Brave)
 
