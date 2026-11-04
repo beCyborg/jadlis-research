@@ -598,7 +598,12 @@ def probe_yandex():
     """One synchronous /v2/web/search call (--sync, 1 result): ≈0.49 ₽ by day, 0.37 ₽ at night when it
     is accepted; auth/billing errors are not billed. Not async: deferred requests run only 00:00–06:00
     MSK (vendor quota page, 2026-11), so a daytime async probe would fail even with working access."""
+    # Bright Data SERP is the scripted fallback of yandex-search.sh (jadlis-search 2.3+, owner decision
+    # 2026-11-04): with its key the channel stays usable when the Yandex API is unpaid or has no key.
+    bd = check_key("BRIGHTDATA_API_KEY").get("state") == "present"
     if check_key("YC_SEARCH_API_KEY").get("state") == "no-key":
+        if bd:
+            return _result("ok", "Yandex API без ключа — канал через Bright Data")
         res = _result("no-key", "ключ YC_SEARCH_API_KEY не заведён")
         res["checked"] = None  # not cached: a key added later must be probed at once
         return res
@@ -608,6 +613,7 @@ def probe_yandex():
     try:
         proc = subprocess.run(
             ["bash", str(YANDEX_SH), "тест", "--sync", "--num", "1", "--no-log", "--out", "urls"],
+            env=dict(os.environ, YANDEX_BACKEND="yandex"),  # probe the API itself, never spend a Bright Data call
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -622,6 +628,8 @@ def probe_yandex():
         proc.stdout.decode("utf-8", "replace"),
         proc.stderr.decode("utf-8", "replace"),
     )
+    if state in ("fail", "no-key") and bd:
+        return _result("ok", "Yandex API недоступен (%s) — канал через Bright Data" % trim(detail, 50))
     return _result(state, detail)
 
 

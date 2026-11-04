@@ -159,12 +159,27 @@ def test_probe_yandex_cheap_call(rs, monkeypatch):
         seen["cmd"], seen["kw"] = cmd, kw
         return subprocess.CompletedProcess(cmd, 3, b"", YA_403.encode())
 
-    monkeypatch.setattr(rs, "check_key", lambda name: {"state": "present"})
+    monkeypatch.setattr(rs, "check_key", lambda name: {"state": "present" if name == "YC_SEARCH_API_KEY" else "no-key"})
     monkeypatch.setattr(rs.subprocess, "run", fake_run)
     assert rs.probe_yandex()["state"] == "fail"
     # sync: async (deferred) search runs only 00:00–06:00 MSK, a daytime async probe fails falsely
     assert "--sync" in seen["cmd"] and "--no-wait" not in seen["cmd"] and "--no-log" in seen["cmd"]
     assert seen["kw"]["stdin"] is subprocess.DEVNULL
+    # the probe asks the API itself and never spends a Bright Data call
+    assert seen["kw"]["env"]["YANDEX_BACKEND"] == "yandex"
+
+
+def test_probe_yandex_403_with_brightdata_keeps_channel(rs, monkeypatch):
+    monkeypatch.setattr(rs, "check_key", lambda name: {"state": "present"})
+    monkeypatch.setattr(rs.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 3, b"", YA_403.encode()))
+    r = rs.probe_yandex()
+    assert r["state"] == "ok" and "Bright Data" in r["detail"]
+
+
+def test_probe_yandex_no_api_key_with_brightdata(rs, monkeypatch):
+    monkeypatch.setattr(rs, "check_key", lambda name: {"state": "no-key" if name == "YC_SEARCH_API_KEY" else "present"})
+    r = rs.probe_yandex()
+    assert r["state"] == "ok" and "Bright Data" in r["detail"]
 
 
 # ── resolve ──────────────────────────────────────────────────────────────────

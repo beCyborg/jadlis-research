@@ -13,26 +13,28 @@ Base command:
 
 ```bash
 Y={PLUGIN_ROOT}/scripts/yandex-search.sh
-bash "$Y" "<query with operators>" --out json     # async (default): usually ~3-6 s; occasionally polling drags on to ~90 s (17 polls, 2026-08-26) — this is not a failure, wait
+bash "$Y" "<query with operators>" --out json     # now via Bright Data: ~1 min per query — run queries in parallel (see the warning below)
 bash "$Y" "<query>" --out urls                    # URLs only (cheap in tokens)
 ```
 
 Output: `--out text|json|urls`; stdout is clean for pipes, diagnostics (`[cost]`/`[poll]`) go to stderr.
 Exit: 0 ok (including found=0) · 2 no key (ENV `YC_SEARCH_API_KEY`) · 3 API error · 4 polling timeout.
 
-> [!warning] Access and the async window (audit 2026-11)
-> - **HTTP 403 PermissionDenied that names a folder** (`Permission to [resource-manager.folder …] denied`)
->   = the key authenticated; the cause is a **suspended billing account or a missing role**
->   `search-api.webSearch.user` — never report it as «key invalid». State on 2026-11-04: the cloud is
->   blocked over a 1.77 ₽ debt (overdue since 14.10), the role is in place, the owner is paying. Until
->   then every call answers 403 → Degradation below; `research-sources.py resolve` usually drops the
->   channel before the run.
-> - **Async (deferred) requests run only 00:00–06:00 MSK** (vendor quota page, 2026-11; quota 1 rps
->   for sync and async submit). This is why the resolve probe uses one synchronous `/v2/web/search`
->   call — a daytime async probe would fail even with working access. What the API answers to a
->   daytime async submit is not verified yet (the cloud is blocked): if it refuses (exit 3), that is
->   Degradation — do not switch the channel to `--sync` yourself, the price decision is the owner's.
-> - Space calls ≥ 1 s apart (1 rps).
+> [!warning] Backend: Bright Data while the Yandex API is unpaid (owner decision 2026-11-04)
+> - The owner's Yandex Cloud billing account is a Russian-resident one (RUB, Russian cards only) and has
+>   never accepted a payment; the owner chose the Bright Data SERP alternative. `yandex-search.sh` handles
+>   it: after one 401/402/403 from the API it marks the API down for 6 h and sends every query to
+>   `scripts/yandex-bd.py` (raw yandex.ru HTML parsed into the same `--out text|json|urls`; `found=n/a`;
+>   stderr `[fallback] …` — expected, not an error). Bright Data: 5 000 requests/month free.
+> - **Each query takes ~1 min (median 55 s, up to ~85 s).** Run the protocol's 4–6 queries IN PARALLEL in
+>   one Bash call (Bash `timeout: 300000`), e.g.
+>   `for q in "q1" "q2" "q3"; do (bash "$Y" "$q" --out json > "$WD/y_$(echo "$q" | md5 | cut -c1-6).json" 2>>"$WD/y.err") & done; wait`
+>   — then read the files. Never call one query per turn (6 queries sequentially = 6+ min of idle turns).
+> - Dates are rarely visible (≈3 of 90 results); freshness still comes from the web channel. `site:`,
+>   quotes and other operators work; the region comes from `lr` (default 225).
+> - If the Yandex API comes back (owner pays/fixes the role), delete `~/.cache/jadlis-search/yandex-api-down`;
+>   then async runs only 00:00–06:00 MSK, sync otherwise (1 rps), and 403 with a folder means suspended
+>   billing or a missing role `search-api.webSearch.user` — never «key invalid».
 
 **FORBIDDEN in this channel:** `--sync` (×16 the price), gen-search (`/v2/gen/search`, 5 ₽/req),
 `--sort time` (sorts the whole index by time, relevance collapses into noise — verified
@@ -109,13 +111,14 @@ if Layer 2 already gave counter-arguments, this call can be skipped.
 - Citation prefixes: [y1], [y2], ... Admiralty — by the type of source behind the URL (of the pages, not of Yandex).
 - Take the nature of the unique layer into account: dzen.ru and corporate blogs are more often C-E (content marketing),
   business media (incrussia.ru, secrets.tbank.ru) — B-C. Do not pass SEO listicles off as expertise.
-- Passages from `--out json` are enough for most citations; the full page text — only
-  when necessary, via `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape` (1 req/s), NOT via Yandex.
+- Snippets from `--out json` are enough for most citations; the full page text — only when necessary,
+  via the page-text ladder (`curl -sL https://r.jina.ai/<url>` → `firecrawl_scrape` with `proxy:"auto"`), NOT via Yandex.
 
 ## Degradation (NO fallback to Brave)
 
 Exit 2 (no key) / 3 (API error) / 4 (timeout) or systematic errors → **no retries**:
 return sourceQuality="LOW", empty citations, mark in findings "Yandex channel unavailable (exit N)";
-for a 403 that names a folder write "billing suspended or role missing (HTTP 403)".
+for a 403 that names a folder write "billing suspended or role missing (HTTP 403)"; a Bright Data
+failure after its own retry (exit 3/5) → "Yandex via Bright Data unavailable (exit N)".
 **Do NOT fall back to Brave** — the open web already covers the web channel; duplicating its results
 under the [y] prefix is harmful (it breaks the family logic of verification). Do NOT crash the workflow.

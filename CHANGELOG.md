@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+## [2.10.1] — 2026-11-04 — канал Яндекса через Bright Data / Yandex channel via Bright Data
+
+### Для человека
+
+- Канал yandex снова работает: пока Yandex Cloud не оплачен, запросы идут через Bright Data (решение владельца 04.11). Раньше проверка доступа видела 403 от Yandex API и выключала канал.
+- Запрос через Bright Data занимает около минуты, поэтому протокол канала теперь запускает 4–6 запросов параллельно одной командой.
+
+### For agents
+
+- Changed: `research-sources.py` Yandex probe runs the API only (`YANDEX_BACKEND=yandex`, no Bright Data call) and reports `ok` with «канал через Bright Data» when the API fails or has no key but `BRIGHTDATA_API_KEY` is present; `sources.json` lists `BRIGHTDATA_API_KEY`, `BRIGHTDATA_ZONE`.
+- Changed: `protocols/yandex-protocol.md` — Bright Data backend note (the API-down mark, ~1 min per query, parallel queries in one Bash call with `timeout: 300000`, rare dates), page text via the r.jina.ai → Firecrawl ladder, Bright Data failure wording.
+- Changed: `scripts/` re-vendored from `jadlis-search--v2.3.1` (6 h API-down mark in `yandex-search.sh`).
+- Tests: probe uses `YANDEX_BACKEND=yandex`; 403 + Bright Data key → ok; no API key + Bright Data key → ok.
+- Changed: `plugin.json` version 2.10.0 → 2.10.1.
+
 ## [2.10.0] — 2026-11-04 — каналы по итогам аудита инструментов / channels per the 2026-11 tools audit
 
 ### Для человека

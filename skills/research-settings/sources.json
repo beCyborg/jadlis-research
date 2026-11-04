@@ -352,6 +352,14 @@
     "TWITTRAPI_API_KEY": {
       "class": "B",
       "how_to_get": "https://twittrapi.com → кабинет → API key ($0.0001 за вызов; запасной бэкенд twitter, основной после того, как кончится баланс TwitterAPI.io)"
+    },
+    "BRIGHTDATA_API_KEY": {
+      "class": "B",
+      "how_to_get": "https://brightdata.com → SERP API zone → API key (5 000 бесплатно/мес); запасной бэкенд канала yandex"
+    },
+    "BRIGHTDATA_ZONE": {
+      "class": "B",
+      "how_to_get": "имя SERP-зоны в кабинете Bright Data (Web Access → My APIs)"
     }
   },
   "tools": {
