@@ -59,7 +59,7 @@ def test_web_exa_lite_default_and_ladder_2026_11():
     assert calls and all("maximum_number_of_tokens=4096" in c for c in calls)
     assert "not bench-tested" in s and "STOP … 402" in s
     i = s.index("pdf-fetch.sh")
-    assert i < s.index("r.jina.ai", i) < s.index('parsers:["pdf"]', i)
+    assert i < s.index("jina-read.sh", i) < s.index('parsers:["pdf"]', i)  # Jina rung via the script (2.10.3)
     j = s.index("**HTML — the default: r.jina.ai**")
     assert j < s.index('proxy="auto"', j)
     assert "JINA_API_KEY" in s and "429" in s
