@@ -77,11 +77,13 @@ Do not ask anything: the user has spelled the change out.
   (`scripts/codex-home.sh`, `gpt-6.1-sol`, `service_tier="priority"`, `< /dev/null`); 0 `web_search`
   events or `timed out negotiating with the code-mode host` → access `fail` («поиск не работает»),
   and `codexweb` is dropped. Usually transient — `--probe` after a while.
-- Yandex: `resolve` with `yandex` makes one async submit without polling (≈0.03 ₽ when accepted,
-  auth errors are not billed); HTTP 403 PermissionDenied (or 501 «unknown service») → access `fail`, the channel is dropped with «403
-  PermissionDenied: у сервисного аккаунта нет роли search-api.webSearch.user». The fix is in the
-  Yandex Cloud console (role on the service account), not a new key. `status` shows the cached
-  verdict and runs the probe only with `--probe`.
+- Yandex: `resolve` with `yandex` makes one synchronous search call (`--sync`, 1 result; ≈0.49 ₽ by
+  day, 0.37 ₽ at night when accepted, auth/billing errors are not billed). Not async: deferred requests
+  run only 00:00–06:00 MSK (vendor quota page, 2026-11), a daytime async probe fails even with working
+  access. HTTP 403 PermissionDenied that names a folder → access `fail`, the channel is dropped with
+  «403: ключ принят, но платёжный аккаунт приостановлен или нет роли search-api.webSearch.user» —
+  the key itself is fine: pay the billing account or grant the role in the Yandex Cloud console, do not
+  issue a new key for this. `status` shows the cached verdict and runs the probe only with `--probe`.
 - `unknown` access = the probe timed out or its output was unparseable; the source is still treated
   as usable, mention the warning line as is.
 

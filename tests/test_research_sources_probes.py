@@ -122,14 +122,21 @@ YA_403 = ('[error] API HTTP 403:\n{"code":7, "message":"rpc error: code = Permis
           'Permission to [resource-manager.folder b1g] denied"}\n')
 
 
-def test_yandex_403_is_fail_with_fixed_detail(rs):
+def test_yandex_403_with_folder_is_billing_or_role_not_bad_key(rs):
     state, detail = rs.classify_yandex(3, "", YA_403)
     assert state == "fail"
-    assert detail == "403 PermissionDenied: у сервисного аккаунта нет роли search-api.webSearch.user"
+    assert detail == rs.YANDEX_403_DETAIL
+    assert "платёжный аккаунт приостановлен" in detail and "search-api.webSearch.user" in detail
+    assert "отклонён" not in detail
+
+
+def test_yandex_403_without_folder_names_scope_role_billing(rs):
+    err = '[error] API HTTP 403:\n{"code":7, "message":"PermissionDenied"}\n'
+    assert rs.classify_yandex(3, "", err) == ("fail", rs.YANDEX_403_NOFOLDER_DETAIL)
 
 
 def test_yandex_other_verdicts(rs):
-    assert rs.classify_yandex(0, "operation_id=abc\n", "[cost] async ~0.0305₽ | тест")[0] == "ok"
+    assert rs.classify_yandex(0, "https://example.ru/\n", "[cost] sync ~0.488₽ | тест")[0] == "ok"
     assert rs.classify_yandex(2, "", "[error] YC_SEARCH_API_KEY not set")[0] == "no-key"
     assert rs.classify_yandex(3, "", "[error] API HTTP 401:\n{}")[0] == "fail"
     err501 = '[error] API HTTP 501:\n{"code":12, "message":"unknown service yandex.cloud.priv.searchapi.v2.WebSearchAsyncService"}'
@@ -155,7 +162,8 @@ def test_probe_yandex_cheap_call(rs, monkeypatch):
     monkeypatch.setattr(rs, "check_key", lambda name: {"state": "present"})
     monkeypatch.setattr(rs.subprocess, "run", fake_run)
     assert rs.probe_yandex()["state"] == "fail"
-    assert "--no-wait" in seen["cmd"] and "--no-log" in seen["cmd"]
+    # sync: async (deferred) search runs only 00:00–06:00 MSK, a daytime async probe fails falsely
+    assert "--sync" in seen["cmd"] and "--no-wait" not in seen["cmd"] and "--no-log" in seen["cmd"]
     assert seen["kw"]["stdin"] is subprocess.DEVNULL
 
 
@@ -192,7 +200,7 @@ def test_resolve_drops_yandex_on_403_caches_it_and_notes_telegram(rs, monkeypatc
 
 
 def test_resolve_keeps_yandex_when_alive(rs, monkeypatch, capsys, tmp_path):
-    monkeypatch.setitem(rs.PROBE_FUNCS, "yandex-access", lambda: rs._result("ok", "async submit принят"))
+    monkeypatch.setitem(rs.PROBE_FUNCS, "yandex-access", lambda: rs._result("ok", "sync-поиск ответил"))
     monkeypatch.setattr(rs, "check_key", lambda name: {"state": "present", "rail": "env", "detail": "env"})
     _, out = run_main(rs, capsys, "--data-dir", str(tmp_path), "resolve", "--channels", "web,yandex", "--json")
     assert json.loads(out)["channels"] == ["web", "yandex"]

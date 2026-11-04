@@ -20,6 +20,20 @@ bash "$Y" "<query>" --out urls                    # URLs only (cheap in tokens)
 Output: `--out text|json|urls`; stdout is clean for pipes, diagnostics (`[cost]`/`[poll]`) go to stderr.
 Exit: 0 ok (including found=0) · 2 no key (ENV `YC_SEARCH_API_KEY`) · 3 API error · 4 polling timeout.
 
+> [!warning] Access and the async window (audit 2026-11)
+> - **HTTP 403 PermissionDenied that names a folder** (`Permission to [resource-manager.folder …] denied`)
+>   = the key authenticated; the cause is a **suspended billing account or a missing role**
+>   `search-api.webSearch.user` — never report it as «key invalid». State on 2026-11-04: the cloud is
+>   blocked over a 1.77 ₽ debt (overdue since 14.10), the role is in place, the owner is paying. Until
+>   then every call answers 403 → Degradation below; `research-sources.py resolve` usually drops the
+>   channel before the run.
+> - **Async (deferred) requests run only 00:00–06:00 MSK** (vendor quota page, 2026-11; quota 1 rps
+>   for sync and async submit). This is why the resolve probe uses one synchronous `/v2/web/search`
+>   call — a daytime async probe would fail even with working access. What the API answers to a
+>   daytime async submit is not verified yet (the cloud is blocked): if it refuses (exit 3), that is
+>   Degradation — do not switch the channel to `--sync` yourself, the price decision is the owner's.
+> - Space calls ≥ 1 s apart (1 rps).
+
 **FORBIDDEN in this channel:** `--sync` (×16 the price), gen-search (`/v2/gen/search`, 5 ₽/req),
 `--sort time` (sorts the whole index by time, relevance collapses into noise — verified
 2026-08-06), the regional parameter `-r` for non-geo topics (0 new domains, only a reshuffle).
@@ -101,6 +115,7 @@ if Layer 2 already gave counter-arguments, this call can be skipped.
 ## Degradation (NO fallback to Brave)
 
 Exit 2 (no key) / 3 (API error) / 4 (timeout) or systematic errors → **no retries**:
-return sourceQuality="LOW", empty citations, mark in findings "Yandex channel unavailable (exit N)".
+return sourceQuality="LOW", empty citations, mark in findings "Yandex channel unavailable (exit N)";
+for a 403 that names a folder write "billing suspended or role missing (HTTP 403)".
 **Do NOT fall back to Brave** — the open web already covers the web channel; duplicating its results
 under the [y] prefix is harmful (it breaks the family logic of verification). Do NOT crash the workflow.

@@ -69,8 +69,12 @@ CODEX_PROBE_PROMPT = (
     "the first result only. Do not answer from memory."
 )
 CODEX_HOST_FAIL = "timed out negotiating with the code-mode host"
-YANDEX_403_DETAIL = "403 PermissionDenied: у сервисного аккаунта нет роли search-api.webSearch.user"
-YANDEX_501_DETAIL = "501 unknown service: API не принимает async-поиск (WebSearchAsyncService), канал работает только через него"
+# 403 that names a folder = the key authenticated (Yandex resolved its folder/cloud): the cause is a suspended
+# billing account (2026-11: cloud blocked over a 1.77 ₽ debt) or a missing role — never «key invalid».
+# Both details stay ≤ 120 chars (trim() in _result).
+YANDEX_403_DETAIL = "403: ключ принят, но платёжный аккаунт приостановлен или нет роли search-api.webSearch.user"
+YANDEX_403_NOFOLDER_DETAIL = "403 без папки: проверь scope ключа yc.search-api.execute, роль search-api.webSearch.user и биллинг"
+YANDEX_501_DETAIL = "501 unknown service: API не принимает этот вызов поиска — проверь адрес Search API"
 TELEGRAM_STARS_OPTION = "telegram-stars"
 OPTIONS = {TELEGRAM_STARS_OPTION: ("free", "paid")}  # first value = default
 
@@ -572,18 +576,16 @@ def probe_codex():
 def classify_yandex(returncode, stdout_text, stderr_text):
     """Pure verdict of the Yandex probe → (state, detail). Never echoes the key."""
     blob = "%s\n%s" % (stdout_text, stderr_text)
-    if returncode == 0 and "operation_id=" in stdout_text:
-        return "ok", "async submit принят"
+    if returncode == 0:
+        return "ok", "sync-поиск ответил"
     if returncode == 2:
         return "no-key", "ключ YC_SEARCH_API_KEY не заведён"
     if re.search(r"HTTP 403\b", blob) or "PermissionDenied" in blob:
-        return "fail", YANDEX_403_DETAIL
+        return "fail", (YANDEX_403_DETAIL if "folder" in blob else YANDEX_403_NOFOLDER_DETAIL)
     if re.search(r"HTTP 401\b", blob):
         return "fail", "401 Unauthorized: ключ YC_SEARCH_API_KEY отклонён"
     if re.search(r"HTTP 501\b", blob) or "unknown service" in blob:
         return "fail", YANDEX_501_DETAIL
-    if returncode == 0:
-        return "unknown", "exit 0 без operation_id"
     head = ""
     for line in stderr_text.splitlines():
         if line.startswith("[error]"):
@@ -593,7 +595,9 @@ def classify_yandex(returncode, stdout_text, stderr_text):
 
 
 def probe_yandex():
-    """One async submit without polling: 0.0305 ₽ when it is accepted, auth errors are not billed."""
+    """One synchronous /v2/web/search call (--sync, 1 result): ≈0.49 ₽ by day, 0.37 ₽ at night when it
+    is accepted; auth/billing errors are not billed. Not async: deferred requests run only 00:00–06:00
+    MSK (vendor quota page, 2026-11), so a daytime async probe would fail even with working access."""
     if check_key("YC_SEARCH_API_KEY").get("state") == "no-key":
         res = _result("no-key", "ключ YC_SEARCH_API_KEY не заведён")
         res["checked"] = None  # not cached: a key added later must be probed at once
@@ -603,7 +607,7 @@ def probe_yandex():
     ya_timeout = budget(YANDEX_TIMEOUT)
     try:
         proc = subprocess.run(
-            ["bash", str(YANDEX_SH), "тест", "--no-wait", "--num", "1", "--no-log"],
+            ["bash", str(YANDEX_SH), "тест", "--sync", "--num", "1", "--no-log", "--out", "urls"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
