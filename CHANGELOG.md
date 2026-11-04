@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+## [2.10.2] — 2026-11-04 — канал Яндекса переживает пустую выдачу Bright Data / Yandex channel survives an empty Bright Data page
+
+### Для человека
+
+- Скрипты обновлены из jadlis-search 2.3.2: запрос к Яндексу через Bright Data сам повторяется, если пришла пустая страница.
+
+### For agents
+
+- Changed: `scripts/` re-vendored from `jadlis-search--v2.3.2` (`yandex-bd.py` retries pages without `serp-item`).
+- Changed: `plugin.json` version 2.10.1 → 2.10.2.
+
 ## [2.10.1] — 2026-11-04 — канал Яндекса через Bright Data / Yandex channel via Bright Data
 
 ### Для человека
