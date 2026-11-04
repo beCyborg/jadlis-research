@@ -33,48 +33,75 @@ Search the platform in its own language: use the LANGUAGES / QUERIES block from 
 Noise to drop: replies from the `@grok` bot are LLM output, not a community voice — do not cite them.
 Media-only posts (`text` = just a `t.co` link) carry no quotable text — skip them.
 
-## TwitterAPI.io layer (the main path; checked 2026-10-11)
+## TwitterAPI.io layer (the main path; two backends since 2026-11)
 
-TwitterAPI.io is a third-party pay-per-call Twitter/X data API (tweets $0.15 / 1K, profiles
-$0.18 / 1K, minimum 15 credits = $0.00015 per call; a 20-tweet page ≈ $0.003; the 2026-10-11
-probe spent ~200 credits per call). It has NO semantic search: the channel is keyword-only.
-Wrapper: `{PLUGIN_ROOT}/scripts/twitterapi.sh` (REST via curl, key from `scripts/secret.sh`);
-one call takes 1–2 s.
+Wrapper: `{PLUGIN_ROOT}/scripts/twitterapi.sh` (REST via curl, keys from `scripts/secret.sh`); one call
+takes 1–2 s. It has NO semantic search: the channel is keyword-only. It speaks to two third-party
+pay-per-call X/Twitter scrapers (neither is the official X API):
 
-- **Key gate.** `bash {PLUGIN_ROOT}/scripts/twitterapi.sh balance` → JSON with credits = key ok;
-  `exit 2` = no `TWITTERAPI_IO_KEY` anywhere (env, macOS Keychain) → go straight to the Brave
-  fallback (Mode B step 5).
+| | TwitterAPI.io (`TWITTERAPI_IO_KEY`) | TwittrAPI (`TWITTRAPI_API_KEY`) |
+|---|---|---|
+| Price | per returned tweet: $0.15 / 1K tweets, min 15 credits ($0.00015) per call; a 20-tweet search page ≈ $0.003; replies ≈ $0.007 average, up to $0.012 per call | **$0.0001 per call**, whatever it returns |
+| One topic (Latest + Top + replies + profile + feed + by id) | ≈ $0.017 | ≈ $0.001 |
+| Search JSON | `{"tweets": [...], "has_next_page", "next_cursor"}` | `{"data": [...], "hasNextPage", "nextCursor"}` (`format=simple`) |
+| Tweet fields | `id`, `url`, `text`, `createdAt`, `likeCount`, `retweetCount`, `replyCount`, `author.userName` | `id`, `url`, `text`, `createdAt` (ISO), `counts.likes`, `counts.retweets`, `counts.replies`, `counts.views`, `author.username` |
+| Replies | the first item may be the root post itself — skip it | the root post is not returned |
+| Invalid operator | an EMPTY page with rc=0 after ~38 s, no error | HTTP 422 (the call is billed) |
+
+**Which backend answered** is printed to stderr as `backend=twitterapi.io` or `backend=twittrapi`
+(`fallback → twittrapi (twitterapi.io HTTP 402)` when it switched) — read it before parsing, the JSON
+shapes differ. `TWITTER_BACKEND` (env, default `auto`): `auto` = TwitterAPI.io first, TwittrAPI on HTTP
+402 (balance spent), 5xx or a missing key; `twittrapi` = TwittrAPI first; `twitterapiio` = TwitterAPI.io
+only. **Owner decision 2026-11-04:** the channel moves to TwittrAPI once the TwitterAPI.io balance runs
+out — `auto` does this by itself, do not set `TWITTER_BACKEND` in a research run. Bench 2026-11-04 (4
+topics): replies on the same tweets identical (95/95), Latest search 74–100 % the same in the same
+minute, tweets by id 44/44; the TwittrAPI answer is 1.85× shorter.
+
+- **Key gate.** `bash {PLUGIN_ROOT}/scripts/twitterapi.sh balance` → one JSON line per backend with a key
+  (TwitterAPI.io `{"recharge_credits", …}`, TwittrAPI `{"balance", "price_per_call", …}`) = ok;
+  `exit 2` = neither key anywhere (env, macOS Keychain) → go straight to the Brave fallback (Mode B step 5).
 - **Why REST, not the vendor MCP** (`mcp.twitterapi.io`, checked 2026-09-06): its `get_trends`
   returns 30 empty `{}` objects, its `get_tweet_replies` rejects the `queryType=Top` its own
   catalog advertises (backend accepts `Relevance|Latest|Likes`), and its tweet objects are
   flattened (no `author{}`, `entities`, `card`). REST returns the full objects. Do not register
   the MCP for this channel.
-- **Rate.** A paid balance has no QPS cap (6 parallel calls fine). A free-tier key is limited to
-  **1 request / 5 s** (HTTP 429) — on a 429, space the calls with `sleep 5`.
-- **Ad-hoc REST outside the wrapper.** Balance: `curl -H "x-api-key: $TWITTERAPI_IO_KEY" https://api.twitterapi.io/oapi/my/info`;
+- **Rate.** A paid TwitterAPI.io balance has no QPS cap (6 parallel calls fine). A free-tier key is
+  limited to **1 request / 5 s** (HTTP 429) — on a 429, space the calls with `sleep 5`. A TwittrAPI test
+  key allows 3 requests/s.
+- **Ad-hoc REST outside the wrapper.** TwitterAPI.io balance: `curl -H "x-api-key: $TWITTERAPI_IO_KEY" https://api.twitterapi.io/oapi/my/info`;
   trends: `GET /twitter/trends?woeid=1&count=10` (name/rank/query). A bare urllib request is blocked by
-  Cloudflare (error 1010) — send a `User-Agent` header. Credit accounting: 1 credit = $0.00001, a 20-tweet
-  page ≈ 300 credits = $0.003.
+  Cloudflare (error 1010) — send a `User-Agent` header. Credit accounting: 1 credit = $0.00001.
 - Other wrapper commands: `twitterapi.sh user <userName>` (bio, followers, `createdAt`,
-  `isBlueVerified` — for the Admiralty rating of a key author); `twitterapi.sh trends <woeid> 10`
-  only when the question is "is it trending now".
+  verified — for the Admiralty rating of a key author); `twitterapi.sh last <userName>` (latest tweets);
+  `twitterapi.sh tweets <id1,id2,…>` (≤ 100 by id); `twitterapi.sh trends <woeid> 10` only when the
+  question is "is it trending now".
 
 ### Mode B — keyword-only (the default: Grok off)
 
-The `twitter` channel stays in the run when `TWITTERAPI_IO_KEY` resolves. Steps:
+The `twitter` channel stays in the run when a key resolves. Steps (field names below are given for
+both backends — check the stderr `backend=` line):
 
 1. `twitterapi.sh search '<keywords + operators> since:<DATE − 6 months> lang:xx' Latest`
 2. `twitterapi.sh search '<same or the semantic angle rephrased as keywords> since:<DATE − 12 months>' Top`
-   — **`since:` is mandatory for Top too**: without it Top returns posts from 2023–2025.
+   — **`since:` is mandatory for Top too**: without it Top returns posts from 2023–2025. But Top +
+   `since:` does **not** reliably return old posts: nothing leaks outside the window, yet in a dense
+   topic Top covered only the last week (bench 2026-11, both backends). When the question needs
+   history, split the window with `until:` — e.g. `since:<DATE − 12 months> until:<DATE − 6 months>`
+   as its own Top call.
 3. `twitterapi.sh replies <id> Likes` on the top-engagement post from 1-2 (counterarguments).
-   The first item may be the root post itself — skip it. Replies of one thread are dependent
-   sources, not independent confirmation.
-4. optional second page of 1 via `next_cursor` (`twitterapi.sh search '<q>' Latest <cursor>`)
-   when the first page is on-topic and `has_next_page` is true.
+   Replies of one thread are dependent sources, not independent confirmation.
+   - `backend=twitterapi.io`: **one tweet per run, first page only** — replies are its most expensive
+     call (≈$0.007 average, up to $0.012; 44 % of the topic cost). Skip the root post if it comes first.
+   - `backend=twittrapi`: a page costs $0.0001 — page through `nextCursor` to the end of the thread
+     (`twitterapi.sh replies <id> Likes <cursor>`, stop on an empty page or `hasNextPage: false`), and
+     replies on a second tweet are fine.
+4. optional second page of 1 via the cursor (`twitterapi.sh search '<q>' Latest <cursor>`) when the
+   first page is on-topic and `has_next_page` / `hasNextPage` is true (cheap on both backends — a short
+   TwitterAPI.io page bills only the tweets it returns).
 5. **Second fallback — Brave.** Go here when `twitterapi.sh` exits ≠ 0, when a 429 persists after
    the `sleep 5` spacing above, OR when a search returns **0 tweets with rc=0**
-   (`{"tweets":[],"has_next_page":false}` — an empty page is not a success, the wrapper raises no
-   error). Use `mcp__plugin_jadlis-search_brave-search__brave_web_search` with
+   (`{"tweets":[],"has_next_page":false}` or `{"data":[],"hasNextPage":false}` — an empty page is not a
+   success, the wrapper raises no error). Use `mcp__plugin_jadlis-search_brave-search__brave_web_search` with
    `site:x.com <topic keywords>` — 2 queries, `count: 15`, `freshness: "py"` (without it about half
    of the results are older than a year). Snippets only: Brave returns no tweet text beyond the
    SERP snippet, so annotate those citations MEDIUM at most and never claim engagement numbers.
@@ -101,7 +128,7 @@ failure, and the share of HIGH citations is not a metric for this channel.
 The channel cannot read images or videos of posts: if the topic is **visual** (memes, interface
 screenshots, demo videos), state this limitation in findings.
 
-## Budget: ≤4 API calls (Mode B)
+## Budget: ≤4 API calls (Mode B) — ≈ $0.017 per topic on TwitterAPI.io, ≈ $0.001 on TwittrAPI
 
 Reality (telemetry v5, 72 runs, Fan-out phase): median 16 tool calls per agent, which is ≈12–19
 TwitterAPI.io calls — agents pack several calls into one Bash, and 61 of 65 agents went over 4
