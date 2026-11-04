@@ -64,7 +64,7 @@
         "jq",
         "pdftotext"
       ],
-      "degrade": "без BRAVE_API_KEY канал выпадает и ресерч считается недостаточным: Brave нужен и верификаторам; без FIRECRAWL_API_KEY остаётся лестница defuddle → r.jina.ai",
+      "degrade": "без BRAVE_API_KEY канал выпадает и ресерч считается недостаточным: Brave нужен и верификаторам; без FIRECRAWL_API_KEY лестница текста страницы теряет последнюю ступень — остаются pdf-fetch и r.jina.ai",
       "cost": "Brave — по тарифу Search; Firecrawl — по кредитам аккаунта"
     },
     "codexweb": {

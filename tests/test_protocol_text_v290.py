@@ -44,13 +44,26 @@ def test_telegram_free_slots_rule_and_no_dead_fallbacks():
     assert "Output shape" in s and "never through a shell variable" in s
 
 
-def test_web_exa_auto_and_pdf_ladder():
+def test_web_exa_lite_default_and_ladder_2026_11():
     s = read(PROTO / "web-protocol.md")
     assert "add `--type keyword`" not in s
     assert "never `--type keyword`" in s
     assert ".response.results" in s
+    assert "Exa `lite` is the default engine for every intent except news" in s
+    assert "--include-domains" in s
+    # every brave_llm_context call carries a token cap
+    calls = re.findall(r"brave_llm_context\(([^)]*)\)", s)
+    assert calls and all("maximum_number_of_tokens=4096" in c for c in calls)
+    assert "not bench-tested" in s and "STOP … 402" in s
     i = s.index("pdf-fetch.sh")
-    assert i < s.index("r.jina.ai", i) < s.index("contents \"<url>\" --full", i) < s.index('parsers:["pdf"]', i)
+    assert i < s.index("r.jina.ai", i) < s.index('parsers:["pdf"]', i)
+    j = s.index("**HTML — the default: r.jina.ai**")
+    assert j < s.index('proxy="auto"', j)
+    assert "JINA_API_KEY" in s and "429" in s
+    # the dropped rungs are named only in the «not in the ladder» note
+    assert 'contents "<url>" --full' not in s and "defuddle parse" not in s
+    assert "crawl4ai-venv" not in s and "api.tavily.com" not in s
+    assert "Base64-Image-Removed" in s and "6-word shingles" in s
 
 
 def test_youtube_full_tool_names_and_layers_without_grokweb():

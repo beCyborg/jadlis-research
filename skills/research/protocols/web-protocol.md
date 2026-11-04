@@ -1,41 +1,79 @@
-# Web — search protocol for the agent (Brave + Exa)
+# Web — search protocol for the agent (Exa + Brave)
 
-## MCP tools
+## Engine choice (audit 2026-11, read first)
 
-### Brave Search (content + search) + Firecrawl (targeted scraping)
+**Exa `lite` is the default engine for every intent except news.** Blind test 2026-11 on 50 real
+queries of the owner (5 engines, two judges of different families): mean rank Exa `auto` 2.14,
+Exa `lite` 2.16, Brave 2.96. `lite` = `auto` in quality (p = 0.74), both beat Brave 32 : 12
+(p = 0.004), `lite` is 43 % cheaper ($0.004 vs $0.007) — Russian queries included (Exa `lite` was
+the best on RU, rank 1.92). **Brave is the engine for news and freshness** (best for both judges on
+news queries) and the content layer `brave_llm_context`. Domain scoping goes through Exa
+`--include-domains`, not `site:` (the 11 `site:` queries had no reliable winner, every score ≤ 4.3).
+
+## Tools
 
 | Tool | Purpose |
 |---|---|
-| `mcp__plugin_jadlis-search_brave-search__brave_llm_context` | **Default for research**: returns the EXTRACTED CONTENT of pages for a query (not just links) — covers most needs without scraping |
-| `mcp__plugin_jadlis-search_brave-search__brave_web_search` | Keyword-based discovery of sources — when you need the LINKS THEMSELVES / coverage (+`extra_snippets`) |
-| `defuddle parse <url> --md` (Bash, CLI 0.19.3) | **Default snapshot writer**: the full text of ONE page verbatim, 0 credits (extraction ladder — Layer 3) |
-| `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape` | Anti-bot / JS pages — the LAST rung of the ladder; for PDFs only as the last PDF rung (`parsers:["pdf"]`), never for x.com (the plugin hook denies it) |
+| `python3 {PLUGIN_ROOT}/scripts/websearch.py exa "<page description>" --tag research` (Bash) | **Default discovery** (type `lite` by default): an embedding index — the query is a description of the target page |
+| `mcp__plugin_jadlis-search_brave-search__brave_llm_context` | Content layer: returns the EXTRACTED CONTENT of pages for a query (not just links); always with `maximum_number_of_tokens` |
+| `mcp__plugin_jadlis-search_brave-search__brave_web_search` | **News / freshness** (`freshness="pw"`/`"pm"`) and keyword top-ups (+`extra_snippets`) |
+| `curl -sL --max-time 60 "https://r.jina.ai/<url>"` (Bash) | **Default snapshot writer** for HTML: the full text of ONE page (extraction ladder — Layer 3) |
+| `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape` | Anti-bot / JS pages — the LAST HTML rung (`proxy:"auto"`); for PDFs only as the last PDF rung (`parsers:["pdf"]`), never for x.com (the plugin hook denies it) |
 
 **CRITICAL:** Before using any tool — load it via ToolSearch if it is unavailable.
-**RATE LIMIT:** Brave (Search plan): 50 req/s — **parallel calls are OK** (several tool calls in one message). Firecrawl scrape: 1 req/s. On 429 — wait 1 s, retry (max 2x).
+**RATE LIMIT:** Brave (Search plan): 50 req/s — **parallel calls are OK** (several tool calls in one message). Exa `/search`: 10 QPS. Firecrawl scrape: 1 req/s. On 429 — `websearch.py` waits and retries twice by itself; for MCP calls wait 1 s, retry (max 2x).
+**HTTP 402 = stop that engine, do not retry.** `websearch.py` answers `STOP … 402` without a network call for 15 minutes after a 402 (on 30.10.2026 a series made 888 calls in an hour after `USAGE_LIMIT_EXCEEDED`); a Brave MCP call that returns 402 means the same for Brave. Switch to the other engine for the rest of the run and note it in the channel file.
 
 ## CONTENT-FIRST Protocol
 
-### Layer 1 — Content + discovery (2-4 calls, IN PARALLEL in one message)
+### Layer 1 — Discovery + content (2-4 calls, IN PARALLEL in one message)
 
 **Mandatory pair (in one message):**
+```bash
+python3 {PLUGIN_ROOT}/scripts/websearch.py exa "<description of the target page: e.g. practitioner blog post explaining how X works in production>" --tag research -n 10 --out json
 ```
-brave_llm_context(query="<expanded query on the topic>", count=30, maximum_number_of_urls=12)
-brave_web_search(query="<topic keywords>", count=10, extra_snippets=true)
+```
+brave_llm_context(query="<expanded query on the topic>", count=30, maximum_number_of_urls=12, maximum_number_of_tokens=4096)
 ```
 
-> **Knobs of `brave_llm_context` — verified 2026-08-06.** Of all the tuning parameters, only two
-> actually work:
+**News / freshness topic** (an event, a release, «за неделю / за месяц», prices that change) → add
+Brave in the same message — it is the news engine:
+```
+brave_web_search(query="<topic keywords>", count=10, freshness="pw", extra_snippets=true)   # "pm" for a month
+```
+
+**Second pair — counterarguments / an alternative angle (in one message):**
+```bash
+python3 {PLUGIN_ROOT}/scripts/websearch.py exa "<page that criticises / compares / reports problems with the topic>" --tag research -n 10 --out json
+```
+```
+brave_llm_context(query="<criticism, problems, comparisons on the topic>", count=30, maximum_number_of_urls=12, maximum_number_of_tokens=4096)
+```
+
+**Exa rules:**
+- The query = **a description of the target page** as a natural phrase, without operators or quotes; 1-2 words give scatter. Keep `-n` ≤ 10-15 — better 2-3 queries from different angles.
+- **Type:** keep the script default (`lite`). `auto` has the same quality for $0.007 instead of $0.004 and is slower; **never `--type keyword`** (legacy; on Russian queries it lost 14 : 0 to the semantic types in R3 — fewer results, less Cyrillic, older pages).
+- **RU topic → Exa in Russian, a full sentence** (Exa `lite` was the best engine on RU queries, rank 1.92).
+- **Domain scoping → `--include-domains a.com,b.org`** (and `--exclude-domains …`, `--start 2026-01-01 --end …` for dates), not `site:` in the query.
+- **Exa does not index reddit.com** — 0 results, no error. Reddit threads are the reddit channel's job (or Brave `site:reddit.com`).
+- **Key gate:** `exit 2` = no `EXA_API_KEY` anywhere (env, `~/.config/exa/key`, Keychain via `scripts/secret.sh`) → Brave takes over discovery: `brave_web_search(query="<topic keywords>", count=10, extra_snippets=true)` in place of every Exa call (keyword query, not a page description). Not a channel error.
+- **Output shape (`--out json`):** an envelope, not a list — `{"_meta": {"engine", "mode", "http", "latency_ms", "cost_usd", "cost_src", "n_res", "err"}, "response": {"results": [{"url", "title", "publishedDate", "author", "highlights": [...]}, ...]}}`. Take the list from `.response.results` (`r[:8]` on the top level fails with `KeyError`); e.g. `... --out json | jq -r '.response.results[] | [.publishedDate[0:10], .url, .title] | @tsv'`. Highlights run up to ~8 KB per result. URLs only → `--out urls`.
+
+> **Knobs of `brave_llm_context` — verified 2026-08-06, token cap added 2026-11.**
 > - `count` — the width of the funnel (the number of results CONSIDERED, not returned). 20→30 yields
 >   fundamentally new sources, including the primary sources the rest cite.
-> - `maximum_number_of_urls` — **the only hard cap**: ask for 8 — get exactly 8.
+> - `maximum_number_of_urls` — **the only hard cap on sources**: ask for 8 — get exactly 8.
+> - `maximum_number_of_tokens` — **always pass it: 4096 when you need sources** (the default call),
+>   **8192 only when you need the page text itself** in the answer. It works as a rough guide
+>   (8192→2048 ≈ −4× the volume). Without it one answer ran to ~36k characters, 16 times per run
+>   (audit 2026-11: ≈2 300 Brave MCP calls in 38 runs). The 4096/8192 values are **not bench-tested
+>   for quality** — if a 4096 answer misses the content you need, repeat that one query with 8192.
 >
 > **IGNORED (do not pass, this is noise in the call):** `maximum_number_of_snippets`,
 > `maximum_number_of_snippets_per_url`, `maximum_number_of_tokens_per_url`,
 > `context_threshold_mode` (the `strict` mode had no effect whatsoever — neither on volume nor on junk).
 > `enable_source_metadata` adds a useful `site_name`, but drags along a long favicon URL for every
-> source — a pure waste of tokens. `maximum_number_of_tokens` works only as a rough guide
-> (8192→2048 ≈ −4× the volume).
+> source — a pure waste of tokens.
 >
 > **Duplicates eat the budget:** the same document regularly arrives under 2 URLs (PDF mirrors —
 > `media.defense.gov` and `nsa.gov` for one report). In the probe this was 21–29 % of all snippets, up to a third
@@ -46,49 +84,31 @@ brave_web_search(query="<topic keywords>", count=10, extra_snippets=true)
 > result arrive even if you did not ask for them. An explicit `extra_snippets=false` cuts the payload ≈fourfold —
 > use it for refining/top-up calls where only the URLs are needed.
 
-**Second pair — counterarguments / an alternative angle (in one message):**
-```
-brave_llm_context(query="<criticism, problems, comparisons on the topic>", count=30, maximum_number_of_urls=12)
-brave_web_search(query="<query from an alternative angle>", count=8)   # optional
-```
-
 QUERY PHRASING RULES:
+- For Exa: a description of the page (see above).
 - For `brave_web_search`: the query = keywords, NOT a description of the page
   - BAD: "comprehensive analysis of AI agent frameworks and their adoption in enterprise"
   - GOOD: "AI agent frameworks enterprise adoption comparison 2026"
 - For `brave_llm_context`: an expanded query is acceptable (the tool extracts the relevant content itself)
-- For fresh information: `freshness="pm"` (month) or `freshness="pw"` (week)
+- For fresh information: Brave with `freshness="pm"` (month) or `freshness="pw"` (week)
 - Search the platform in its own language: use the LANGUAGES / QUERIES block from the orchestrator prompt; when `languages` contains anything beyond ru/en, Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md` first (native-term dictionary).
-- For Russian-language topics: the query in Russian (details — the "RU topics" block below)
+- For Russian-language topics: the queries in Russian (details — the "RU topics" block below)
 
-**RU topics (verified 2026-08-06).** The driver of how "Runet-heavy" the results are is **the language of the query, not geo**:
+**RU topics (Brave part verified 2026-08-06).** Exa `lite` in Russian goes first (see above). For the Brave
+calls the driver of how "Runet-heavy" the results are is **the language of the query, not geo**:
 - `country="RU"` (+`search_lang="ru"`, `ui_lang="ru-RU"`) yielded only **2 new domains out of 16** with
   85 % URL overlap — cosmetics, not worth a separate call. **Not recommended.**
 - What works: a query in Russian + `freshness="pm"` — **3 new domains out of 10** in the probe,
   including fresh industry rankings with prices. Freshness is a stronger lever for RU result diversity than geo.
 - **Channel gap:** Russian business media (`rb.ru`, `cnews.ru`, `tadviser.ru`, `forbes.ru`, `rbc.ru`)
   are **never** returned by Brave **under any parameters** — the RU results are an SEO layer (vendor and
-  integrator blogs + rankings). This gap is closed by the optional yandex channel
-  (`yandex-protocol.md`), not by tweaking Brave's parameters.
+  integrator blogs + rankings). Exa `--include-domains rb.ru,tadviser.ru,…` reaches named domains; the
+  deep Runet layer is the optional yandex channel (`yandex-protocol.md`).
 
-### Layer 1b — Semantic pass (Exa, 1 call)
-
-Exa is an embedding index: it catches pages that keyword-Brave does not find (overlap of the top-5 domains between the engines ≈0.23 in 09.2026 and again in 10.2026). The query = **a description of the target page** as a natural phrase, without operators or quotes.
-
-**Order by intent (blind re-test R3, 2026-10, 48 queries, two judges):**
-- **Product / company / people topics → Exa FIRST** (launch it in the same message as the Brave pair, or before it): Exa won 7 : 0 on English product/company/people queries.
-- **Russian-language research → Exa first as well** (Exa 6 : 3).
-- English research → both engines, order does not matter (7 : 6).
-
-```bash
-python3 {PLUGIN_ROOT}/scripts/websearch.py exa "<description of the target page: e.g. practitioner blog post explaining how X works in production>" --tag research -n 8 --out json
-```
-
-- **Key gate:** `exit 2` = no `EXA_API_KEY` anywhere (env, `~/.config/exa/key`, Keychain via `scripts/secret.sh`) → SKIP the layer silently (not a fallback, not a channel error).
-- **RU topic → keep the default `--type auto`; never `--type keyword`.** R3: auto beat keyword 14 : 0 on Russian queries — keyword returned fewer results (6.5 vs 10), less Cyrillic (79 % vs 96 %) and older pages (median 425 vs 217 days); the script itself warns that `keyword` is a legacy type.
-- **Output shape (`--out json`):** an envelope, not a list — `{"_meta": {"engine", "mode", "http", "latency_ms", "cost_usd", "cost_src", "n_res", "err"}, "response": {"results": [{"url", "title", "publishedDate", "author", "highlights": [...]}, ...]}}`. Take the list from `.response.results` (`r[:8]` on the top level fails with `KeyError`); e.g. `... --out json | jq -r '.response.results[] | [.publishedDate[0:10], .url, .title] | @tsv'`. Highlights run up to ~8 KB per result. URLs only → `--out urls`.
-- The results go into the same Layer 2 candidate pool marked with the source `exa`; URL duplicates against the Brave results are collapsed. Exa-only candidates go through the same selection and full-text fetch (Layer 3), and their reliability badge is no higher than the rest.
-- Budget: 1 call (2 for a narrow topic with different angles); $0.007/call.
+- The Exa and Brave results go into one Layer 2 candidate pool marked with their source; URL duplicates
+  are collapsed. Every candidate goes through the same selection and full-text fetch (Layer 3); no engine
+  raises a reliability badge.
+- Budget: 2 Exa calls ($0.004 each) + 2 `brave_llm_context` + 0-1 news `brave_web_search`.
 
 ### Layer 2 — Evaluation and selection (0 calls)
 
@@ -110,36 +130,57 @@ Analyze the Layer 1 results:
 
 ### Layer 3 — Full-text fetch: the extraction ladder (2-5 URLs: all HIGH candidates + gaps)
 
-The order of the rungs is fixed (stack audit 2026-09: verbatimness and price). A rung has closed
-the page (body ≥ ~1 000 characters, not challenge markup) → do not go further. Write the real rung
-into the snapshot header: `Extractor: <pdf-fetch|defuddle|jina|exa-full|tavily|firecrawl>`.
+The order of the rungs is fixed (bench 2026-11 on 60 real research pages, ground truth = a headless
+Chromium render: this ladder took 56 of 57 pages with 0 false accepts — the one miss was a Reddit
+thread no extractor read; the old defuddle-first ladder took 54 with 2 silently truncated bodies).
+A rung has closed the page (the body passed the gate below) → do not go further. Write the real rung
+into the snapshot header: `Extractor: <pdf-fetch|jina|firecrawl>`.
 There is no `timeout` utility on macOS — set the time limit with the Bash tool's `timeout` parameter.
+
+**Gate — a body is accepted only if ALL hold:**
+1. ≥ 1 000 characters are left after removing `data:…;base64,…` blobs and `<Base64-Image-Removed>`;
+2. base64 / `data:` URIs take < 30 % of the body;
+3. the script matches the expected language (RU page: Cyrillic ≥ 50 % of letters; EN page: CJK < 5 %);
+4. no block phrase in a short body («Just a moment», «Access denied», «captcha», «verify you are human»);
+5. when a quote is known (a snapshot for a citation): the quote is in the body verbatim or ≥ 80 % of
+   its 6-word shingles — **compare after stripping** Markdown link targets `](…)`, bare URLs, all
+   punctuation and `_`, lowercased, whitespace collapsed (a link inside the phrase otherwise breaks
+   the match and rejects a correct body).
+The old «≥ ~1 000 chars» rule let through a base64 loader GIF, a zh-CN copy of a Google doc and a site footer.
 
 1. **PDF URL** (`.pdf`/`/TXT/PDF/`/`?format=pdf`) — its own ladder, in this order:
    1. `out=$(bash {PLUGIN_ROOT}/scripts/pdf-fetch.sh "<url>")` → `Read "$out"` (0 cr). `exit 2` (PDF_UNREACHABLE/PDF_EMPTY — JS gate, 403 behind Akamai, scan, paywall) → next rung. A scientific article with a DOI → try its Unpaywall OA link with `pdf-fetch.sh` first.
-   2. `curl -s --max-time 45 "https://r.jina.ai/<url>"` (keyless, 0 cr).
-   3. `python3 {PLUGIN_ROOT}/scripts/websearch.py contents "<url>" --full` (~$0.001).
-   4. Last resort — `firecrawl_scrape` with `parsers:["pdf"]` AND `pdfOptions.maxPages ≤ 20` (the plugin hook lets nothing else through; a 17-page PDF cost 17 credits).
-   Probe 2026-10-11 on an NSA PDF: `pdf-fetch.sh` → 403 / `PDF_EMPTY`; `r.jina.ai` (40 KB) and `contents --full` (39 KB, $0.001) both returned the full text with the quote; Firecrawl returned the same for 17 credits. Nothing worked → cite from the snippets with the mark "(reconstructed)".
-2. **HTML — the default:** `defuddle parse "<url>" --md` (Bash, `timeout: 60000`; on 403 — `-u "<browser User-Agent>"`) → stdout = clean markdown of the main content (it strips navigation itself; probe 2026-09-06: a Cloudflare doc → 1.1 KB of clean text versus 18 KB from Reader with menus). Empty / < 1 000 characters / challenge text → rung 3.
-3. **CSR / JS render:** `curl -s --max-time 45 "https://r.jina.ai/<url>"` (Reader, keyless; probe 2026-09-06 — 200, 18 KB; the timeout is mandatory — it hangs on heavy pages). Empty → rung 4.
-   Local alternative for the same rung (no external service): Crawl4AI 0.9.3 in `~/.cache/crawl4ai-venv` — `~/.cache/crawl4ai-venv/.venv/bin/python -c 'import asyncio,sys;from crawl4ai import AsyncWebCrawler
-async def m():
-    async with AsyncWebCrawler(verbose=False) as c: r=await c.arun(url=sys.argv[1]); print(r.markdown if isinstance(r.markdown,str) else r.markdown.raw_markdown)
-asyncio.run(m())' "<url>"` (bake-off 2026-09-06: 3/3 URLs, quote matched, <2 s each; output keeps navigation like Reader does). Venv missing → skip.
-4. **URL-exact index:** `python3 {PLUGIN_ROOT}/scripts/websearch.py contents "<url>" --full` (Exa contents, ~$0.001/page; **always `--full`** — the default truncates to 8 000 characters, and a truncated piece does not close the gate).
-5. **Tavily extract — only with the key `TAVILY_API_KEY`** (resolve it first: `eval "$(bash "{PLUGIN_ROOT}/scripts/secret.sh" --export TAVILY_API_KEY)"` — env, then the macOS Keychain; there is NO keyless mode: without a key `POST /extract` → 401 "missing or invalid API key", checked 2026-09-06): `curl -s --max-time 30 -X POST https://api.tavily.com/extract -H "Authorization: Bearer $TAVILY_API_KEY" -H 'Content-Type: application/json' -d '{"urls":["<url>"]}'` → `.results[0].raw_content`. No key → the rung is skipped silently.
-6. **Anti-bot — the last rung:** `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape(url, formats=["markdown"], onlyMainContent=true)`; on failure → retry with `waitFor: 5000`. **Never** for PDFs outside the PDF ladder (rung 1) and never for x.com/twitter.com (an AI retelling for 30 credits, the hook denies it; tweets — the twitter channel). Behind a login — Playwright MCP only.
+   2. `curl -sL --max-time 60 "https://r.jina.ai/<url>"` (same rules as rung 2 below; 5 of 6 PDFs in the bench).
+   3. Last resort — `firecrawl_scrape` with `parsers:["pdf"]` AND `pdfOptions.maxPages ≤ 20` (the plugin hook lets nothing else through; a 17-page PDF cost 17 credits).
+   Key numbers may sit only inside raster figures — `pdftotext` then returns the captions without the values; read the cached original `.pdf` with the `pages` parameter. Nothing worked → cite from the snippets with the mark "(reconstructed)".
+2. **HTML — the default: r.jina.ai** (renders JS in a browser; 52 of 57 alone, 0 false accepts):
+   ```bash
+   eval "$(bash {PLUGIN_ROOT}/scripts/secret.sh --export JINA_API_KEY 2>/dev/null)"   # once per agent; no key is fine
+   curl -sL --max-time 60 ${JINA_API_KEY:+-H "Authorization: Bearer $JINA_API_KEY"} "https://r.jina.ai/<url>"
+   ```
+   Bash `timeout: 90000`. **Keyless = ~20 requests/minute per IP**, and the parallel channels share
+   the IP: pause 3–4 s between your Jina calls (`sleep 3` before the next one), never fire them in
+   parallel. With `JINA_API_KEY` the limit is lifted. **HTTP 429 → go to rung 3 for this URL, do not
+   loop.** RU pages are slow on Jina (median 13 s in the bench) — that is not a failure. Body fails the
+   gate / 403 / challenge text → rung 3.
+3. **Anti-bot / JS — the last HTML rung:** `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape(url, formats=["markdown"], onlyMainContent=true, proxy="auto")`; on failure → retry once with `waitFor: 5000`. About 1 page in 20 needs it (Revolut, idealista-class anti-bot pages). **HTML only** — never for PDFs outside the PDF ladder (rung 1.3) and never for x.com/twitter.com (an AI retelling for 30 credits, the hook denies it; tweets — the twitter channel).
+4. **Reddit URLs — not this ladder.** Every extractor is blocked on reddit.com (the bench miss). A Reddit thread that matters → the reddit channel tools: Reddit MCP `fetch_comments` or `python3 {PLUGIN_ROOT}/scripts/reddit-archive.py comments <id> --compact` (see `reddit-protocol.md`).
+5. **Behind a login** → Playwright MCP only.
+
+**Not in the ladder any more** (bench 2026-11): defuddle (added no page beyond Jina + Firecrawl on 57
+pages and let 2 truncated bodies through as first rung), Exa `contents` (partial pages 3× in 57),
+Tavily keyless (429 at volume and 3 truncated bodies), Crawl4AI (its venv is gone).
 
 No rung produced a body → mark the URL `[SOURCE UNAVAILABLE]`, the citation — MEDIUM at most, "[no-snapshot: blocked]".
 
 ### Layer 4 — Supplementation (optional, 0-2 calls)
 
 If gaps remain:
-- **The second page (the first set of results is exhausted):** `brave_web_search(query="<the same query>", count=10, offset=1)`
+- **Another Exa angle** — a different description of the target page, or `--start <date>` for fresh pages.
+- **Domain-filtered search:** `websearch.py exa "<page description>" --tag research --include-domains specific-site.com` (not `site:`; Brave alternative — `goggles="$discard\n$site=specific-site.com"`).
+- **The second Brave page (the first set of results is exhausted):** `brave_web_search(query="<the same query>", count=10, offset=1)`
   — in the probe on 2026-08-06 it gave **10/10 new URLs, zero overlap**; cheaper and more reliable than
   rephrasing the query. The ceiling is `offset=9` (~100 results per query).
-- Domain-filtered search: `brave_web_search(query="...", goggles="$discard\n$site=specific-site.com")`
 - Search for fresh data: `brave_web_search(query="...", freshness="pw")`
 - **Ready-made Q&A — only for product / consumer / comparison topics:**
   `brave_web_search(query="...", result_filter=["web","faq"])` — returns question/answer pairs of
@@ -177,11 +218,12 @@ The results of the place layer are ordinary citations with reliability (a Google
 a review aggregator, usually C; the venue's own site = A/E depending on context). Opening hours
 and prices must be CROSS-CHECKED against the venue's site — cards go stale.
 
-## Budget: 5-10 calls (+1 Exa, +0-3 place layer for local topics)
+## Budget: 6-12 calls (+0-3 place layer for local topics)
 
-Reality (telemetry v5, 72 runs, Fan-out phase, 71 agents): median 34 tool calls per agent — Brave
-16 (p90 23), Exa 1, text extraction 11; median 9 snapshots per run instead of "3-5". Median 389 s
-(p90 577 s).
+Reality (telemetry v5, 72 runs, Fan-out phase, 71 agents; before the 2026-11 engine switch): median
+34 tool calls per agent — Brave 16 (p90 23), Exa 1, text extraction 11; median 9 snapshots per run
+instead of "3-5". Median 389 s (p90 577 s). Audit 2026-11: `brave_llm_context` without a token cap
+returned ~36k characters per call — the cap in Layer 1 is the main saving.
 
 | Layer | Calls | Mandatory |
 |-------|---------|-------------|
@@ -192,9 +234,10 @@ Reality (telemetry v5, 72 runs, Fan-out phase, 71 agents): median 34 tool calls 
 
 ## Fallback
 
-1. On a failure of `brave_llm_context` → continue on `brave_web_search` (+`extra_snippets`) and Layer 3. On a failure of `brave_web_search` → retry with a rephrased keyword query + `count=5`. Max 2 retries.
-2. The full text of a page — only via the Layer 3 ladder (defuddle → jina → Exa `--full` → Tavily
-   when a key is present → Firecrawl last); Playwright MCP — **only for logged-in sessions**.
+1. Exa fails (`exit 2` no key, `STOP … 402`, exit 3/4) → Brave `brave_web_search` (+`extra_snippets`) takes over discovery with keyword queries. On a failure of `brave_llm_context` → continue on Exa + `brave_web_search` and Layer 3. On a failure of `brave_web_search` → retry with a rephrased keyword query + `count=5`. Max 2 retries; a 402 is never retried.
+2. The full text of a page — only via the Layer 3 ladder (PDF: pdf-fetch → r.jina.ai → Firecrawl
+   `parsers:["pdf"]`; HTML: r.jina.ai → Firecrawl `proxy:"auto"`; Reddit → the Reddit tools);
+   Playwright MCP — **only for logged-in sessions**.
 3. If all channels fail → record `[WEB SOURCE UNAVAILABLE]` and finish with what you have.
 
 ### Google-layer slots (off by default)
