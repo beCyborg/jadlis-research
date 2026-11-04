@@ -5,6 +5,29 @@
 
 ## [Unreleased]
 
+## [2.10.0] — 2026-11-04 — каналы по итогам аудита инструментов / channels per the 2026-11 tools audit
+
+### Для человека
+
+- Канал web ищет через Exa типа `lite` по умолчанию, Brave — для новостей; текст страницы снимается лестницей pdf-fetch → r.jina.ai → Firecrawl с гейтом и проверкой цитаты. Основание — слепой тест на 50 реальных запросах и 60 реальных страницах за три месяца.
+- Reddit: треды ищутся сначала через Brave `site:reddit.com`, потом глобальным `reddit_search` (89 % релевантных против 45 % у поиска по сабреддитам). Деревья reddit-alt и RSS убраны; записаны даты закрытия API Reddit (RSS — 13.11.2026, весь публичный доступ — март 2027) и запасной путь через Arctic Shift.
+- Hacker News и Substack: треды и посты ищутся через Exa с фильтром домена — родной поиск площадок оказался последним. Substack больше не начинает с авторов.
+- X: два бэкенда — TwitterAPI.io и TwittrAPI; переход на TwittrAPI сам случится, когда кончится баланс TwitterAPI.io.
+- YouTube выбирается только для практических тем. Видео — отдельная семья источников, только если автор показывает свой тест; пересказ чужого источника второй семьёй не считается. За три месяца YouTube дал новое знание в 1 из 84 ключевых утверждений.
+- Telegram: новый поиск каналов и чатов — посев, проверка внутри канала, расширение через похожие каналы, упоминания и группы комментариев. Каталоги вроде TGStat убраны.
+- Codex: убран флаг, который ничего не делал; живой поиск держит `config.toml`.
+- Яндекс: проверка доступа идёт синхронным вызовом; 403 с папкой означает приостановленный биллинг или нет роли. Скрипт сам уходит в Bright Data, если API недоступен.
+- Репозиторий теперь живёт на GitHub: https://github.com/becyb-org/jadlis-research. GitLab остаётся копией и CI. Лицензия — Apache-2.0.
+
+### For agents
+
+- Changed: `skills/research/protocols/` — `web-protocol.md` (Exa lite default, Brave news, `maximum_number_of_tokens` for `brave_llm_context`, ladder + gate), `reddit-protocol.md` (Layer 0 Brave `site:reddit.com` → `reddit_search`; dialog `fetch_comments` until March 2027, then `reddit-archive.py comments --compact`; no reddit-alt trees, no RSS), `hackernews-protocol.md` (Exa lite `--include-domains`; Algolia for trees/by-date/points), `substack-protocol.md` (Exa lite → Brave → `substack-fetch.py`; `PAYWALL_PREVIEW`), `twitter-protocol.md` (two backends, both JSON shapes, `backend=` marker), `youtube-protocol.md`, `telegram-protocol.md` (seed → verify → expand), `codex-web-protocol.md` (no `-c tools.web_search`), `yandex-protocol.md`.
+- Changed: `skills/research/SKILL.md` channel tree — YouTube only for practical topics; `workflows/full-research-core.js` curator: a video is its own family only with the author's own test; verifier `REDDIT_CMD` → Brave `site:reddit.com` + `reddit_search`; Substack handles add to post discovery; the Codex flag removed from the escalation.
+- Changed: `skills/research-settings/scripts/research-sources.py` — Yandex probe uses sync `/v2/web/search`; X probe parses both backends of `twitterapi.sh balance`; the twitter channel stays with either `TWITTERAPI_IO_KEY` or `TWITTRAPI_API_KEY`; `sources.json` lists `TWITTRAPI_API_KEY`.
+- Changed: `scripts/` and `shared/` re-vendored from `jadlis-search--v2.3.0`.
+- Tests: `tests/test_research_sources_probes.py` (+ balance cases), `tests/test_protocol_text_v290.py`, `tools/test-core-v290.mjs` (curator YouTube rule, verifier Reddit route).
+- Changed: `plugin.json` version 2.9.1 → 2.10.0, `license` Apache-2.0 (+ `LICENSE`), `homepage`/`repository` → GitHub becyb-org.
+
 ## [2.9.1] — 2026-10-19 — дневной лимит поиска выключается / daily search cap can be turned off
 
 ### Для человека
