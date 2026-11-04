@@ -663,18 +663,31 @@ def probe_twitterapi():
     body = proc.stdout.decode("utf-8", "replace").strip()
     err = proc.stderr.decode("utf-8", "replace").strip()
     if proc.returncode == 2:
-        return _result("no-key", "ключ TWITTERAPI_IO_KEY не заведён")
+        return _result("no-key", "нет ни TWITTERAPI_IO_KEY, ни TWITTRAPI_API_KEY")
     if proc.returncode == 0:
-        try:
-            data = json.loads(body) if body else None
-        except ValueError:
-            data = None
-        credits = _find_credits(data)
-        if credits is None:
-            return _result("unknown", "ответ без recharge_credits")
-        if credits > 0:
-            return _result("ok", "%d credits" % int(credits))
-        return _result("down", "no credits")
+        # `balance` prints one JSON line per backend that answered (jadlis-search 2.3+):
+        # TwitterAPI.io {recharge_credits…}, TwittrAPI {"balance": <usd>, …}
+        credits, usd = None, None
+        for line in body.splitlines():
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            c = _find_credits(data)
+            if c is not None:
+                credits = c
+            if isinstance(data, dict) and isinstance(data.get("balance"), (int, float)) and not isinstance(data.get("balance"), bool):
+                usd = float(data["balance"])
+        parts = []
+        if credits is not None:
+            parts.append("TwitterAPI.io %d credits" % int(credits))
+        if usd is not None:
+            parts.append("TwittrAPI $%.2f" % usd)
+        if not parts:
+            return _result("unknown", "ответ без баланса")
+        if (credits or 0) > 0 or (usd or 0) > 0:
+            return _result("ok", "; ".join(parts))
+        return _result("down", "no credits: " + "; ".join(parts))
     blob = (body + " " + err).strip()
     if re.search(r"\b(401|403)\b", blob):
         return _result("down", "key revoked (%s)" % ("401" if "401" in blob else "403"))
@@ -848,12 +861,12 @@ def channel_access(key, cdef, settings, keys, providers, probes=None):
     if key == "twitter":
         if pinfo is not None and provider_usable(pinfo):
             return "ok", "Grok Mode A"
-        alt_key = "TWITTERAPI_IO_KEY"
-        if keys.get(alt_key, {}).get("state") == "present":
-            return "ok", "Mode B через TwitterAPI.io (Grok недоступен)"
+        alt = [k for k in ("TWITTERAPI_IO_KEY", "TWITTRAPI_API_KEY") if keys.get(k, {}).get("state") == "present"]
+        if alt:
+            return "ok", "Mode B через twitterapi.sh (%s; Grok недоступен)" % ", ".join(alt)
         if pinfo is not None and pinfo["setting"] == "off":
-            return "n/a", "Grok выключен, нет TWITTERAPI_IO_KEY"
-        return "no-key", "нет TWITTERAPI_IO_KEY, Grok недоступен"
+            return "n/a", "Grok выключен, нет TWITTERAPI_IO_KEY / TWITTRAPI_API_KEY"
+        return "no-key", "нет TWITTERAPI_IO_KEY / TWITTRAPI_API_KEY, Grok недоступен"
     if key == "telegram":
         return "ok", telegram_mode()
     if pinfo is not None:
@@ -943,7 +956,7 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
 
     grok = providers.get("grok")
     balance = probes.get("twitterapi-balance") or {}
-    twitterapi_present = keys.get("TWITTERAPI_IO_KEY", {}).get("state") == "present"
+    twitterapi_present = any(keys.get(k, {}).get("state") == "present" for k in ("TWITTERAPI_IO_KEY", "TWITTRAPI_API_KEY"))
 
     kept = []
     dropped = []

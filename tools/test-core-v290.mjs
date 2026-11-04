@@ -301,7 +301,7 @@ await aside(`${WD}/reddit.md`, async () => {
   // verifier Reddit route (audit R1): reddit-alt discovery, limit:25, no non-existent operations
   const { prompts } = await run(base)
   const vp = prompts['verify:c3#1'] || ''
-  check(vp.includes('reddit-alt__reddit_search_communities') && vp.includes('limit:25') && vp.includes('get_post_details / search_all do NOT exist') && !vp.includes('operation_id="discover_subreddits"'),
+  check(vp.includes('reddit-alt__reddit_search') && vp.includes('site:reddit.com') && vp.includes('limit:25') && !vp.includes('reddit_search_communities') && vp.includes('get_post_details / search_all do NOT exist') && !vp.includes('operation_id="discover_subreddits"'),
     'verifier Reddit route: alt discovery, limit:25, unknown operations named, no primary discover')
 }
 {

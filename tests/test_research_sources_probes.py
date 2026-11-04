@@ -221,3 +221,31 @@ def test_telegram_paid_option_removes_free_note(rs, monkeypatch, capsys, tmp_pat
 def test_set_option_rejects_unknown_value(rs, capsys, tmp_path):
     code, _ = run_main(rs, capsys, "--data-dir", str(tmp_path), "set", "option", "telegram-stars", "maybe")
     assert code == rs.EXIT_USAGE
+
+
+# ── X / twitterapi.sh balance with two backends (jadlis-search 2.3) ──────────
+def _fake_balance(tmp_path, stdout, rc=0):
+    sh = tmp_path / "twitterapi.sh"
+    sh.write_text("#!/bin/sh\nprintf '%s' '" + stdout.replace("'", "'\\''") + "'\nexit " + str(rc) + "\n")
+    sh.chmod(0o755)
+    return sh
+
+
+def test_twitter_balance_two_backends(rs, tmp_path, monkeypatch):
+    out = '{"data":{"recharge_credits":1986091}}\n{"balance":0.4957,"price_per_call":0.0001}\n'
+    monkeypatch.setattr(rs, "TWITTERAPI_SH", _fake_balance(tmp_path, out))
+    r = rs.probe_twitterapi()
+    assert r["state"] == "ok" and "TwitterAPI.io 1986091 credits" in r["detail"] and "TwittrAPI $0.50" in r["detail"]
+
+
+def test_twitter_balance_only_twittrapi_left(rs, tmp_path, monkeypatch):
+    out = '{"data":{"recharge_credits":0}}\n{"balance":12.5}\n'
+    monkeypatch.setattr(rs, "TWITTERAPI_SH", _fake_balance(tmp_path, out))
+    r = rs.probe_twitterapi()
+    assert r["state"] == "ok"
+
+
+def test_twitter_balance_both_empty_is_down(rs, tmp_path, monkeypatch):
+    out = '{"data":{"recharge_credits":0}}\n{"balance":0}\n'
+    monkeypatch.setattr(rs, "TWITTERAPI_SH", _fake_balance(tmp_path, out))
+    assert rs.probe_twitterapi()["state"] == "down"
