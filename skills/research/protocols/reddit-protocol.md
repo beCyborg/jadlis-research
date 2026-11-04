@@ -4,135 +4,73 @@
 > Слепые судьи (`Знания/Ресерчи/Система/Бенчмарк языка протоколов full-research — 2026-09-06`): RU-форма дала 55 цитат против 33 и 28 контраргументов против 22 у EN; EN выиграл только свежесть. Провалы EN — протокольные (цитаты «только заголовок», невыкачанные деревья комментариев), поэтому ниже добавлены гейты, а язык оставлен. Формат выходного файла задаёт промпт оркестратора (английские заголовки секций) — он главнее шаблона в этом файле. Языковой слот: площадку ищи на её языке (блок LANGUAGES / QUERIES из промпта; при языках вне ru/en сначала Read `{PLUGIN_ROOT}/skills/research/references/language-layers.md`).
 
 
-## MCP-инструменты
+> [!warning] Доступ к Reddit закрывается — даты (Reddit, 30.09.2026; r/redditdev 1wubcvf, r/modnews 1wubgvt)
+> - **31.10.2026** — новые заявки на API закрыты (свой OAuth-клиент завести уже нельзя);
+> - **13.11.2026** — выключается RSS (`search.rss` из протокола убран);
+> - **с 12.01.2027** — закрывается доступ незарегистрированных приложений;
+> - **март 2027** — закрывается весь публичный доступ. Dialog (`mcp.dialog.tools`, работает на PRAW)
+>   упадёт к этой дате; деревья комментариев тогда идут только через Arctic Shift в сжатом виде.
+> После марта 2027 этот протокол нужно пересмотреть: выживет ли Arctic Shift, не проверено.
 
-Namespace: `mcp__plugin_jadlis-search_reddit__*`
+## Инструменты
 
-Все операции выполняются через 3 инструмента:
-- `mcp__plugin_jadlis-search_reddit__discover_operations` — список операций
-- `mcp__plugin_jadlis-search_reddit__get_operation_schema` — схема параметров
-- `mcp__plugin_jadlis-search_reddit__execute_operation` — выполнение
+| Инструмент | Роль |
+|---|---|
+| `mcp__plugin_jadlis-search_brave-search__brave_web_search` с `site:reddit.com` | **Поиск тредов — первым** (слепой стенд 2026-11, 15 тем: 6,47 балла — лучший) |
+| `mcp__plugin_jadlis-search_reddit-alt__reddit_search` (redditapis) | **Поиск тредов — вторым**, глобальный по всему Reddit (5,47 балла, 89 % релевантных тредов против 45 % у старого пути «сообщества → `search_subreddit`»); с Brave почти не пересекается (Jaccard 0,08) — вместе лучше любого одного |
+| `mcp__plugin_jadlis-search_reddit__execute_operation` → `fetch_comments` (dialog) | **Деревья комментариев до марта 2027**: 372 символа на комментарий, 99 % живого топ-10 |
+| `python3 {PLUGIN_ROOT}/scripts/reddit-archive.py comments <id> --compact [N]` (Arctic Shift) | **Деревья после марта 2027** и запасной путь сейчас: топ-N по score (по умолчанию 30), плоско, только `id/parent_id/author/score/depth/body`; ≈6 тыс. символов на тред, 98,8 % топ-10, бесплатно |
 
-**КРИТИЧНО:** `parameters` в `execute_operation` — ВСЕГДА native JSON object, НЕ строка.
+**Exa по reddit.com не ищет** — 0 результатов без ошибки (15 из 15 тем). Не тратить на него вызов.
+**Не использовать:** reddit-alt `reddit_post_comments` для деревьев — он отдаёт сырые объекты Reddit
+(~80 полей на комментарий, 2 204 символа против 372 у dialog), одно дерево весит до 222 тыс. символов;
+`reddit_search_communities` → `search_subreddit` как путь поиска (уводит в чужие сообщества: q7 —
+`CharacterAI_No_Filter` вместо LocalLLaMA); `discover_subreddits` (векторный индекс слеп к точным именам).
+
+Dialog (primary MCP, namespace `mcp__plugin_jadlis-search_reddit__*`): все операции — через
+`execute_operation`. **КРИТИЧНО:** `parameters` в `execute_operation` — ВСЕГДА native JSON object, НЕ строка.
+reddit-alt (redditapis, namespace `mcp__plugin_jadlis-search_reddit-alt__*`) — плоские тулы, платный:
+PAYG ≈$0,0015 за чтение, первые 1 000 чтений в месяц бесплатно. Нет `REDDITAPIS_KEY` → reddit-alt
+недоступен: Layer 1 пропустить, поиск — Brave + `search_subreddit` dialog в сабреддитах из Layer 0.
 
 > [!warning] 401 после смены хоста MCP — нужен повторный вход в браузере
 > Хост `https://mcp.dialog.tools/mcp` закрыт OAuth: на голый `initialize` он отвечает **401** с
 > `www-authenticate: Bearer error="invalid_token"` и `resource_metadata=…/.well-known/oauth-protected-resource/mcp`.
 > Авторизационный сервер — Descope (`api.descope.com/v1/apps/P33G9OI0uZKubCM9c3RE9KGxPJbn`), scopes
 > `openid profile email`, есть `registration_endpoint`. Смена URL сервера (06.09.2026) обнуляет сохранённую
-> авторизацию: до повторного входа канал получает 401 и уходит на no-auth-лестницу (Arctic Shift / search.rss)
-> и `reddit-alt`. Лечение: после рестарта CLI пройти OAuth-флоу в браузере при первом обращении к серверу
-> (или `/mcp` → reconnect). Затем сверить дефект размеров: `discover_subreddits("model context protocol")` —
-> r/mcp 73 456 значит дефект вендора, ~119 953 — прежний сервер врал.
+> авторизацию: до повторного входа канал получает 401 — деревья комментариев тогда берутся из Arctic Shift
+> (`reddit-archive.py comments <id> --compact`). Лечение: после рестарта CLI пройти OAuth-флоу в браузере при первом обращении к серверу
+> (или `/mcp` → reconnect).
 
-## THREE-LAYER Protocol
+## Протокол
 
-### Layer 1 — Discover (2 вызова: лексический + семантический)
-
-**Шаг 1 (первым, всегда): `mcp__plugin_jadlis-search_reddit-alt__reddit_search_communities`** (`q`, `limit: 10`) —
-лексический поиск официального листинга. Находит точные имена, к которым слеп семантический
-индекс primary (r/mcp первым результатом — замер 3×3 2026-08-15; вердикт совета 2026-08-15:
-reddit-alt = первая линия discovery, свой OAuth-клиент/заявка НЕ нужны, пока reddit-alt жив).
-~$0.002/вызов (прикреплённый ключ), без 402-слоя primary.
-
-**Шаг 2 (опционально): primary `discover_subreddits`** — только если тема перифрастическая
-(смысловой запрос без точных имён) И шаг 1 дал мало релевантного. Один вызов с массивом
-`queries` — 2-3 переформулировки. Батч эквивалентен по покрытию N одиночным вызовам
-(проба 2026-08-06), но стоит 1 вызов вместо N. `limit` действует **per query**.
-При 402 от primary — НЕ ретраить, работать только через reddit-alt (402 = платный слой
-вендора MCP, не Reddit).
+### Layer 0 — Поиск тредов через Brave (2-3 вызова, параллельно)
 
 ```json
-execute_operation({
-  "operation_id": "discover_subreddits",
-  "parameters": {
-    "queries": ["<ЗАПРОС>", "<синоним-1>", "<синоним-2>"],
-    "limit": 15,
-    "min_confidence": 0.4
-  }
-})
+brave_web_search({ "query": "<ЗАПРОС> site:reddit.com", "count": 20, "extra_snippets": true })
+brave_web_search({ "query": "<ЗАПРОС другим углом: опыт / сравнение / проблема> site:reddit.com", "count": 20 })
 ```
+Запрос — ключевые слова на языке площадки (обычно английский). Для свежего среза —
+`freshness: "py"` или `"pm"`. Из URL вида `reddit.com/r/<sub>/comments/<id>/…` взять id треда и
+**имя сабреддита — сабреддиты берутся только из найденных тредов**, отдельного шага поиска
+сообществ нет.
 
-Запомни все сабреддиты с confidence >= 0.4.
+### Layer 1 — Глобальный поиск redditapis (1-2 вызова)
 
-Не повторяй `discover_subreddits` «для надёжности» — ответ детерминирован (векторный индекс,
-не живая выдача), повтор тратит вызов и ничего не меняет.
-
-Слабый сигнал качества — `summary.confidence_stats` (`mean`/`max`). При низком `max` (< ~0.6) —
-максимум ОДНА переформулировка запроса, не больше. Полями `quality_indicators` (в payload его нет)
-и `tier_distribution` (вырожден: всё `peripheral`) не пользоваться.
-
-### Layer 1b — Прямая проверка очевидных имён (+0-2 вызова)
-
-Если тема содержит короткое имя или термин (аббревиатура, имя продукта, `r/<term>`) — проверь
-такой сабреддит **напрямую** через `search_subreddit`, не полагаясь на discovery: семантический
-индекс слеп к точным именам сабреддитов.
-
-Кейс: `r/mcp` (73K подписчиков) по запросу «MCP model context protocol» не выдаётся вообще —
-discovery возвращает Minecraft и McKinney (подстрочный матч «Mc»); снятие `min_confidence` не лечит.
-Прямой `search_subreddit` в `r/mcp` при этом отрабатывает идеально (проба 2026-08-06).
-
-Признак, что нужен этот шаг: все `match_tier == "peripheral"` и имена явно из другого домена.
-
-### Layer 2 — Batch Fetch (5 вызовов)
-
-1. `fetch_multiple` со всеми сабреддитами (confidence >= 0.4, до 7 штук):
 ```json
-execute_operation({
-  "operation_id": "fetch_multiple",
-  "parameters": {
-    "subreddit_names": ["sub1", "sub2", "sub3", "sub4", "sub5"]
-  }
-})
+mcp__plugin_jadlis-search_reddit-alt__reddit_search({ "q": "<ЗАПРОС>", "sort": "relevance", "t": "all", "limit": 25 })
 ```
+Без `subreddit` — поиск по всему Reddit. Объединить с Layer 0, дубли по id треда схлопнуть.
+Посты с живыми метриками (score, `num_comments`) — отсюда; у Arctic Shift score заморожен.
+Внутри одного сабреддита, который дал несколько сильных тредов, — тот же тул с `"subreddit": "<sub>"`.
+Свежий срез (0-1 вызов): `"sort": "new", "t": "month"` — релевантность проседает, брать только прямые
+попадания и помечать каждую такую цитату датой поста.
 
-2. `search_subreddit` в **топ-4 сабреддитах** (по одному вызову на каждый):
-```json
-execute_operation({
-  "operation_id": "search_subreddit",
-  "parameters": {
-    "subreddit_name": "<top_sub>",
-    "query": "<ЗАПРОС>",
-    "sort": "relevance",
-    "time_filter": "all",
-    "limit": 25
-  }
-})
-```
+### Layer 2 — Деревья комментариев (5-7 вызовов)
 
-`time_filter: "all"` + sort relevance ловит одновременно канонические старые треды и свежие
-обсуждения (проверено A/B-бенчмарком 2026-06: 3:0 против `year`/топ-2).
-`"limit": 25` обязателен: дефолт — 10, а позиции 11-25 содержат прямые попадания
-(проба 2026-08-06). Стоит 0 дополнительных вызовов, даёт ×2,5 к охвату.
-Имена параметров сверены со schema 2026-08-06: `subreddit_names` (НЕ subreddits),
-`time_filter` (НЕ time), `subreddit_name` (канон для `search_subreddit`) —
-при ошибке схемы сначала `get_operation_schema`, не гадай.
-`subreddit` — недокументированный рабочий алиас (нормализуется сервером), не полагаться:
-может исчезнуть при апгрейде.
+Для **топ 5-7 тредов** объединённого списка (приоритет: `num_comments >= 20`, высокий score):
 
-### Layer 2b — Freshness-проход (2 вызова)
-
-`search_subreddit` в **топ-2 сабреддитах** с сортировкой по свежести:
-```json
-execute_operation({
-  "operation_id": "search_subreddit",
-  "parameters": {
-    "subreddit_name": "<top_sub>",
-    "query": "<ЗАПРОС>",
-    "sort": "new",
-    "time_filter": "month",
-    "limit": 25
-  }
-})
-```
-
-Релевантность в этом режиме проседает — `sort: "new"` отдаёт свежайшее из совпавших
-по любому слабому совпадению (проба 2026-08-06). Брать **только прямые попадания**,
-каждую freshness-цитату помечать датой поста.
-
-### Layer 3 — Deep Comments (5-7 вызовов)
-
-`fetch_comments` для **топ 5-7 постов** (приоритет постам с `num_comments >= 20`, высокий score):
+**До марта 2027 — dialog:**
 ```json
 execute_operation({
   "operation_id": "fetch_comments",
@@ -146,25 +84,20 @@ execute_operation({
 Принимает `url` (предпочтительно) либо `submission_id`. Параметров `post_id`/`depth` **нет** —
 вызов падает с `unexpected keyword argument 'post_id'` (сверено с живым MCP 2026-07-27).
 
-### Layer 4 — Контраргументы (2-3 вызова)
-
-После формирования ключевых тезисов — поиск опровержений:
-
-1. `search_subreddit` в тех же субреддитах с инвертированным запросом:
-```json
-execute_operation({
-  "operation_id": "search_subreddit",
-  "parameters": {
-    "subreddit_name": "<top_sub>",
-    "query": "problems with {TOPIC}" / "why {TOPIC} is bad" / "{TOPIC} criticism",
-    "sort": "relevance",
-    "time_filter": "all",
-    "limit": 25
-  }
-})
+**После марта 2027, и сейчас — когда dialog отвечает 401/5xx:**
+```bash
+python3 {PLUGIN_ROOT}/scripts/reddit-archive.py comments <id> --compact      # топ-30 по score
+python3 {PLUGIN_ROOT}/scripts/reddit-archive.py comments <id> --compact 50   # шире
 ```
+`<id>` — id треда из URL (без `t3_`). Arctic Shift отстаёт на 1–2 дня: тред моложе 1–2 дней через
+него неполон — такой тред читать только через dialog, пока он жив. Сжатый вид даёт и свёрнутые
+ветки «more», которых нет в живых ответах.
 
-2. `fetch_comments` для постов с противоположной точкой зрения (1-2 вызова)
+### Layer 3 — Контраргументы (2-3 вызова)
+
+1. Brave: `"<ЗАПРОС> problems site:reddit.com"` / `"why <ЗАПРОС> is bad site:reddit.com"` /
+   `"<ЗАПРОС> criticism site:reddit.com"` + `reddit_search` с тем же инвертированным запросом.
+2. Деревья (Layer 2) для 1-2 тредов с противоположной точкой зрения.
 
 В выходном файле — отдельная секция:
 ```
@@ -176,65 +109,38 @@ execute_operation({
 
 - Не более **3 цитат с одного треда** — иначе один тред перевешивает канал.
 - У **каждой** цитаты — дата поста (рекомендация бенчмарка 2026-06).
-  Для цитат из Layer 2b дата обязательна вдвойне: это и есть их ценность.
+  Для цитат из свежего среза Layer 1 дата обязательна вдвойне: это и есть их ценность.
 
-## Бюджет: 14-20 вызовов
+## Бюджет: 10-14 вызовов
 
-Реальность (телеметрия v5, 72 прогона, фаза Fan-out): медиана 60 вызовов инструментов на агента, из них
-38 поисковых (p10 25, p90 48) и около 13 служебных Bash — разбор тяжёлых ответов `reddit-alt`.
-Медиана 578 с (p90 808 с).
+| Слой | Вызовов |
+|---|---|
+| 0 — Brave `site:reddit.com` | 2-3 |
+| 1 — `reddit_search` | 1-2 |
+| 2 — деревья | 5-7 |
+| 3 — контраргументы | 2-3 |
 
-## Резервный Reddit-MCP — `reddit-alt` (redditapis-mcp, ступень 1.5)
+Стенд 2026-11 (9 запросов): цепочка «поиск → 3 дерева» на dialog — 6 вызовов и ≈50 тыс. символов;
+с деревьями reddit-alt — ≈190 тыс. символов. Реальность (телеметрия v5, 72 прогона, фаза Fan-out, до
+перестройки 2026-11): медиана 60 вызовов инструментов на агента, из них 38 поисковых (p10 25, p90 48)
+и около 13 служебных Bash — разбор тяжёлых ответов `reddit-alt`. Медиана 578 с (p90 808 с).
 
-Второй MCP, независимый бэкенд (api.redditapis.com, live-данные, полные метрики).
-Namespace: `mcp__plugin_jadlis-search_reddit-alt__*` — 32 плоских тула (без execute_operation-обёртки).
-Платный: ~$0.002/read с прикреплённого ключа (в env конфига), т.е. полный протокол ≈ $0.05.
-`reddit_deep_comment_search` — «premium call» с недокументированной ценой, по умолчанию не звать.
+## Arctic Shift — история и точные сабреддиты (без ключей)
 
-Маппинг операций планки:
+CLI-обёртка с троттлингом: `python3 {PLUGIN_ROOT}/scripts/reddit-archive.py` (`sub` / `search` / `comments`).
+Лимит ~2000 rpm, архив 2005→сейчас, **лаг свежести ~1–2 дня по комментариям и до месяца по метрикам** —
+свежее только через MCP.
 
-| Операция primary | reddit-alt | Отличия |
-|---|---|---|
-| `discover_subreddits` | `reddit_search_communities` (`q`, `limit`) | лексический, НЕ semantic → находит точные имена (r/mcp — проверено 2026-08-12), но хуже по смысловым перифразам |
-| `search_subreddit` | `reddit_search` (`q`, `subreddit`, `sort`, `t`, `limit`, пост-фильтры `min_score`/`min_comments`) | есть и глобальный поиск (без `subreddit`) — primary так не умеет |
-| `fetch_posts` | `reddit_subreddit_posts` (`sort`: hot/new/top/rising/controversial/best) | — |
-| `fetch_multiple` | нет батча по сабам → по одному `reddit_subreddit_posts`; батч по id — `reddit_by_id` (до 100 fullnames) | |
-| `fetch_comments` | `reddit_post_comments` (`permalink`, `limit`) | threaded-дерево + `after`-курсор |
-| feeds | мониторинг только на платном плане — не используем | |
+1. **Посты одного сабреддита** (точное имя, история, бэкфилл за пределами 1000-item cap):
+   `reddit-archive.py sub <sub> [--after YYYY-MM-DD --before YYYY-MM-DD --limit N]`.
+2. **Поиск по заголовкам внутри одного сабреддита:** `reddit-archive.py search "<запрос>" --sub <sub>`
+   (`--fulltext` — и по телу поста, часто 422 по таймауту). **Без `--sub` скрипт выходит с кодом 2** —
+   поиска по всему Reddit в Arctic Shift нет, он идёт через `reddit_search` (Layer 1).
+3. **Дерево комментариев:** `reddit-archive.py comments <id> --compact [N]` (Layer 2).
+4. Массовые объёмы — bulk-dumps Watchful1 (github.com/Watchful1/PushshiftDumps, ~4 ТБ).
 
-**Роли (обновлено вердиктом совета 2026-08-15):** discovery — reddit-alt ПЕРВЫМ (Layer 1
-шаг 1), primary discover — второй линией для смысловых перифраз. Остальные операции —
-primary первым выбором; переключение на alt (любое из): primary 5xx/timeout/402;
-не-английский запрос (кейс польского — проверено 2026-08-12: primary 0, alt находит r/Polska);
-нужны live-метрики свежих постов (у Arctic Shift score заморожен).
-
-## Fallback-лестница (no-auth бэкенды)
-
-MCP остаётся **primary** (live-данные, семантика). Лестница — когда MCP молчит,
-recall-гэп (семантика слепа к точным именам, кейс r/mcp; ломается на польском)
-или нужна история. Оба бэкенда — без ключей и регистрации.
-CLI-обёртка с троттлингом: `python3 {PLUGIN_ROOT}/scripts/reddit-archive.py` (sub / search / comments).
-
-1. **Точное имя сабреддита или blind-spot discovery** → **Arctic Shift** `posts/search` по `subreddit`:
-   `https://arctic-shift.photon-reddit.com/api/posts/search?subreddit=<sub>&limit=100`
-   (+ `after`/`before` ISO-даты, `author`, `query` — FTS внутри одного сабреддита).
-   Лимит ~2000 rpm, архив 2005→сейчас, **лаг свежести ~месяц** — свежее только через MCP.
-2. **Ключевик по ВСЕМУ Reddit** (не умеют ни MCP, ни Arctic Shift) → **Reddit search RSS**
-   с браузерным User-Agent (2026-09-05 — вместо PullPush: тот отдаёт 429 на первый запрос с любого IP
-   с 2026-08-26 и агентам отказывает явно):
-   `https://www.reddit.com/search.rss?q=<query>&sort=new` (+ `&t=year`, `&restrict_sr=1` в
-   `r/<sub>/search.rss`). Обёртка: `python3 {PLUGIN_ROOT}/scripts/reddit-archive.py search "<query>"`
-   (Atom → JSON: title/url/subreddit/date/summary; только посты, комментариев в RSS нет — дерево
-   через `comments`). Ответ без `<entry>` при 200 = поиск пуст, не блок; 429/403 → сразу Arctic
-   Shift (`sub` с `query`) или MCP.
-   > discover hosted MCP и метаданные Arctic Shift — НЕ источник истины по размерам сабреддитов
-   > (r/mcp: discover отдавал 73 456 при ~119 953 реальных); метрики Arctic Shift моложе ~36 ч не читать.
-3. **Бэкфилл за пределами 1000-item cap / глубокая история** → Arctic Shift, при массовых
-   объёмах — bulk-dumps Watchful1 (github.com/Watchful1/PushshiftDumps, ~4 ТБ).
-
-Дерево комментов треда → Arctic Shift `comments/tree?link_id=<submission_id>&limit=25000`.
-
-Лимиты сняты на 2026-08 (волонтёрские, могут меняться) — при первом 429 сверить заново.
+> Метаданные Arctic Shift — НЕ источник истины по размерам сабреддитов и score: метрики моложе ~36 ч
+> не читать. Лимиты волонтёрские, при первом 429 сверить заново.
 
 ## Гейты доказательности (по A/B 2026-09-06)
 
@@ -244,11 +150,11 @@ CLI-обёртка с троттлингом: `python3 {PLUGIN_ROOT}/scripts/red
 4. **Событийный свип для версионируемых технологий** (сравнения «X vs Y», релизы, миграции): до финализации просмотри профильный сабреддит продукта (`r/<продукт>`) по `new` и `top` за последние 30–60 дней — релизы и высокорейтинговые треды часто не матчатся на ключевой запрос (кейс A/B: пропущен релиз Bun 1.4 на 244 апвоута). Утверждение «за последний месяц нового нет» допустимо только после этого свипа.
 5. **Контраргумент = «кто + почему + голоса + ссылка».** Заголовок треда контраргументом не считается.
 
-## Фоллбэк (Brave, если и бэкенды недоступны)
+## Фоллбэк
 
-При сбое Reddit MCP и бэкендов — `mcp__plugin_jadlis-search_brave-search__brave_web_search`:
-```json
-{ "query": "site:reddit.com <ЗАПРОС>", "count": 10, "result_filter": ["web", "discussions"] }
-```
+Brave есть, но Reddit-инструменты молчат (dialog 401/5xx и Arctic недоступен, нет `REDDITAPIS_KEY`) →
+цитировать из сниппетов Brave Layer 0 с пометкой "(reconstructed)", тогда `sourceQuality` не выше
+MEDIUM. Brave тоже недоступен → `reddit_search` + Arctic Shift. Ничего не работает → `sourceQuality=LOW`
+с пустыми цитатами, workflow продолжит на остальных каналах.
 
-Вызывай инструмент напрямую. ToolSearch ТОЛЬКО при InputValidationError.
+Вызывай инструменты напрямую. ToolSearch ТОЛЬКО при InputValidationError.
