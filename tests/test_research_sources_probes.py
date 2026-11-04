@@ -90,7 +90,8 @@ def test_probe_codex_command_env_and_stdin(rs, monkeypatch):
     assert cmd[:2] == ["/usr/local/bin/codex", "exec"]
     assert cmd[cmd.index("-m") + 1] == "gpt-6.1-sol"
     assert 'service_tier="priority"' in cmd
-    assert 'tools.web_search={mode="live"}' in cmd
+    # live search comes from CODEX_HOME/config.toml (codex-home.sh); the -c tools.web_search key is ignored
+    assert not any("tools.web_search" in part for part in cmd)
     assert "--json" in cmd
     assert calls["kw"]["stdin"] is subprocess.DEVNULL
     assert calls["kw"]["env"]["CODEX_HOME"] == "/tmp/research-codex-home"

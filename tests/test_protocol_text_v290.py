@@ -21,6 +21,9 @@ def test_codex_pins_one_model_and_priority_everywhere():
     assert "2024-2026" not in s and "Prefer sources from the last 24 months" in s
     assert "timed out negotiating with the code-mode host" in s
     assert "156 s" not in s and "timeout: 300000" not in s
+    assert "tools.web_search={mode=" not in "\n".join(commands)
+    assert 'web_search = "live"' in s and "codex-home.sh" in s
+    assert '"web_search")] | length' in s  # the JSONL live-search check stays
 
 
 def test_twitter_grok_moved_out_and_note_section_still_exists():

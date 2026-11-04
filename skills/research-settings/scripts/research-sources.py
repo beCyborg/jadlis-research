@@ -462,7 +462,7 @@ def codex_probe_cmd(binary):
     return [
         binary, "exec", "-m", CODEX_PROBE_MODEL, "-s", "read-only", "--skip-git-repo-check",
         "-c", 'model_reasoning_effort="low"', "-c", 'service_tier="priority"',
-        "-c", 'tools.web_search={mode="live"}', "--json", CODEX_PROBE_PROMPT,
+        "--json", CODEX_PROBE_PROMPT,
     ]
 
 

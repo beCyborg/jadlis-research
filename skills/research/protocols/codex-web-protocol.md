@@ -15,7 +15,7 @@ Web search via **Codex CLI** (`codex exec`) with web search enabled. Billing —
 Base command (Bash, `timeout: 600000` ms per call):
 
 ```bash
-CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json '<PROMPT>' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" --json '<PROMPT>' < /dev/null
 ```
 
 > [!warning] `< /dev/null` is MANDATORY in every call — without it the channel hangs until timeout
@@ -34,8 +34,8 @@ CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-s
 > within its 600s timeout and was moved to the background") — wait for its notification, do NOT
 > relaunch it.
 
-- The `--search` flag does NOT exist (re-checked on codex-cli 0.162.1, 2026-10-11) — web search is enabled only via `-c`.
-- **`tools.web_search={mode="live"}` — a MANDATORY pin (re-checked on 0.162.1).** A bare `true` may return the OpenAI index CACHE (cached mode: snippets from the cache, and when the network is unavailable — fabrication without an error). The value `"live"` as a string is an invalid config — only the object `{mode="live"}`.
+- The `--search` flag does NOT exist (re-checked on codex-cli 0.162.1, 2026-10-11).
+- **Live web search comes from the isolated home, not from a flag:** `scripts/codex-home.sh` writes `web_search = "live"` into `$CODEX_HOME/config.toml` on every call. Do NOT add `-c 'tools.web_search={mode=…}'` — Codex 0.166 silently ignores that field (audit 2026-11, `codex debug prompt-input`: `tools.web_search={mode="bogus"}` → rc=0, no error; the top-level `web_search="bogus"` → rc=1 `unknown variant`, so only the top-level key sets the mode). Without that config line Codex falls back to `cached` (snippets from the OpenAI index cache, fabrication without an error when the network is down) — so never call `codex exec` without the `CODEX_HOME="$(bash … codex-home.sh)"` prefix. The JSONL check below proves that a search ran at all.
 - `-s read-only` is mandatory: the user's global config is `danger-full-access`, which is not needed for search.
 - `--json` — JSONL events in stdout (re-checked on 0.162.1). The agent's final text:
   ```bash
@@ -65,13 +65,13 @@ Query language: whenever `languages` is not ru/en only, both `codex exec` prompt
 ### Call 1 — Broad overview (mandatory)
 
 ```bash
-CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json 'Research the web for: <expanded query — topic, aspects, what decision is being made>. Use ONLY the web search tool - run real searches, do NOT answer from memory. Every claim MUST have a source URL and publication date; omit claims without URLs. Prefer sources from the last 24 months (today is <DATE from the orchestrator prompt>). Open and READ THE FULL PAGE of every key source before citing it - do NOT cite from search-result snippets alone; quote specifics that only appear in the page body. Return: key findings (bulleted, each with URL), notable numbers/quotes with URLs, and a final Sources section listing all URLs.' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" --json 'Research the web for: <expanded query — topic, aspects, what decision is being made>. Use ONLY the web search tool - run real searches, do NOT answer from memory. Every claim MUST have a source URL and publication date; omit claims without URLs. Prefer sources from the last 24 months (today is <DATE from the orchestrator prompt>). Open and READ THE FULL PAGE of every key source before citing it - do NOT cite from search-result snippets alone; quote specifics that only appear in the page body. Return: key findings (bulleted, each with URL), notable numbers/quotes with URLs, and a final Sources section listing all URLs.' < /dev/null
 ```
 
 ### Call 2 — Counter-arguments (mandatory)
 
 ```bash
-CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json 'Search the web for criticism, problems, failures and counter-arguments about: <topic>. Use ONLY the web search tool - real searches, NOT memory; every claim needs a source URL. Who disagrees and why? Known issues, regressions, negative experience reports. Open and READ THE FULL PAGE of key sources before citing - do NOT cite from snippets alone. Return bulleted findings with URLs + Sources section.' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" --json 'Search the web for criticism, problems, failures and counter-arguments about: <topic>. Use ONLY the web search tool - real searches, NOT memory; every claim needs a source URL. Who disagrees and why? Known issues, regressions, negative experience reports. Open and READ THE FULL PAGE of key sources before citing - do NOT cite from snippets alone. Return bulleted findings with URLs + Sources section.' < /dev/null
 ```
 
 Launch both calls in ONE message (two Bash calls in parallel), each with a `timeout` of 600000 ms.
@@ -111,8 +111,8 @@ Diagnostics:
   transient failure of the local code-mode host). Handle it as a failed call: ONE retry, then
   Degradation. Do NOT spend turns on `--disable code_mode_host`, `standalone_web_search` or sandbox
   changes — agents tried them, none helped.
-- Messages in stderr about web search being disabled — the `tools.web_search` config key has been renamed
-  (check `codex exec --help` and `~/.codex/config.toml`).
+- Messages in stderr about web search being disabled — the `web_search` config key has been renamed
+  (check `codex exec --help` and the `config.toml` that `scripts/codex-home.sh` writes).
 
 ## Verification escalation (third voice, schema v5)
 
@@ -121,7 +121,7 @@ Besides serving as a channel, Codex is used by the `full-research-core` workflow
 The call (made by a lightweight subagent bridge, the `escalationPrompt` prompt in core.js):
 
 ```bash
-CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" -c 'tools.web_search={mode="live"}' --json -o "<workDir>/_codex-esc-<claimId>-last.md" "$(cat "<workDir>/_codex-esc-<claimId>-prompt.md")" < /dev/null > "<workDir>/_codex-esc-<claimId>.jsonl"
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="priority" --json -o "<workDir>/_codex-esc-<claimId>-last.md" "$(cat "<workDir>/_codex-esc-<claimId>-prompt.md")" < /dev/null > "<workDir>/_codex-esc-<claimId>.jsonl"
 ```
 
 - **Live-search gate:** the JSONL must contain ≥1 `web_search` event (`grep -c '"web_search'`); 0 → the voice does not count (`escalationSkipped: 'no-live-search'`) — Codex was answering from memory.
@@ -136,7 +136,7 @@ The ChatGPT-subscription quota is one finite pool for the codexweb channel (auto
 Replacement, same OpenAI web_search backend (Bing index + OAI-SearchBot), ≈30–80 s per question, `agent_message.text` = JSON matching the schema:
 
 ```bash
-CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check -c 'tools.web_search={mode="live"}' --json --output-schema schema.json '<PROMPT>' < /dev/null
+CODEX_HOME="$(bash {PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m gpt-6.1-sol -s read-only --skip-git-repo-check --json --output-schema schema.json '<PROMPT>' < /dev/null
 ```
 
 `web_search` events show the queries (but not the list of opened sources — only the cited ones). Priority inside the pool: `/verif` > codexweb > everything else. Before a mass run make one probe API call (the 429 arrives immediately) and one `codex exec ... 'ok' < /dev/null` probe; a usage-limit answer means the channel goes off. Any script built on the Responses API must ship with a `codex exec` fallback.

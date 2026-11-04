@@ -662,7 +662,7 @@ Answer with EXACTLY one JSON object as the final message, no prose after it:
 2. Check the binary: Bash \`command -v codex >/dev/null && echo HAVE || echo NONE\`. NONE → return status="no-binary" (other fields: confirmsExclusion=false, verdictSuggested="UNCHECKED", reasoning="codex binary missing", urls=[], liveSearchEvents=0) and stop.
 
 3. ONE Bash call (parameter timeout: 300000; < /dev/null is mandatory):
-CODEX_HOME="$(bash ${PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m ${CODEX_MODEL} -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="${CODEX_SERVICE_TIER}" -c 'tools.web_search={mode="live"}' --json -o "${lf}" "$(cat "${pf}")" < /dev/null > "${jf}" 2>"${WORK_DIR}/_codex-esc-${claim.id}.err"; echo "EXIT=$?"
+CODEX_HOME="$(bash ${PLUGIN_ROOT}/scripts/codex-home.sh)" codex exec -m ${CODEX_MODEL} -s read-only --skip-git-repo-check -c model_reasoning_effort="high" -c service_tier="${CODEX_SERVICE_TIER}" --json -o "${lf}" "$(cat "${pf}")" < /dev/null > "${jf}" 2>"${WORK_DIR}/_codex-esc-${claim.id}.err"; echo "EXIT=$?"
 
 4. Parsing:
    - EXIT≠0 and ${jf}/.err contains "usage limit" / "quota" / "rate limit" / 429 → status="quota". Bash timeout (call interrupted) → status="timeout".
