@@ -434,7 +434,7 @@ function languageBlock(key) {
 function channelPrompt(key) {
   const c = ALL_CHANNELS[key]
   const handlesLine = (key === 'substack' && SUBSTACK_HANDLES.length)
-    ? `\nSUBSTACK_HANDLES: ${SUBSTACK_HANDLES.join(', ')}\n(handles are provided — skip Layer 0 and use them)`
+    ? `\nSUBSTACK_HANDLES: ${SUBSTACK_HANDLES.join(', ')}\n(handles are provided — search inside them with archive --search in addition to the Exa/Brave post discovery of Layers 0-1)`
     : ''
   const decisionLine = DECISION ? `\nRESEARCH FOR A DECISION: ${DECISION}\n(priority — material that helps make exactly this decision)` : ''
   // CHANNEL NOTE: text from the user's source settings. No note for twitter while Grok is off →
