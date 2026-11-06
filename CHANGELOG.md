@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+## [2.10.4] — 2026-11-06 — репозиторий снова на GitHub beCyborg / repository back on GitHub beCyborg
+
+### Для человека
+
+- Плагин снова живёт на GitHub: https://github.com/beCyborg/jadlis-research. Каталог ставится командой `claude plugin marketplace add https://github.com/beCyborg/jadlis-hub.git`.
+- Работа плагина не изменилась, поменялись только адреса.
+
+### For agents
+
+- Changed: README pair, `docs/tier/README*.md` (images via raw.githubusercontent.com), `.claude-plugin/plugin.json` homepage/repository — GitLab/becyb-org → `github.com/beCyborg`.
+- Changed: `tools/sync-shared.sh` clones `jadlis-search` from `https://github.com/beCyborg/jadlis-search.git`.
+- Changed: CI `.gitlab-ci.yml` → `.github/workflows/ci.yml` (reusable `beCyborg/jadlis-hub` plugin-ci).
+- Changed: `.claude-plugin/plugin.json` version 2.10.3 → 2.10.4.
+
 ## [2.10.3] — 2026-11-04 — текст страниц через Jina с ключом / page text via Jina with a key
 
 ### Для человека
