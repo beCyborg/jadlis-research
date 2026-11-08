@@ -84,8 +84,8 @@ check(v('cw', 1).includes('family: web → Exa') && v('cw', 1).includes('websear
 check(v('cr', 2).includes('websearch.py exa') && v('cr', 2).includes('LENS "CROSS-TYPE" (family: web)'), 'reddit claim, cross-type lens: Exa primary-source check')
 check(v('cmix', 2).includes('websearch.py exa'), 'mixed web+hn claim: the web vote goes through Exa')
 const vr = v('cr', 1)
-check(vr.includes('reddit-alt__reddit_search') && vr.includes('reddit-archive.py search') && !vr.includes('site:reddit.com'),
-  'reddit same-family lens: reddit_search, Arctic Shift without a key, no site:reddit.com')
+check(vr.includes('reddit-alt__reddit_search') && vr.includes('operation_id="search_subreddit"') && vr.includes('reddit-archive.py search') && !vr.includes('site:reddit.com'),
+  'reddit same-family lens: reddit_search, then search_subreddit and Arctic Shift without a key, no site:reddit.com')
 check(v('cw', 2).includes('reddit-archive.py search') || v('cw', 2).includes('hn-fetch.sh'), 'web claim, community lens: HN / Reddit tools without Brave')
 check(v('cx', 1).includes('twitterapi.sh') && v('cx', 1).includes('no web fallback'), 'twitter same-family lens: twitterapi.sh, no web fallback')
 check(v('ctg', 1).includes('--include-domains t.me'), 'telegram same-family lens: Exa site fallback on t.me')
