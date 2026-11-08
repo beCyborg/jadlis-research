@@ -19,7 +19,7 @@ effort: high
 # /research — full research of a topic (hybrid Skill + Workflow)
 Before Phase A read `references/gotchas.md` — run failure modes (analyst session limit and resume, the ledger dropping claims, forbidden characters in `QUERY_RU`, paired runs).
 
-The heavy part (N channel researchers → per-claim verification with live Brave counter-search →
+The heavy part (N channel researchers → per-claim verification with live Brave counter-search, or Exa when Brave is off →
 analyst synthesis) runs in the deterministic workflow **`full-research-core`**. The skill does the
 interactive intake (Phase A: channels + recon + interview → brief in `{WORK_DIR}/_brief.md`; one
 AskUserQuestion = launch gate) and the vault write (vault contract: dedup, wikilinks, daily-note
@@ -144,9 +144,11 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
    - `SELECTED_CHANNELS` = `.channels` — what actually runs;
    - `CHANNEL_NOTES` = `.notes` — `{channel: text}`, per-channel instructions that take precedence
      over the protocol where they conflict (degradations: `youtube` without `YOUTUBE_API_KEY` runs
-     on Brave `site:youtube.com` + transcripts, `reddit` without `REDDITAPIS_KEY`, `twitter` in
+     on Brave (or Exa when Brave is off) `site:youtube.com` + transcripts, `reddit` without `REDDITAPIS_KEY`, `twitter` in
      Mode B …). Pass them on verbatim — `{PLUGIN_ROOT}` is substituted inside the workflow;
-   - `PROVIDERS_OFF` = `.providers_off` — providers switched off (`grok`, `codex`);
+   - `PROVIDERS_OFF` = `.providers_off` — providers switched off or dead (`grok`, `codex`, `brave`).
+     `brave` here (switched off, or the probe got 401/402/403/422 — a dead key) → the recon below runs
+     on Exa, and the core gives every agent the Exa route instead of Brave (2.11.0);
    - `SOURCE_DROPPED` = `.dropped` — `[{channel, reason, detail}]`, reason is
      `disabled-by-settings` or `no-access`.
 
@@ -172,6 +174,9 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
    - `PROVIDERS_OFF = ['grok']`;
      `SOURCE_DROPPED = [{channel: 'grokweb', reason: 'no-access', detail: 'source resolve unavailable'}]`;
    - keep `codexweb` only if `command -v codex` succeeds — otherwise drop it too;
+   - Brave: one call `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/websearch.py" brave test --tag other -n 1
+     --no-log --out urls`; exit 3 with `HTTP 401/402/403/422` in stderr → add `brave` to `PROVIDERS_OFF`
+     (exit 2 = no key → the same);
    - the remaining channels go as the tree proposed them.
 
    **`GROK_DISABLED_NOTE`** — the constant, pass it verbatim:
@@ -194,8 +199,12 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
    (Search tier: 50 req/s, parallel OK; `count: 5`): a broad overview of the topic + optionally one
    clarifying aspect. The goal is orientation (aspects, sub-topics, controversies), not data
    collection. Read-only.
+   **`brave` in `PROVIDERS_OFF` → never call the Brave tool;** run the same 1-2 queries through Exa:
+   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/websearch.py" exa "<query>" --tag research --type lite -n 5`
+   (Bash; about 10 req/s). A Brave call that fails during recon (401/402/403/422) → switch to the
+   Exa command at once and add `brave` to `PROVIDERS_OFF`.
    **Substack handle extraction:** if "substack" is among the channels — parse URLs of the form
-   `<handle>.substack.com` from the Brave results → the array `SUBSTACK_HANDLES`.
+   `<handle>.substack.com` from the recon results (Brave or Exa) → the array `SUBSTACK_HANDLES`.
 
 4. **Interview (ALWAYS, no skip).** ONE AskUserQuestion call (all questions in one batch, one dimension per
    question — a single question gets «не знаю» far more often than two or three), in Russian:
@@ -323,7 +332,7 @@ Workflow({
     decisionContext: DECISION_CONTEXT,  // from the interview: which decision the user makes
     channels: SELECTED_CHANNELS,        // keys: web/codexweb/grokweb/reddit/twitter/hackernews/substack (+opt-in: yandex, youtube, telegram, ja, zh, ko, eu)
     channelNotes: CHANNEL_NOTES,        // resolve.notes — {channel: text}; the core injects them into the channel prompt
-    providersOff: PROVIDERS_OFF,        // resolve.providers_off — e.g. ["grok"]: the core filters the channels and skips Codex escalation
+    providersOff: PROVIDERS_OFF,        // resolve.providers_off — e.g. ["grok"]: the core filters the channels and skips Codex escalation; "brave" → Exa route for every agent
     sourceDropped: SOURCE_DROPPED,      // resolve.dropped — [{channel, reason, detail}], returned back in sourceSettings
     languages: LANGUAGES,               // e.g. ["ru"] or ["ja","en"]; omitted → detected from the query
     queries: QUERIES,                   // {lang: native phrasing}; may be {}
@@ -359,7 +368,7 @@ constant · `short-snapshot` < 1 000 chars · `quote-not-found`); `urlhealth` ch
 URLs and the quotes against the snapshots (`snapshotChars` in evidence); two verifiers vote
 (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), **one per macro-family** (schema v5, 2026-09-17):
 verifier #1 challenges the claim in the SAME family it came from (a Reddit claim on Reddit, an HN
-claim on HN, an X claim via TwitterAPI.io, a web claim via Brave), verifier #2 takes the other
+claim on HN, an X claim via TwitterAPI.io, a web claim via Brave or Exa), verifier #2 takes the other
 family (web ↔ communities); each vote is recorded as `family:verdict` plus `searchedVia` (the
 platform actually searched). Web and communities disagree (CONFIRMED vs CHALLENGED/OUTDATED) →
 `FAMILY-SPLIT`: no Codex (a web tie-breaker would only side with the web), the lead family

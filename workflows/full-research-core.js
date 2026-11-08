@@ -2,8 +2,8 @@ export const meta = {
   name: 'full-research-core',
   description: 'Ядро full-research: N канальных исследователей → curator (evidence-префиксы) → urlhealth → per-claim верификация (2 линзы: та же семья + другая семья, по голосу от веба и от сообществ) → веб и сообщества разошлись = FAMILY-SPLIT (без Codex) → одиночное исключение → третий голос Codex → analyst пишет отчёт в workDir. Vault-контракт — в скилле.',
   phases: [
-    { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты; обрыв защитным фильтром у любой роли → один повтор на Opus 4.8 (лимит classifierRetryCap)' },
-    { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims «сколько нужно» (все критичные + новый проверяемый фон, потолок 32) с evidence-префиксами → _curated.json → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5) → результат (_ledger.json из него пишет скилл, scripts/write-ledger.py); reuseStages:true пропускает стадии, чьи файлы уже в workDir' },
+    { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave или exa/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты; обрыв защитным фильтром у любой роли → один повтор на Opus 4.8 (лимит classifierRetryCap)' },
+    { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims «сколько нужно» (все критичные + новый проверяемый фон, потолок 32) с evidence-префиксами → _curated.json → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave, при providersOff:[brave] — через Exa) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5) → результат (_ledger.json из него пишет скилл, scripts/write-ledger.py); reuseStages:true пропускает стадии, чьи файлы уже в workDir' },
     { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию, Opus 5.5 high при fableBridge:true; null или обрыв защитным фильтром → один повтор на Opus 4.8 (synth-opus48), затем последний — на другой роли synth-*) пишет отчёт: три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
@@ -148,9 +148,27 @@ const NON_DEFAULT_LANGS = LANGUAGES.filter(l => l !== 'ru' && l !== 'en')
 const LANGUAGE_LAYERS = `${PLUGIN_ROOT}/skills/research/references/language-layers.md`
 
 
+// Brave Search off (2.11.0): providersOff contains 'brave' when the user switched it off or the probe got
+// 401/402/403/422 (dead key). Every agent then searches the open web through Exa (websearch.py, Bash):
+// the channels get BRAVE_OFF_NOTE, the web verifiers get the Exa command in their lens, Reddit goes only
+// through the Reddit tools (Exa does not index reddit.com), X has no web fallback (Exa does not index x.com).
+const BRAVE_OFF = Array.isArray(A.providersOff) && A.providersOff.map(String).includes('brave')
+const WEB_ENGINE = BRAVE_OFF ? 'Exa' : 'Brave'
+const EXA_SEARCH = `python3 ${PLUGIN_ROOT}/scripts/websearch.py exa "<query>" --tag research --type lite`
+const JINA_READ = `bash ${PLUGIN_ROOT}/scripts/jina-read.sh <url>`
+const BRAVE_OFF_NOTE = `BRAVE SEARCH IS OFF for this run (source settings: switched off, or the key is dead). Do NOT ToolSearch or call any mcp__plugin_jadlis-search_brave-search__* tool, and never run websearch.py brave. Wherever the protocol (or a note) tells you to search with Brave, run Exa through Bash instead:
+  ${EXA_SEARCH} -n 10
+  - a "site:X" filter → --include-domains X (several sites: --include-domains a.com,b.org);
+  - page content in the result (the llm_context equivalent) → add --contents text --max-chars 4000;
+  - news / freshness → add --start YYYY-MM-DD;
+  - the full text of one page → ${JINA_READ}.
+EXCEPTIONS: Exa does NOT index reddit.com, x.com or twitter.com (0 results, checked 2026-11). Reddit → only the Reddit tools of the protocol (reddit_search / execute_operation) and python3 ${PLUGIN_ROOT}/scripts/reddit-archive.py. X → only twitterapi.sh, there is no web fallback for X. Exa allows about 10 requests/s — at most 5 parallel calls.`
+// Second-level safety: the twitter channel mode is derived from providersOff, not only from a note —
+// if the caller forgot the note, the core supplies the same text itself (see channelPrompt).
+
 const PROTO_DIR = `${PLUGIN_ROOT}/skills/research/protocols`
 const ALL_CHANNELS = {
-  web: { source: 'Web (Brave Search)', prefix: 'w', protocol: `${PROTO_DIR}/web-protocol.md`, file: 'web.md' },
+  web: { source: BRAVE_OFF ? 'Web (Exa)' : 'Web (Brave Search)', prefix: 'w', protocol: `${PROTO_DIR}/web-protocol.md`, file: 'web.md' },
   codexweb: { source: `Web (${CODEX_LABEL})`, prefix: 'cx', protocol: `${PROTO_DIR}/codex-web-protocol.md`, file: 'web-codex.md' },
   grokweb: { source: 'Web (Grok)', prefix: 'gw', protocol: `${PROTO_DIR}/grok-web-protocol.md`, file: 'web-grok.md' },
   reddit: { source: 'Reddit', prefix: 'r', protocol: `${PROTO_DIR}/reddit-protocol.md`, file: 'reddit.md' },
@@ -207,9 +225,10 @@ const PROVIDERS_OFF = new Set(Array.isArray(A.providersOff) ? A.providersOff.map
 const PROVIDER_OF = { grokweb: 'grok', codexweb: 'codex' }
 const SOURCE_DROPPED = Array.isArray(A.sourceDropped) ? A.sourceDropped : []
 const CODEX_OFF = PROVIDERS_OFF.has('codex')
-// Second-level safety: the twitter channel mode is derived from providersOff, not only from a note —
-// if the caller forgot the note, the core supplies the same text itself (see channelPrompt).
-const DEFAULT_GROK_OFF_NOTE = `GROK DISABLED by user source settings. Do NOT run ~/.grok/bin/grok, do NOT load mcp__grok-mcp__* or mcp__twitterapi-mcp__*. Skip every Grok section of the protocol; run ONLY the section 'TwitterAPI.io layer → Mode B keyword-only' via bash {PLUGIN_ROOT}/scripts/twitterapi.sh; if the REST layer fails (exit≠0, persistent 429) use brave_web_search with site:x.com as the second fallback. sourceQuality no higher than MEDIUM; say in findings that the semantic angle is missing.`
+const X_SECOND_FALLBACK = BRAVE_OFF
+  ? 'if the REST layer fails (exit≠0, persistent 429) there is NO second fallback: Brave Search is off and Exa does not index x.com — return what you have with sourceQuality LOW.'
+  : 'if the REST layer fails (exit≠0, persistent 429) use brave_web_search with site:x.com as the second fallback.'
+const DEFAULT_GROK_OFF_NOTE = `GROK DISABLED by user source settings. Do NOT run ~/.grok/bin/grok, do NOT load mcp__grok-mcp__* or mcp__twitterapi-mcp__*. Skip every Grok section of the protocol; run ONLY the section 'TwitterAPI.io layer → Mode B keyword-only' via bash {PLUGIN_ROOT}/scripts/twitterapi.sh; ${X_SECOND_FALLBACK} sourceQuality no higher than MEDIUM; say in findings that the semantic angle is missing.`
 const hostOf = u => { try { return String(new URL(String(u || '')).hostname || '').toLowerCase() } catch (e) { return '' } }
 // A channel whose provider is off never runs — a safety net in case the caller forgot to drop it.
 const providerOn = c => !PROVIDERS_OFF.has(PROVIDER_OF[c])
@@ -376,7 +395,7 @@ const VERIFY_SCHEMA = {
     evidence: { type: 'string', description: 'what the counter-search found' },
     url: { type: 'string' },
     numberVerbatim: { type: ['string', 'null'], description: 'for numeric claims — the number/date/version VERBATIM from the source found (as written, no normalisation); null — claim not numeric or number not found' },
-    searchedVia: { type: 'string', description: 'the platform you ACTUALLY searched (honest telemetry): brave | reddit | hn | x | <site or layer>; "none" when no search ran' },
+    searchedVia: { type: 'string', description: 'the platform you ACTUALLY searched (honest telemetry): brave | exa | reddit | hn | x | <site or layer>; "none" when no search ran' },
     interrupted: INTERRUPTED_PROP,
   },
   required: ['claimId', 'verdict', 'credibility', 'evidence', 'url', 'numberVerbatim', 'searchedVia', 'interrupted'],
@@ -417,11 +436,12 @@ const ANALYST_SCHEMA = {
 
 // One line in every schema prompt (2.7.8): the agent itself reports a safety-classifier stop.
 const INTERRUPT_NOTE = 'INTERRUPTION: if ANY tool_result says the response "was stopped by a safety classifier", set interrupted="safety-classifier" and hand in what you managed so far (do not pad it). Another interruption you could not recover from → interrupted="other". A normal run → interrupted="none".'
-const TOOL_NOTE = 'IMPORTANT: do NOT use the built-in WebSearch/WebFetch (banned). Load the MCP tools you need through ToolSearch before calling them. Brave (Search tier): 50 req/s — parallel calls are fine. Firecrawl scrape: 1 req/s.'
+const TOOL_NOTE = 'IMPORTANT: do NOT use the built-in WebSearch/WebFetch (banned). Load the MCP tools you need through ToolSearch before calling them. ' +
+  (BRAVE_OFF ? 'Brave Search is OFF this run — web search goes through Exa (Bash, websearch.py), about 10 req/s, at most 5 parallel calls.' : 'Brave (Search tier): 50 req/s — parallel calls are fine.') + ' Firecrawl scrape: 1 req/s.'
 
 // ── Language block shared by the channel prompts ──
 function languageBlock(key) {
-  const lines = [`LANGUAGES: ${LANGUAGES.join(', ')} (search each platform in ITS OWN language: site:zhihu.com → Chinese, site:wykop.pl → Polish, Brave for Korean forums → Korean; an English query on a non-English platform returns translators and course sellers, not practitioners).`]
+  const lines = [`LANGUAGES: ${LANGUAGES.join(', ')} (search each platform in ITS OWN language: site:zhihu.com → Chinese, site:wykop.pl → Polish, ${WEB_ENGINE} for Korean forums → Korean; an English query on a non-English platform returns translators and course sellers, not practitioners).`]
   const per = LANGUAGES.map(l => QUERIES[l] ? `  ${l}: ${QUERIES[l]}` : null).filter(Boolean)
   if (per.length) lines.push(`QUERIES per language (use verbatim as the seed, expand with the platform's own terms):\n${per.join('\n')}`)
   if (NON_DEFAULT_LANGS.length && (FAMILY[key] === 'web' || NON_DEFAULT_LANGS.includes(key))) {
@@ -443,6 +463,9 @@ function channelPrompt(key) {
   const noteBlock = rawNote
     ? `\nCHANNEL NOTE (from the user's source settings — takes precedence over the protocol where they conflict):\n${String(rawNote).split('{PLUGIN_ROOT}').join(PLUGIN_ROOT)}\n`
     : ''
+  const braveBlock = BRAVE_OFF
+    ? `\nBRAVE OFF (source settings — takes precedence over the protocol and over the channel note):\n${BRAVE_OFF_NOTE}\n`
+    : ''
   return `You are the ${c.source} researcher. Find as much information on the topic as possible.
 
 QUERY: ${QUERY}${decisionLine}
@@ -454,7 +477,7 @@ Read the file ${c.protocol} (Read tool) and follow it step by step, including th
 
 PLUGIN_ROOT = ${PLUGIN_ROOT}
 Inside the protocol, paths are written as {PLUGIN_ROOT}/… — substitute the value above for the placeholder. Never send a literal \`{PLUGIN_ROOT}\` to a command.
-${noteBlock}
+${noteBlock}${braveBlock}
 ${TOOL_NOTE}
 
 RULES:
@@ -545,13 +568,25 @@ IN>>>`
 //    other family; every claim ends with one web vote and one community vote) ──
 const BRAVE_TOOLS = 'mcp__plugin_jadlis-search_brave-search__brave_web_search,mcp__plugin_jadlis-search_brave-search__brave_llm_context'
 const HN_CMD = `\`${PLUGIN_ROOT}/scripts/hn-fetch.sh search "<query>" --tags story --limit 10\` and/or \`--tags comment\` (full comment texts right in the output; exit 3 = HN search unavailable → take Reddit)`
+// Open-web search for verifiers: Brave MCP tools, or Exa through Bash when Brave is off (2.11.0).
+// siteSearch(d) — one site, in the claim platform's own language.
+const WEB_TOOLS = BRAVE_OFF
+  ? `Bash: \`${EXA_SEARCH} -n 10\` (page content in the result: add --contents text --max-chars 4000; full text of one page: \`${JINA_READ}\`); Brave Search is OFF this run — never load a Brave tool`
+  : `ToolSearch "select:${BRAVE_TOOLS}"`
+const siteSearch = d => (BRAVE_OFF
+  ? `Bash: \`${EXA_SEARCH} -n 10 --include-domains ${d}\``
+  : `ToolSearch "select:${BRAVE_TOOLS}" → brave_web_search with site:${d}`)
 // Native Telegram search from the owner's Premium account (telegram-protocol.md NATIVE mode); free commands only here.
-const TG_CMD = '`python3 "${TGSEARCH_PY:-$HOME/.claude/skills/telegram-search/scripts/tgsearch.py}" csearch -q <form1> -q <form2> --in @<peer> --in @<peer> --since=-365d --dedup --out=text` (free; 2-4 word forms, no morphology) and/or `comments @<channel> -q <word> --since=-365d` (free) — search peers OTHER than the evidence ones (`similar @<channel>` / `chats -q <audience>` to find them, free). NEVER `posts -q` (paid daily slot) and never `--pay-stars`; script missing or exit 2 → ToolSearch "select:' + BRAVE_TOOLS + '" → brave_web_search with site:t.me'
+const TG_CMD = '`python3 "${TGSEARCH_PY:-$HOME/.claude/skills/telegram-search/scripts/tgsearch.py}" csearch -q <form1> -q <form2> --in @<peer> --in @<peer> --since=-365d --dedup --out=text` (free; 2-4 word forms, no morphology) and/or `comments @<channel> -q <word> --since=-365d` (free) — search peers OTHER than the evidence ones (`similar @<channel>` / `chats -q <audience>` to find them, free). NEVER `posts -q` (paid daily slot) and never `--pay-stars`; script missing or exit 2 → ' + siteSearch('t.me')
 // Reddit for verifiers (2.9.0, audit R1 R-reddit.md): discovery through reddit-alt's lexical
 // community search (the primary discover_subreddits is blind to exact names like r/mcp), search with
 // limit:25 (the default is 10 — 333 of 358 verifier calls ran without it), only operations that exist
 // (get_post_details / search_all → "Unknown operation"), never retry a subreddit that answered "banned".
-const REDDIT_CMD = `ToolSearch "select:mcp__plugin_jadlis-search_brave-search__brave_web_search,mcp__plugin_jadlis-search_reddit-alt__reddit_search,mcp__plugin_jadlis-search_reddit__execute_operation" → find OTHER threads: brave_web_search(query:"<claim keywords> site:reddit.com", count:10) (Exa does not index Reddit) and/or reddit_search(q:"<keywords>", sort:"relevance", t:"year", limit:25) (global Reddit search; bench 2026-11: 89% relevant vs 45% for the subreddit route); a thread's comments, if needed → execute_operation(operation_id="fetch_comments", parameters={url,comment_limit:50}). get_post_details / search_all do NOT exist; do NOT call discover_subreddits/discover_operations/get_operation_schema`
+// Brave off: Reddit only through the Reddit tools — reddit_search (reddit-alt, needs REDDITAPIS_KEY) and,
+// when reddit-alt is missing or errors, Arctic Shift search inside the evidence subreddits (free, no key).
+const REDDIT_CMD = BRAVE_OFF
+  ? `ToolSearch "select:mcp__plugin_jadlis-search_reddit-alt__reddit_search,mcp__plugin_jadlis-search_reddit__execute_operation" → find OTHER threads: reddit_search(q:"<keywords>", sort:"relevance", t:"year", limit:25) (global Reddit search). reddit_search missing from ToolSearch or failing (no REDDITAPIS_KEY / 401 / 5xx) → Bash \`python3 ${PLUGIN_ROOT}/scripts/reddit-archive.py search "<keywords>" --sub <subreddit>\` for the evidence subreddits and their neighbours (Arctic Shift, free; --sub is mandatory). A thread's comments, if needed → execute_operation(operation_id="fetch_comments", parameters={url,comment_limit:50}) or \`reddit-archive.py comments <id> --compact\`. Brave Search is OFF and Exa does not index Reddit — never use either for Reddit. get_post_details / search_all do NOT exist; do NOT call discover_subreddits/discover_operations/get_operation_schema`
+  : `ToolSearch "select:mcp__plugin_jadlis-search_brave-search__brave_web_search,mcp__plugin_jadlis-search_reddit-alt__reddit_search,mcp__plugin_jadlis-search_reddit__execute_operation" → find OTHER threads: brave_web_search(query:"<claim keywords> site:reddit.com", count:10) (Exa does not index Reddit) and/or reddit_search(q:"<keywords>", sort:"relevance", t:"year", limit:25) (global Reddit search; bench 2026-11: 89% relevant vs 45% for the subreddit route); a thread's comments, if needed → execute_operation(operation_id="fetch_comments", parameters={url,comment_limit:50}). get_post_details / search_all do NOT exist; do NOT call discover_subreddits/discover_operations/get_operation_schema`
 
 function evidenceBlock(claim) {
   const ev = claim.evidence || []
@@ -571,10 +606,10 @@ function sameFamilyCommunityTools(chans) {
   const t = []
   if (chans.includes('reddit')) t.push(`Reddit (the claim's own platform): ${REDDIT_CMD} — search OTHER subreddits/threads than the evidence`)
   if (chans.includes('hackernews')) t.push(`HackerNews (the claim's own platform; Bash, no ToolSearch): ${HN_CMD}`)
-  if (chans.includes('twitter')) t.push(`Twitter/X (the claim's own platform; Bash): \`bash ${PLUGIN_ROOT}/scripts/twitterapi.sh search "<query>" Top\` — exit≠0 or 429 → ToolSearch "select:${BRAVE_TOOLS}" → brave_web_search with site:x.com`)
+  if (chans.includes('twitter')) t.push(`Twitter/X (the claim's own platform; Bash): \`bash ${PLUGIN_ROOT}/scripts/twitterapi.sh search "<query>" Top\` — exit≠0 or 429 → ${BRAVE_OFF ? 'no web fallback (Brave is off, Exa does not index x.com) → UNCHECKED' : `ToolSearch "select:${BRAVE_TOOLS}" → brave_web_search with site:x.com`}`)
   if (chans.includes('telegram')) t.push(`Telegram (the claim's own platform; Bash, calls queue on a session lock — run them in the foreground): ${TG_CMD}`)
   const layers = chans.filter(ch => LANGUAGE_LAYER_KEYS.includes(ch))
-  if (layers.length) t.push(`Regional layer ${layers.join('/')} (the claim's own communities): ToolSearch "select:${BRAVE_TOOLS}" → brave_web_search with site: filters of the layer's platforms, in the platform's language (platform map: ${LANGUAGE_LAYERS})`)
+  if (layers.length) t.push(`Regional layer ${layers.join('/')} (the claim's own communities): ${BRAVE_OFF ? `Bash: \`${EXA_SEARCH} -n 10 --include-domains <the layer's platforms>\`` : `ToolSearch "select:${BRAVE_TOOLS}" → brave_web_search with site: filters of the layer's platforms`}, in the platform's language (platform map: ${LANGUAGE_LAYERS})`)
   if (!t.length) t.push(`the origin platform (${chans.join(', ') || '—'}) has no cheap search — take the nearest community platform: Reddit ${REDDIT_CMD}; alternative HackerNews (Bash): ${HN_CMD}`)
   return t
 }
@@ -585,11 +620,11 @@ function verifyPrompt(claim, idx) {
   const sameFamily = idx === 0
   const experiential = claim.claimType === 'experiential'
   const { webOrigin, communityOrigin } = originFamilies(claim)
-  const braveTools = `ToolSearch "select:${BRAVE_TOOLS}"`
+  const webTools = WEB_TOOLS
   let lens
   if (sameFamily && family === 'web') {
-    lens = `LENS "SAME-FAMILY REFUTATION" (family: web → Brave): the claim came from the open web — look for REFUTING evidence on the open web: counterarguments, contradictions, debunks, a newer primary source. Queries like "<topic> problems", "<claim> debunked", "<topic> criticism".
-TOOLS: ${braveTools} → 1-2 queries (llm_context for page content, web_search for coverage; parallel calls are fine).`
+    lens = `LENS "SAME-FAMILY REFUTATION" (family: web → ${WEB_ENGINE}): the claim came from the open web — look for REFUTING evidence on the open web: counterarguments, contradictions, debunks, a newer primary source. Queries like "<topic> problems", "<claim> debunked", "<topic> criticism".
+TOOLS: ${webTools} → 1-2 queries (${BRAVE_OFF ? 'add --contents text for page content' : 'llm_context for page content, web_search for coverage'}; parallel calls are fine).`
   } else if (sameFamily) {
     lens = `LENS "SAME-FAMILY REFUTATION" (family: community → the claim's OWN platform): the claim came from ${chans.filter(ch => macroFamily(ch) === 'community').join(', ') || 'communities'}. Challenge it WHERE IT WAS FOUND: look for people on the SAME platform who report the OPPOSITE or a different picture — OTHER threads, OTHER accounts, OTHER time than the evidence spans (the same thread is not independent). Queries like "<topic> didn't work", "<claim> wrong", "<topic> regret", "<topic> vs <alternative>".
 TOOLS (the origin platform; ONE tool set):
@@ -599,8 +634,8 @@ Judge by the platform's OWN picture: several independent people agree with the c
     lens = `LENS "CROSS-TYPE" (family: community): the claim came from web engines → confirm or refute it against PRACTITIONER COMMUNITIES (people who tried it, not the docs). Preferably HackerNews (Bash, no ToolSearch): ${HN_CMD}. Alternative — Reddit: ${REDDIT_CMD}.${experiential ? ' The claim is experiential: first person with specifics (Admiralty C — "X broke on my prod under Y") is FULL independent testimony.' : ' The claim is factual: people\'s experience supports or contradicts, the primary source decides — report what the practitioners say.'}`
   } else {
     lens = (webOrigin && communityOrigin)
-      ? `LENS "CROSS-TYPE" (family: web): the claim is supported by both web and communities → check its CURRENCY and the PRIMARY SOURCE (official docs/changelog, "<topic> 2026") via ${braveTools} → 1-2 queries.`
-      : `LENS "CROSS-TYPE" (family: web): the claim came from communities → check it against PRIMARY SOURCES on the open web: ${braveTools} → 1-2 queries like "<claim> official docs" / "<topic> changelog" / "<topic> benchmark". ${experiential ? 'The claim is experiential: absence of a mention in the official docs does NOT refute people\'s experience — CHALLENGED only if a primary source DIRECTLY contradicts it, otherwise UNCHECKED.' : 'The claim is factual: the primary source decides.'}`
+      ? `LENS "CROSS-TYPE" (family: web): the claim is supported by both web and communities → check its CURRENCY and the PRIMARY SOURCE (official docs/changelog, "<topic> 2026") via ${webTools} → 1-2 queries.`
+      : `LENS "CROSS-TYPE" (family: web): the claim came from communities → check it against PRIMARY SOURCES on the open web: ${webTools} → 1-2 queries like "<claim> official docs" / "<topic> changelog" / "<topic> benchmark". ${experiential ? 'The claim is experiential: absence of a mention in the official docs does NOT refute people\'s experience — CHALLENGED only if a primary source DIRECTLY contradicts it, otherwise UNCHECKED.' : 'The claim is factual: the primary source decides.'}`
   }
   lens += `
 BUDGET: ≤3 tool calls, load EXACTLY ONE tool set. You are the "${family}" family vote — do NOT switch to the other family when yours is silent (silence → UNCHECKED; the other verifier covers the other family). FORBIDDEN: Grok CLI (~/.grok/bin/grok) and mcp__grok-mcp__x_search — too slow/expensive for verification; Yandex (yandex-search.sh) — paid, not used in verification; Reddit discover_subreddits/discover_operations/get_operation_schema — use the Reddit route above as written.`
@@ -627,7 +662,7 @@ Judge:
 - Confirmed independently, no refutations? → CONFIRMED.
 - credibility (1-6): 1 — confirmed by an independent source of another type; 2 — probably true (logical, consistent, no direct independent confirmation); 3 — possibly true; 4 — doubtful; 5 — improbable; 6 — cannot be judged.
 
-Return by the schema: claimId="${claim.id}", verdict (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), credibility (1-6), evidence (what you found, in English; for UNCHECKED — what exactly failed and why), url (key verification source; for UNCHECKED — the unreachable URL or an empty string), numberVerbatim (the number verbatim or null), searchedVia (the platform you ACTUALLY searched: brave | reddit | hn | x | <site or layer>; "none" if no search ran).
+Return by the schema: claimId="${claim.id}", verdict (CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED), credibility (1-6), evidence (what you found, in English; for UNCHECKED — what exactly failed and why), url (key verification source; for UNCHECKED — the unreachable URL or an empty string), numberVerbatim (the number verbatim or null), searchedVia (the platform you ACTUALLY searched: ${BRAVE_OFF ? 'exa' : 'brave | exa'} | reddit | hn | x | <site or layer>; "none" if no search ran).
 ${INTERRUPT_NOTE}
 Do NOT spawn sub-agents.`
 }
@@ -704,7 +739,7 @@ LEDGER SUMMARY: ${JSON.stringify(stats)}
 
 CROSS-VALIDATION (for selecting material; the process itself is NOT written into the report):
 - Triangulation: is a thesis confirmed by DIFFERENT source types? (web+community=strong; two reddit posts=weak). Circular reporting: 2 sources on 1 original = 1 source.
-- WEB FAMILY: the files web.md/web-codex.md/web-grok.md/web-yandex.md are ENGINES (Brave [w], Codex [cx], Grok [gw], Yandex [y]) over ONE open web. Deduplicate their findings by URL. Engine agreement = reinforcement WITHIN the web type, NOT independent triangulation (independence = web+community). A finding given by only ONE engine and confirmed by nobody else — reduced credibility (badge digit no better than 3) + a short note "только {движок}".
+- WEB FAMILY: the files web.md/web-codex.md/web-grok.md/web-yandex.md are ENGINES (${WEB_ENGINE} [w], Codex [cx], Grok [gw], Yandex [y]) over ONE open web. Deduplicate their findings by URL. Engine agreement = reinforcement WITHIN the web type, NOT independent triangulation (independence = web+community). A finding given by only ONE engine and confirmed by nobody else — reduced credibility (badge digit no better than 3) + a short note "только {движок}".
 - Community consensus = strong ONLY when independent (different accounts/time, no incentives).
 - WEIGHTS (schema v3): the weight of a statement is made of four axes — (1) independence: number of DIFFERENT source families (web, reddit, hn, twitter, substack, youtube, telegram, ja, zh, ko, eu); (2) source reliability: Admiralty A-F from the channel files; (3) claim type: for factual the primary source decides (web/docs is the priority family), for experiential the communities decide (first person with specifics, Admiralty C, is full testimony; the web only complements); (4) confirmation: credibility 1-6 from the ledger. Do not apply a global priority "social over web" or vice versa — the family priority follows the claim TYPE.
 - Claims from the ledger: CONFIRMED → not only license verdicts in the conclusions but are RENDERED EXPLICITLY in the subsection «Проверенные факты» of the section «📚 Контекст и находки» (with evidence and a credibility badge) — this is the confirmed foundation, it must not be "dissolved" into the conclusions. The VOTE VECTOR is visible to the reader: every confirmed fact carries «(2 голоса: веб + сообщества)» when voteCount=2 or «(1 голос — только {веб|сообщества}: второй верификатор не смог проверить)» when voteCount=1 (the family from votes[]) — the reader must distinguish double from single confirmation and see which family confirmed. FAMILY-SPLIT → subsection «Веб и сообщества расходятся» (heading EXACTLY \`### Веб и сообщества расходятся\`): per claim — the statement, a line «Веб: …» (what the web vote found, with its url) and a line «Сообщества: …» (what the community vote found, with its url), then «Приоритет: {веб|сообщества} — claim {фактический|опытный}» (leadFamily follows claimType: factual → web, experiential → communities) and one line WHY the two stories differ if visible (different versions, different use cases, marketing vs practice). Badge no better than 3. The claim may support a conclusion or advice ONLY when leadVerdict=CONFIRMED and ONLY with the marker «(расхождение веб/сообщества, приоритет {семья})» next to it; leadVerdict=CHALLENGED/OUTDATED → not in conclusions and not in advice, only in the subsection. Never average the two stories into one and never drop the divergence silently. DISPUTED → subsection «Спорные факты» (votes split, the third vote did not confirm exclusion): statement + what the disagreement is + badge; not part of conclusions and advice. CHALLENGED/OUTDATED → NOT in conclusions and NOT in context, only a line in the methodology callout with the reason. UNCHECKED → NOT in the report; one line in the methodology callout: «не удалось проверить: N claims (причины кратко)». weakEvidence/evidenceless → badge no better than 3 even when CONFIRMED. ceilingCapped → badge no better than 3 even when CONFIRMED (all evidence of the claim is llm-mediated/short-snapshot/no-snapshot/quote-not-found: not fabrication but a channel limitation — the span is not confirmed against the page body); one line in the methodology callout: «потолок MEDIUM по снапшот-гейту: N claims».

@@ -1,12 +1,13 @@
 {
   "version": 1,
   "updated": "2026-10-12",
-  "comment": "Catalogue of research sources: model providers, 14 channels, key layers and binaries. Data only — probes, TTL and the resolve rules live in scripts/research-sources.py. Keys are English identifiers, human-facing strings are Russian.",
+  "comment": "Catalogue of research sources: model and search providers, 14 channels, key layers and binaries. Data only — probes, TTL and the resolve rules live in scripts/research-sources.py. Keys are English identifiers, human-facing strings are Russian.",
   "probe_ids": [
     "grok-402",
     "codex-quota",
     "twitterapi-balance",
-    "yandex-access"
+    "yandex-access",
+    "brave-access"
   ],
   "providers": {
     "grok": {
@@ -39,11 +40,26 @@
       "how_to_get": "подписка ChatGPT/Codex → `codex login`; квота общая с /jadlis-verif (verif имеет приоритет)",
       "degrade": "codexweb выпадает; расхождения верификаторов не эскалируются в третий голос",
       "cost": "квота подписки Codex (скользящее 5-часовое окно); probe — один живой веб-поиск через изолированный CODEX_HOME (gpt-6.1-sol, priority), ≈10 с"
+    },
+    "brave": {
+      "label": "Brave Search API",
+      "kind": "api",
+      "key": "BRAVE_API_KEY",
+      "probe": "brave-access",
+      "powers": [
+        "web",
+        "verifiers",
+        "recon"
+      ],
+      "primary_channels": [],
+      "how_to_get": "https://api-dashboard.search.brave.com → подписка на тариф Search → Subscriptions → API keys; затем /jadlis-search:keys",
+      "degrade": "веб-канал, разведка и веб-проверяющие идут через Exa (websearch.py exa --type lite, нужен EXA_API_KEY); Reddit — только Reddit MCP и Arctic Shift (Exa не индексирует reddit.com); у X нет второго фолбэка (Exa не индексирует x.com)",
+      "cost": "$0.005 за запрос; проба — один запрос раз в 6 ч, ошибка ключа не тарифицируется"
     }
   },
   "channels": {
     "web": {
-      "label": "Веб (Brave Search + Firecrawl)",
+      "label": "Веб (Brave Search или Exa + Firecrawl)",
       "family": "web",
       "default_set": true,
       "provider": null,
@@ -51,7 +67,7 @@
         {
           "key": "BRAVE_API_KEY",
           "class": "A",
-          "drop_without_key": true
+          "drop_without_key": false
         },
         {
           "key": "FIRECRAWL_API_KEY",
@@ -59,13 +75,15 @@
           "drop_without_key": false
         }
       ],
-      "optional_keys": [],
+      "optional_keys": [
+        "EXA_API_KEY"
+      ],
       "tools": [
         "jq",
         "pdftotext"
       ],
-      "degrade": "без BRAVE_API_KEY канал выпадает и ресерч считается недостаточным: Brave нужен и верификаторам; без FIRECRAWL_API_KEY лестница текста страницы теряет последнюю ступень — остаются pdf-fetch и r.jina.ai",
-      "cost": "Brave — по тарифу Search; Firecrawl — по кредитам аккаунта"
+      "degrade": "Brave недоступен (выключен, нет ключа или ключ отклонён) → канал идёт через Exa, если есть EXA_API_KEY; нет ни Brave, ни Exa → канал выпадает и ресерч считается недостаточным: веб нужен и проверяющим. Без FIRECRAWL_API_KEY лестница текста страницы теряет последнюю ступень — остаются pdf-fetch и r.jina.ai",
+      "cost": "Brave — $0.005 за запрос; Exa lite — $0.004; Firecrawl — по кредитам аккаунта"
     },
     "codexweb": {
       "label": "Веб через Codex",

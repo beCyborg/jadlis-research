@@ -14,6 +14,8 @@ def rs():
     spec = importlib.util.spec_from_file_location("research_sources_probes_mod", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    # hermetic by default: resolve always resolves Brave (2.11.0) — never hit the real API from a test
+    mod.PROBE_FUNCS["brave-access"] = lambda: mod._result("ok", "stub")
     return mod
 
 
@@ -264,3 +266,121 @@ def test_twitter_balance_both_empty_is_down(rs, tmp_path, monkeypatch):
     out = '{"data":{"recharge_credits":0}}\n{"balance":0}\n'
     monkeypatch.setattr(rs, "TWITTERAPI_SH", _fake_balance(tmp_path, out))
     assert rs.probe_twitterapi()["state"] == "down"
+
+
+# ── Brave (2.11.0) ───────────────────────────────────────────────────────────
+def test_brave_classify(rs):
+    assert rs.classify_brave(0, "https://a.example\n", "")[0] == "ok"
+    assert rs.classify_brave(2, "", "BRAVE_API_KEY not set")[0] == "no-key"
+    state, detail = rs.classify_brave(
+        3, "", "[error] brave: HTTP 422 SUBSCRIPTION_TOKEN_INVALID: The provided API key is invalid.\n")
+    assert state == "fail" and "422 SUBSCRIPTION_TOKEN_INVALID" in detail
+    for code in ("401", "402", "403"):
+        assert rs.classify_brave(3, "", "[error] brave: HTTP %s nope" % code)[0] == "fail"
+    # a rate limit or a timeout must not switch the whole run to Exa
+    assert rs.classify_brave(3, "", "[error] brave: HTTP 429 RATE_LIMITED")[0] == "unknown"
+    assert rs.classify_brave(4, "", "[error] brave: timeout after 20s")[0] == "unknown"
+
+
+def test_probe_brave_skips_call_without_key(rs, monkeypatch):
+    monkeypatch.setattr(rs, "check_key", lambda name: {"state": "no-key"})
+    monkeypatch.setattr(rs.subprocess, "run", lambda *a, **k: pytest.fail("must not call the API"))
+    res = rs.probe_brave()
+    assert res["state"] == "no-key" and res["checked"] is None  # not cached
+
+
+def test_probe_brave_one_cheap_call(rs, monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"], seen["kw"] = cmd, kw
+        return subprocess.CompletedProcess(cmd, 3, b"", b"[error] brave: HTTP 422 SUBSCRIPTION_TOKEN_INVALID: x\n")
+
+    monkeypatch.setattr(rs, "check_key", lambda name: {"state": "present"})
+    monkeypatch.setattr(rs.subprocess, "run", fake_run)
+    res = rs.probe_brave()
+    assert res["state"] == "fail" and res["checked"]
+    cmd = seen["cmd"]
+    assert cmd[1].endswith("websearch.py") and cmd[2] == "brave"
+    assert cmd[cmd.index("-n") + 1] == "1" and "--no-log" in cmd
+    assert seen["kw"]["stdin"] is subprocess.DEVNULL
+
+
+def _resolve(rs, monkeypatch, capsys, tmp_path, brave, keys_missing=(), channels="web,reddit", setup=()):
+    calls = []
+
+    def fake_brave():
+        calls.append(1)
+        return brave
+
+    monkeypatch.setitem(rs.PROBE_FUNCS, "brave-access", fake_brave)
+    monkeypatch.setitem(rs.PROBE_FUNCS, "grok-402", lambda: rs._result("ok", "stub"))
+    monkeypatch.setitem(rs.PROBE_FUNCS, "codex-quota", lambda: rs._result("ok", "stub"))
+    monkeypatch.setitem(rs.PROBE_FUNCS, "twitterapi-balance", lambda: rs._result("ok", "stub"))
+    monkeypatch.setattr(rs, "check_key", lambda name: {"state": "no-key" if name in keys_missing else "present",
+                                                       "rail": "env", "detail": "env"})
+    for argv in setup:
+        run_main(rs, capsys, "--data-dir", str(tmp_path), *argv)
+    code, out = run_main(rs, capsys, "--data-dir", str(tmp_path), "resolve", "--channels", channels, "--json")
+    assert code == 0
+    return json.loads(out), calls
+
+
+def test_resolve_dead_brave_runs_web_on_exa(rs, monkeypatch, capsys, tmp_path):
+    data, _ = _resolve(rs, monkeypatch, capsys, tmp_path, rs._result("fail", "ключ отклонён: HTTP 422 X"))
+    assert data["channels"] == ["web", "reddit"]
+    assert "brave" in data["providers_off"]
+    assert data["insufficient"] is False
+    assert "websearch.py exa" in data["notes"]["web"] and "HTTP 422" in data["notes"]["web"]
+    assert any("через Exa" in line for line in [data["summary_ru"]])
+
+
+def test_resolve_dead_brave_without_exa_is_insufficient(rs, monkeypatch, capsys, tmp_path):
+    data, _ = _resolve(rs, monkeypatch, capsys, tmp_path, rs._result("fail", "HTTP 422"), keys_missing=("EXA_API_KEY",),
+                       channels="web,reddit,hackernews")
+    assert "web" not in data["channels"]
+    assert data["insufficient"] is True
+    assert any("EXA_API_KEY" in w for w in data["warnings"])
+
+
+def test_resolve_brave_off_by_setting_skips_probe(rs, monkeypatch, capsys, tmp_path):
+    data, calls = _resolve(rs, monkeypatch, capsys, tmp_path, rs._result("ok", "stub"),
+                           setup=[("set", "provider", "brave", "off")])
+    assert calls == []
+    assert data["providers"]["brave"]["setting"] == "off"
+    assert "brave" in data["providers_off"] and "web" in data["channels"]
+    assert "выключен в настройках" in data["summary_ru"]
+
+
+def test_resolve_live_brave_changes_nothing(rs, monkeypatch, capsys, tmp_path):
+    data, calls = _resolve(rs, monkeypatch, capsys, tmp_path, rs._result("ok", "поиск ответил"))
+    assert calls == [1]
+    assert "brave" not in data["providers_off"]
+    assert "web" not in data["notes"]
+
+
+def test_resolve_brave_unknown_keeps_brave_with_warning(rs, monkeypatch, capsys, tmp_path):
+    data, _ = _resolve(rs, monkeypatch, capsys, tmp_path, rs._result("unknown", "HTTP 429: лимит запросов"))
+    assert "brave" not in data["providers_off"]
+    assert any(w.startswith("brave:") for w in data["warnings"])
+
+
+def test_resolve_brave_off_notes_name_no_brave_tool(rs, monkeypatch, capsys, tmp_path):
+    data, _ = _resolve(rs, monkeypatch, capsys, tmp_path, rs._result("fail", "HTTP 422"),
+                       keys_missing=("YOUTUBE_API_KEY", "WYKOP_API_KEY"),
+                       channels="web,twitter,youtube,eu,reddit",
+                       setup=[("set", "provider", "grok", "off")])
+    assert {"web", "twitter", "youtube", "eu"} <= set(data["notes"])
+    for key, note in data["notes"].items():
+        assert "brave_" not in note, key
+    assert "NO second fallback" in data["notes"]["twitter"]
+    assert "--include-domains youtube.com" in data["notes"]["youtube"]
+    assert "--include-domains wykop.pl" in data["notes"]["eu"]
+
+
+def test_status_web_row_shows_exa(rs, monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(rs, "check_key", lambda name: {"state": "present", "rail": "env", "detail": "env"})
+    run_main(rs, capsys, "--data-dir", str(tmp_path), "set", "provider", "brave", "off")
+    code, out = run_main(rs, capsys, "--data-dir", str(tmp_path), "status", "--no-probe", "--json")
+    data = json.loads(out)
+    assert data["channels"]["web"]["access"] == "ok" and "через Exa" in data["channels"]["web"]["detail"]

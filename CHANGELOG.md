@@ -5,6 +5,26 @@
 
 ## [Unreleased]
 
+## [2.11.0] — 2026-11-08 — ресёрч без Brave / research without Brave
+
+### Для человека
+
+- Если ключ Brave мёртв или Brave выключен, ресёрч не падает. Веб-канал, разведка и веб-проверяющие ищут через Exa.
+- Проба Brave сама замечает мёртвый ключ: ответ 401, 402, 403 или 422 переводит прогон на Exa. Результат пробы хранится 6 часов.
+- Выключить Brave вручную: `research-sources.py set provider brave off`. Вернуть: `… set provider brave auto`.
+- Reddit без Brave идёт только через Reddit MCP и Arctic Shift: Exa не индексирует reddit.com. У X без Brave нет второго запасного пути: Exa не индексирует x.com.
+- Нет ни Brave, ни ключа Exa → ресёрч помечен недостаточным и не запускается.
+
+### For agents
+
+- Added: provider `brave` in `skills/research-settings/sources.json` (`kind: api`, probe `brave-access`, TTL 6 h); `probe_brave` / `classify_brave` in `research-sources.py` — one `websearch.py brave test -n 1 --no-log` call; 401/402/403/422 → `fail`, 429 / timeout → `unknown` (Brave stays), no key → `no-key` (not cached).
+- Changed: `resolve` always resolves `brave` (web channel, recon, verifiers and `site:` fallbacks all use it) and always checks `EXA_API_KEY`; Brave unusable → `providers_off` gets `brave`, the `web` channel stays with an Exa note; Brave unusable and no Exa key → `web` dropped and `insufficient: true`. `web` no longer drops on a missing `BRAVE_API_KEY` alone.
+- Changed: notes that named `brave_web_search` (twitter Mode B, youtube without key, eu without Wykop key) switch to the Exa form or to «no second fallback» for x.com when Brave is off.
+- Changed: `workflows/full-research-core.js` — `providersOff` with `brave` → `BRAVE_OFF_NOTE` in every channel prompt; verifier lenses use `websearch.py exa` instead of the Brave tools; `REDDIT_CMD` without Brave = `reddit_search` → `reddit-archive.py search --sub` (no key); Telegram / regional-layer fallbacks via `--include-domains`; X has no web fallback; `searchedVia` reports `exa`; the web channel is named «Web (Exa)».
+- Changed: `skills/research/SKILL.md` — recon on Exa when `brave` ∈ `PROVIDERS_OFF`; the fail-closed path probes Brave once.
+- Added: `tools/test-core-brave-off.mjs` (real resolver notes → mocked run over every family; no prompt contains `brave_`; control run keeps Brave); Brave tests in `tests/test_research_sources_probes.py`; the probe tests no longer reach the live Brave API.
+- Changed: `.claude-plugin/plugin.json` version 2.10.4 → 2.11.0.
+
 ## [2.10.4] — 2026-11-06 — репозиторий снова на GitHub beCyborg / repository back on GitHub beCyborg
 
 ### Для человека

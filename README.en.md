@@ -165,8 +165,10 @@ mean "wrong" — it means "not confirmed by cross-checking, re-read it yourself"
 not start.
 
 **What you need.** A Claude Code subscription. The paid Brave and Firecrawl keys — they are set up
-together with the `jadlis-search` plugin, and without them a run does not go. Brave and Firecrawl are the
-ones who bill you, so check their pricing with them: I name no figures of my own. The report is put
+together with the `jadlis-search` plugin. If the Brave key is dead or Brave is switched off in the settings,
+the web channel and the verification run on Exa and need `EXA_API_KEY`; with neither Brave nor Exa a run
+does not go. Brave, Exa and Firecrawl are the ones who bill you, so check their pricing with them: I name
+no figures of my own. The report is put
 into the notes folder you specify at install time — that is `VAULT_PATH`, `~/Jadlis` by default.
 
 **How tokens get spent.** A heavy run — dozens of subagents out of your own quota; several runs back

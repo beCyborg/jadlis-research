@@ -45,6 +45,7 @@ SECRET_SH = PLUGIN_ROOT / "scripts" / "secret.sh"
 TWITTERAPI_SH = PLUGIN_ROOT / "scripts" / "twitterapi.sh"
 CODEX_HOME_SH = PLUGIN_ROOT / "scripts" / "codex-home.sh"
 YANDEX_SH = PLUGIN_ROOT / "scripts" / "yandex-search.sh"
+WEBSEARCH_PY = PLUGIN_ROOT / "scripts" / "websearch.py"
 
 SETTINGS_NAME = "source-settings.json"
 CACHE_NAME = "probe-cache.json"
@@ -52,7 +53,7 @@ LOCK_NAME = "source-settings.lock"
 DATA_DIR_LEAF = "jadlis-research-jadlis"
 
 PROBE_TTL = {"grok-402": 6 * 3600, "codex-quota": 2 * 3600, "twitterapi-balance": 3600,
-             "yandex-access": 2 * 3600}
+             "yandex-access": 2 * 3600, "brave-access": 6 * 3600}
 GLOBAL_DEADLINE = 90.0
 KEY_TIMEOUT = 15
 GROK_TIMEOUT = 40
@@ -60,6 +61,7 @@ CODEX_TIMEOUT = 80
 CODEX_HOME_TIMEOUT = 15
 TWITTERAPI_TIMEOUT = 30
 YANDEX_TIMEOUT = 30
+BRAVE_TIMEOUT = 25
 
 # The probe uses the same model, tier, isolated home and live-search pin as the codexweb channel,
 # so a dead web-search tool (e.g. the code-mode host failure, exit 0 with no search) fails the probe.
@@ -108,10 +110,24 @@ GROK_OFF_NOTE = (
     "{cause}. Do NOT run ~/.grok/bin/grok, do NOT load mcp__grok-mcp__* or "
     "mcp__twitterapi-mcp__*. Skip every Grok section of the protocol; run ONLY the section "
     "'TwitterAPI.io layer → Mode B keyword-only' via bash {{PLUGIN_ROOT}}/scripts/twitterapi.sh; "
-    "if the REST layer fails (exit≠0, persistent 429) use brave_web_search with site:x.com as "
-    "the second fallback. sourceQuality no higher than MEDIUM; say in findings that the semantic "
+    "{fallback} sourceQuality no higher than MEDIUM; say in findings that the semantic "
     "angle is missing."
 )
+X_FALLBACK_BRAVE = ("if the REST layer fails (exit≠0, persistent 429) use brave_web_search with site:x.com as "
+                    "the second fallback.")
+X_FALLBACK_NONE = ("if the REST layer fails (exit≠0, persistent 429) there is NO second fallback: Brave Search "
+                   "is off and Exa does not index x.com — return what you have with sourceQuality LOW.")
+
+# Brave Search off or dead (2.11.0): every agent searches the open web through Exa instead.
+# Exa does not index reddit.com, x.com or twitter.com (checked 2026-11-04 and 2026-11-08).
+EXA_CMD = 'python3 {PLUGIN_ROOT}/scripts/websearch.py exa "<query>" --tag research --type lite'
+
+
+def site_search(domain, brave_on):
+    """How a note tells an agent to search one site: Brave site: or Exa --include-domains."""
+    if brave_on:
+        return "brave_web_search site:%s" % domain
+    return "%s --include-domains %s (Bash; Brave Search is off)" % (EXA_CMD, domain)
 CAUSE_SETTINGS = "GROK DISABLED by user source settings"
 CAUSE_PROBE = "GROK DOWN (probe)"
 
@@ -377,6 +393,8 @@ def grok_binary():
 
 
 def provider_binary(name, pdef):
+    if pdef.get("kind") == "api":
+        return "api"  # an HTTP API provider (brave): no binary, the probe decides
     if name == "grok":
         return grok_binary()
     declared = str(pdef.get("binary") or name)
@@ -633,6 +651,61 @@ def probe_yandex():
     return _result(state, detail)
 
 
+def classify_brave(returncode, stdout_text, stderr_text):
+    """Pure verdict of the Brave probe → (state, detail). websearch.py exits 0 ok · 2 no key ·
+    3 HTTP error · 4 timeout. 401/402/403/422 = the key or the subscription is dead → `fail`
+    (the provider goes off and the run switches to Exa). 429 and the rest stay `unknown`."""
+    blob = "%s\n%s" % (stdout_text, stderr_text)
+    if returncode == 0:
+        return "ok", "поиск ответил"
+    if returncode == 2:
+        return "no-key", "ключ BRAVE_API_KEY не заведён"
+    m = re.search(r"HTTP (401|402|403|422)\b[^\n]*", blob)
+    if m:
+        return "fail", "ключ отклонён: " + trim(m.group(0), 70)
+    if re.search(r"HTTP 429\b", blob):
+        return "unknown", "HTTP 429: лимит запросов"
+    if returncode == 4:
+        return "unknown", "timeout"
+    head = ""
+    for line in stderr_text.splitlines():
+        if line.startswith("[error]"):
+            head = line
+            break
+    return "unknown", "exit %s: %s" % (returncode, trim(head or first_line(blob), 60))
+
+
+def probe_brave():
+    """One Brave web search (1 result, $0.005 when the key works; an auth error is not billed).
+    No key → `no-key`, not cached, so a key added later is probed at once."""
+    if check_key("BRAVE_API_KEY").get("state") == "no-key":
+        res = _result("no-key", "ключ BRAVE_API_KEY не заведён")
+        res["checked"] = None
+        return res
+    if not WEBSEARCH_PY.exists():
+        return _result("unknown", "websearch.py not found")
+    br_timeout = budget(BRAVE_TIMEOUT)
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(WEBSEARCH_PY), "brave", "test", "--tag", "other", "-n", "1",
+             "--no-log", "--out", "urls", "--timeout", str(max(5, int(br_timeout) - 5))],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=br_timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return _result("unknown", "timeout %.0fs" % br_timeout)
+    except OSError as exc:
+        return _result("unknown", trim(exc, 60))
+    state, detail = classify_brave(
+        proc.returncode,
+        proc.stdout.decode("utf-8", "replace"),
+        proc.stderr.decode("utf-8", "replace"),
+    )
+    return _result(state, detail)
+
+
 def _find_credits(obj):
     if isinstance(obj, dict):
         value = obj.get("recharge_credits")
@@ -709,6 +782,7 @@ PROBE_FUNCS = {
     "codex-quota": probe_codex,
     "twitterapi-balance": probe_twitterapi,
     "yandex-access": probe_yandex,
+    "brave-access": probe_brave,
 }
 
 
@@ -877,6 +951,13 @@ def channel_access(key, cdef, settings, keys, providers, probes=None):
         return "no-key", "нет TWITTERAPI_IO_KEY / TWITTRAPI_API_KEY, Grok недоступен"
     if key == "telegram":
         return "ok", telegram_mode()
+    if key == "web":
+        brave = providers.get("brave")
+        if brave is not None and not provider_usable(brave):
+            why = "выключен" if brave["setting"] == "off" else (brave["detail"] or brave["access"])
+            if keys.get("EXA_API_KEY", {}).get("state") == "no-key":
+                return "no-key", "Brave недоступен (%s) и нет EXA_API_KEY" % why
+            return "ok", "через Exa (Brave: %s)" % why
     if pinfo is not None:
         if pinfo["setting"] == "off":
             return "n/a", "провайдер %s выключен" % pname
@@ -934,6 +1015,10 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
         pname = (channels_def[key] or {}).get("provider")
         if pname:
             provider_names.add(pname)
+    # Brave is not a channel provider: the web channel, the recon, the web verifiers and the
+    # site: fallbacks of other protocols all use it, so its state is resolved on every run.
+    if "brave" in catalogue["providers"]:
+        provider_names.add("brave")
 
     wanted_probes = set()
     for pname in provider_names:
@@ -952,6 +1037,7 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
     cache = load_cache(data_dir)
     to_run, resolved = plan_probes(wanted_probes, cache, mode)
     keys_wanted = needed_keys(catalogue, requested)
+    keys_wanted.add("EXA_API_KEY")  # the Exa fallback of every Brave call, not only the web channel
     keys, fresh_probes = run_parallel(keys_wanted, to_run, warnings)
     save_cache(data_dir, {k: v for k, v in fresh_probes.items() if v.get("checked")}, warnings)
     probes = dict(resolved)
@@ -963,6 +1049,18 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
         providers[pname] = provider_info(pname, pdef, settings, probes)
 
     grok = providers.get("grok")
+    brave = providers.get("brave")
+    brave_on = brave is None or provider_usable(brave)
+    exa_present = keys.get("EXA_API_KEY", {}).get("state") != "no-key"
+    brave_why = ""
+    if not brave_on:
+        brave_why = "выключен в настройках" if brave["setting"] == "off" else "%s%s" % (
+            ACCESS_RU.get(brave["access"], brave["access"]),
+            (" — " + brave["detail"]) if brave["detail"] else "")
+    elif brave is not None and brave["access"] == "unknown":
+        warnings.append("brave: доступ неизвестен (%s) — оставляю Brave, при ошибке агенты уйдут на Exa"
+                        % (brave.get("detail") or "не проверялся"))
+    no_web_search = not brave_on and not exa_present
     balance = probes.get("twitterapi-balance") or {}
     twitterapi_present = any(keys.get(k, {}).get("state") == "present" for k in ("TWITTERAPI_IO_KEY", "TWITTRAPI_API_KEY"))
 
@@ -1005,7 +1103,8 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
                 continue
             if twitterapi_present:
                 cause = CAUSE_SETTINGS if (pinfo is not None and pinfo["setting"] == "off") else CAUSE_PROBE
-                note = GROK_OFF_NOTE.format(cause=cause)
+                note = GROK_OFF_NOTE.format(cause=cause,
+                                            fallback=X_FALLBACK_BRAVE if brave_on else X_FALLBACK_NONE)
                 if balance.get("state") == "ok" and balance.get("detail"):
                     note += " (TwitterAPI.io balance: %s)" % balance["detail"]
                 elif balance.get("state") in ("down", "no-key") and balance.get("detail"):
@@ -1034,6 +1133,21 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
             warnings.append("провайдер %s: доступ неизвестен (%s) — считаю пригодным"
                             % (pname, pinfo.get("detail") or "не проверялся"))
 
+        # 3b. web: Brave off or dead → the channel runs on Exa; neither → dropped
+        if key == "web" and not brave_on:
+            if not exa_present:
+                dropped.append({"channel": key, "reason": "no-access",
+                                "detail": "Brave недоступен (%s) и нет EXA_API_KEY" % brave_why})
+                state[key] = "no-access"
+                continue
+            notes[key] = (
+                "BRAVE SEARCH IS OFF (%s). This channel searches the open web through Exa: run every "
+                "search step of the protocol as Bash `%s` (site:X → --include-domains X; page text in "
+                "the result → --contents text --max-chars 4000). Never load or call a Brave tool. "
+                "Report the engine as Exa in the file header." % (
+                    "switched off in source settings" if brave["setting"] == "off"
+                    else "probe: " + (brave["detail"] or brave["access"]), EXA_CMD))
+
         # 4. required keys
         missing = None
         for req in cdef.get("requires", []) or []:
@@ -1043,11 +1157,6 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
         if missing:
             dropped.append({"channel": key, "reason": "no-access", "detail": "нет ключа %s" % missing})
             state[key] = "no-access"
-            if key == "web":
-                warnings.append(
-                    "нет BRAVE_API_KEY: канал web выпал, Brave нужен и верификаторам — ресерч "
-                    "считается недостаточным"
-                )
             continue
 
         # 4b. yandex liveness: a key without the search role answers 403 on every call
@@ -1067,9 +1176,9 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
         if key == "youtube" and keys.get("YOUTUBE_API_KEY", {}).get("state") != "present":
             notes[key] = (
                 "No YOUTUBE_API_KEY: skip every mcp__plugin_jadlis-search_youtube__* call; work "
-                "through brave_web_search site:youtube.com plus "
+                "through %s plus "
                 "python3 {PLUGIN_ROOT}/scripts/yt-transcript.py. This is a normal degradation, "
-                "not a channel failure."
+                "not a channel failure." % site_search("youtube.com", brave_on)
             )
         if key == "reddit" and keys.get("REDDITAPIS_KEY", {}).get("state") != "present":
             notes[key] = (
@@ -1082,12 +1191,17 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
         if key == "eu" and keys.get("WYKOP_API_KEY", {}).get("state") != "present":
             notes[key] = (
                 "No WYKOP_API_KEY: feed-fetch.py returns exit 3 for the wykop source — cover "
-                "wykop.pl through brave_web_search site:wykop.pl; the other EU sites are unaffected."
+                "wykop.pl through %s; the other EU sites are unaffected." % site_search("wykop.pl", brave_on)
             )
 
     families_in = set((channels_def[c] or {}).get("family") for c in requested)
     families_out = set((channels_def[c] or {}).get("family") for c in kept)
     insufficient = len(kept) < 2 or (len(families_in) >= 2 and len(families_out) < 2)
+    if no_web_search:
+        # the web verifiers (one vote per claim) and the recon have no search engine at all
+        insufficient = True
+        warnings.append("Brave недоступен (%s) и нет EXA_API_KEY: веб-проверяющим нечем искать — "
+                        "ресерч считается недостаточным" % brave_why)
 
     providers_off = sorted(
         name for name, info in providers.items() if info["setting"] == "off"
@@ -1112,6 +1226,9 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
     if na_list:
         summary.append("Нет доступа: %s."
                        % ", ".join("%s (%s)" % (d["channel"], trim(d["detail"], 60)) for d in na_list))
+    if not brave_on and exa_present:
+        summary.append("Brave %s — веб, разведка и веб-проверяющие идут через Exa." % (
+            "выключен в настройках" if brave["setting"] == "off" else "недоступен (%s)" % trim(brave_why, 70)))
     if "twitter" in kept and "twitter" in notes and notes["twitter"].startswith(("GROK DISABLED", "GROK DOWN")):
         summary.append("Twitter идёт keyword-only через TwitterAPI.io (Mode B, sourceQuality ≤ MEDIUM).")
     if insufficient:
@@ -1314,7 +1431,7 @@ def cmd_status(args, catalogue, data_dir, settings, corrupt):
     print("")
     header = ["Источник", "Тип", "Каналы", "Настройка", "Доступ", "Проверено", "Без него / где взять"]
 
-    print("Провайдеры моделей")
+    print("Провайдеры (модели и поиск)")
     rows = [header]
     for pname in sorted(providers.keys()):
         pdef = catalogue["providers"][pname]
@@ -1424,7 +1541,11 @@ def cmd_set(args, catalogue, data_dir, settings, corrupt):
     else:
         label = known[name].get("label", name)
         print("data dir: %s" % data_dir)
-        if state == "off":
+        if state == "off" and kind == "provider" and known[name].get("kind") == "api":
+            print("Провайдер «%s» (%s) выключен: probe не запускается, каналы работают через замену."
+                  % (label, name))
+            print("Без него: %s" % known[name].get("degrade", ""))
+        elif state == "off":
             print("%s «%s» (%s) выключен: probe не запускается, канал(ы) не выбираются."
                   % ("Провайдер" if kind == "provider" else "Канал", label, name))
             if kind == "provider":
