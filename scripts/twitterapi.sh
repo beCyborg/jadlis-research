@@ -74,7 +74,8 @@ run() {  # run "<twitterapi.io call>" "<twittrapi call>" — order by TWITTER_BA
   case "${TWITTER_BACKEND:-auto}" in
     twitterapiio) eval "$a" ;;
     twittrapi)    eval "$b" || { switchable && eval "$a"; } ;;
-    *)            eval "$a" || { switchable && { echo "fallback → twittrapi (twitterapi.io HTTP $LAST_CODE)" >&2; eval "$b"; }; } ;;
+    *)            if [ -z "${TWITTERAPI_IO_KEY:-}" ]; then echo "no TWITTERAPI_IO_KEY → twittrapi" >&2; eval "$b"   # not an HTTP 401
+                  else eval "$a" || { switchable && { echo "fallback → twittrapi (twitterapi.io HTTP $LAST_CODE)" >&2; eval "$b"; }; }; fi ;;
   esac
 }
 rank_t() { case "$1" in Latest) echo Recency;; Likes) echo Likes;; *) echo Relevance;; esac; }

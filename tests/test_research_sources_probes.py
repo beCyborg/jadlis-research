@@ -384,3 +384,9 @@ def test_status_web_row_shows_exa(rs, monkeypatch, capsys, tmp_path):
     code, out = run_main(rs, capsys, "--data-dir", str(tmp_path), "status", "--no-probe", "--json")
     data = json.loads(out)
     assert data["channels"]["web"]["access"] == "ok" and "через Exa" in data["channels"]["web"]["detail"]
+
+
+def test_twitter_channel_checks_both_rest_keys(rs):
+    """2.12.1: TWITTRAPI_API_KEY alone keeps the twitter channel (Sergey's Mac 09.11 dropped it)."""
+    cat = json.loads((SCRIPT.parents[1] / "sources.json").read_text(encoding="utf-8"))
+    assert {"TWITTERAPI_IO_KEY", "TWITTRAPI_API_KEY"} <= rs.needed_keys(cat, ["twitter"])

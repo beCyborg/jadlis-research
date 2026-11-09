@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+## [2.12.1] — 2026-11-09 — канал Twitter работает и на ключе TwittrAPI / the twitter channel runs on a TwittrAPI key alone
+
+### Для человека
+
+- Канал Twitter больше не выпадает, если есть только ключ TwittrAPI: раньше проверка спрашивала один ключ TwitterAPI.io и писала «нет ключа».
+- Без ключа TwitterAPI.io обёртка сразу идёт в TwittrAPI и пишет об этом прямо, а не «HTTP 401», похожее на отозванный ключ.
+
+### For agents
+
+- Fixed: `skills/research-settings/sources.json` — twitter: `TWITTRAPI_API_KEY` in `optional_keys` and as alternative `twittrapi`, `keep_without_provider` names both keys; `needed_keys()` now checks it, so `resolve` keeps the channel (seen 09.11 on a Mac with only TWITTRAPI_API_KEY: «Grok недоступен (no-binary) и нет TWITTERAPI_IO_KEY»).
+- Changed: `research-sources.py` drop detail names both keys; `scripts/twitterapi.sh` auto mode without `TWITTERAPI_IO_KEY` → TwittrAPI directly with «no TWITTERAPI_IO_KEY → twittrapi».
+- Docs: `docs/tier/README*.md` key table. Tests: `test_twitter_channel_checks_both_rest_keys`.
+
 ## [2.12.0] — 2026-11-09 — Firecrawl первым в лестнице текста страницы / Firecrawl first in the page-text ladder
 
 ### Для человека

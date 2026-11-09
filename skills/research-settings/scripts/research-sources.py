@@ -1116,7 +1116,7 @@ def cmd_resolve(args, catalogue, data_dir, settings, corrupt):
                     warnings.append("twitter: TwitterAPI.io отвечает «%s» — канал может отвалиться"
                                     % balance.get("detail", "нет баланса"))
                 continue
-            detail = "Grok недоступен (%s) и нет TWITTERAPI_IO_KEY" % (
+            detail = "Grok недоступен (%s) и нет ни TWITTERAPI_IO_KEY, ни TWITTRAPI_API_KEY" % (
                 (pinfo or {}).get("access", "unknown"))
             dropped.append({"channel": key, "reason": "no-access", "detail": detail})
             state[key] = "no-access"

@@ -125,7 +125,7 @@
       "family": "twitter",
       "default_set": true,
       "provider": "grok",
-      "keep_without_provider": "if TWITTERAPI_IO_KEY",
+      "keep_without_provider": "if TWITTERAPI_IO_KEY or TWITTRAPI_API_KEY",
       "alternatives": [
         {
           "id": "twitterapi",
@@ -134,6 +134,13 @@
           "mode": "B",
           "tool": "{PLUGIN_ROOT}/scripts/twitterapi.sh",
           "label": "TwitterAPI.io REST — Mode B keyword-only"
+        },
+        {
+          "id": "twittrapi",
+          "key": "TWITTRAPI_API_KEY",
+          "mode": "B",
+          "tool": "{PLUGIN_ROOT}/scripts/twitterapi.sh",
+          "label": "TwittrAPI REST — Mode B keyword-only (тот же twitterapi.sh, запасной поставщик)"
         },
         {
           "id": "brave-site",
@@ -145,7 +152,8 @@
       ],
       "requires": [],
       "optional_keys": [
-        "TWITTERAPI_IO_KEY"
+        "TWITTERAPI_IO_KEY",
+        "TWITTRAPI_API_KEY"
       ],
       "tools": [],
       "degrade": "без Grok канал живёт на TwitterAPI.io (Mode B keyword-only, sourceQuality не выше MEDIUM, семантический угол теряется); без TWITTERAPI_IO_KEY выпадает совсем",

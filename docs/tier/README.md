@@ -143,7 +143,7 @@ brew install uv jq poppler yt-dlp   # ставить только то, что M
 | `OPENALEX_API_KEY` + `OPENALEX_MAILTO` | OpenAlex, снежный ком | дневной cost-бюджет режется |
 | `CROSSREF_MAILTO`, `UNPAYWALL_EMAIL` | проверка DOI и отзывов, поиск открытых текстов | вне «вежливого пула», лимиты жёстче |
 | Опциональные: `EXA_API_KEY`, `CORE_API_KEY`, `YC_SEARCH_API_KEY`, `GOOGLE_PLACES_API_KEY` | семантический слой `/search`, доп. источник, канал `yandex`, place-слой | слой или канал просто не включается |
-| `TWITTERAPI_IO_KEY` | канал `twitter` без Grok: keyword-only Mode B через TwitterAPI.io | канал `twitter` выпадает, когда Grok выключен или без баланса |
+| `TWITTERAPI_IO_KEY` или `TWITTRAPI_API_KEY` | канал `twitter` без Grok: keyword-only Mode B через TwitterAPI.io или TwittrAPI | канал `twitter` выпадает, когда Grok выключен или без баланса |
 
 Что из этого сейчас доступно, показывает `/jadlis-research:research-settings`: одна таблица по всем провайдерам, каналам и слоям — настройка (`auto` или `off`), доступ, что теряется без источника. Там же провайдер или канал выключается насовсем.
 

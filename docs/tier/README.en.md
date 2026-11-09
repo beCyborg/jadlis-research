@@ -145,7 +145,7 @@ Then `/jadlis-search:keys`: the skill takes values one at a time, stores them in
 | `OPENALEX_API_KEY` + `OPENALEX_MAILTO` | OpenAlex, snowballing | a tighter daily cost budget |
 | `CROSSREF_MAILTO`, `UNPAYWALL_EMAIL` | DOI and retraction checks, open-access lookup | outside the polite pool, harsher limits |
 | Optional: `EXA_API_KEY`, `CORE_API_KEY`, `YC_SEARCH_API_KEY`, `GOOGLE_PLACES_API_KEY` | semantic layer of `/search`, extra source, the `yandex` channel, the place layer | that layer or channel simply stays off |
-| `TWITTERAPI_IO_KEY` | the `twitter` channel without Grok: keyword-only Mode B through TwitterAPI.io | the `twitter` channel drops out whenever Grok is off or out of balance |
+| `TWITTERAPI_IO_KEY` or `TWITTRAPI_API_KEY` | the `twitter` channel without Grok: keyword-only Mode B through TwitterAPI.io or TwittrAPI | the `twitter` channel drops out whenever Grok is off or out of balance |
 
 What of this is available right now is shown by `/jadlis-research:research-settings`: one table over every provider, channel and layer — the setting (`auto` or `off`), the access, what is lost without that source. The same table switches a provider or a channel off for good.
 
