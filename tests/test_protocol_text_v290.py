@@ -59,10 +59,12 @@ def test_web_exa_lite_default_and_ladder_2026_11():
     assert calls and all("maximum_number_of_tokens=4096" in c for c in calls)
     assert "not bench-tested" in s and "STOP … 402" in s
     i = s.index("pdf-fetch.sh")
-    assert i < s.index("jina-read.sh", i) < s.index('parsers:["pdf"]', i)  # Jina rung via the script (2.10.3)
-    j = s.index("**HTML — the default: Firecrawl**")  # Firecrawl first since 2.12.0
-    assert j < s.index("firecrawl-read.sh", j) < s.index("**Fallback HTML rung: r.jina.ai**", j) < s.index("jina-read.sh", j)
-    assert "JINA_API_KEY" in s and "429" in s
+    assert i < s.index('parsers:["pdf"]', i)  # PDF: pdf-fetch, then Firecrawl pdf as the last resort
+    j = s.index("**HTML — the default: Firecrawl**")  # Firecrawl is the one HTML rung since 09.11.2026
+    k = s.index("**Firecrawl failed → the page is unread.**", j)
+    assert j < s.index("firecrawl-read.sh", j) < k < s.index("[SOURCE UNAVAILABLE]", k) < s.index("browser-operator", k)
+    assert "browser-operator` is not installed" in s and "429" in s
+    assert "ji" + "na" not in s.lower()  # the fallback reader rung after Firecrawl was dropped (09.11.2026); split literal keeps `rg -il` clean
     # the dropped rungs are named only in the «not in the ladder» note
     assert 'contents "<url>" --full' not in s and "defuddle parse" not in s
     assert "crawl4ai-venv" not in s and "api.tavily.com" not in s

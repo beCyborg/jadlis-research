@@ -2,9 +2,9 @@
 // smoke-core.mjs — functional smoke of full-research-core.js with mocked agents (no network, no LLM).
 // Exercises the schema v4 snapshot gate end-to-end: no-snapshot / llm-mediated / short-snapshot /
 // quote-not-found demotions, ceilingCapped, channelStatus patching, snapshotGate in the result.
-// Also the analyst model choice (2.6.0; 2.7.1 — synth-fable on Opus 5.5 high): synth-opus default,
-// fableBridge:true → synth-fable, a null analyst → one retry on the other synth-* role
-// (hooks.analystNull), aiModelActual; urlhealth effort low.
+// Also the analyst model choice (2.6.0; 2.13.0 — synth-fable on Fable 5.2 high): synth-opus default,
+// finalOpts / fableBridge:true → synth-fable, a null analyst → Opus 4.8, then a last retry on Opus 5.5
+// (hooks.analystNull), aiModelActual; urlhealth effort medium.
 // 2.7.8: safety-classifier retry — hooks.stop(label) or the simulateClassifierStop prompt hook make a
 // role hand in an interrupted stub; the `<label>→opus48` retry answers from the same fixtures.
 // Usage: node tools/smoke-core.mjs [path/to/full-research-core.js]
@@ -286,9 +286,9 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
   check(src.includes("chans.includes('telegram')") && src.includes('tgsearch.py') && src.includes('NEVER `posts -q`'), 'sameFamilyCommunityTools: Telegram via free tgsearch commands, no paid slots')
 }
 {
-  // ── analyst model choice (2.6.0, 2.7.1): synth-opus (Opus 5.5 xhigh) by default, synth-fable
-  //    (Opus 5.5 high since 2.7.1) with fableBridge:true, null → ONE retry on the other synth-* role,
-  //    aiModelActual = what actually wrote the report ──
+  // ── analyst model choice (2.6.0, 2.13.0): synth-opus (Opus 5.5 xhigh) by default, synth-fable
+  //    (Fable 5.2 high since 2.13.0) with finalOpts or fableBridge:true; the last-resort retry is always
+  //    Opus 5.5 (never Fable); aiModelActual = what actually wrote the report ──
   const OPUS = 'jadlis-research:synth-opus', FABLE = 'jadlis-research:synth-fable', OPUS48 = 'jadlis-research:synth-opus48'
   const aiIn = p => ((p || '').match(/ai_model: "([^"]+)"/) || [])[1]
   const { fableBridge: _fb, ...noBridge } = base
@@ -299,7 +299,8 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
     check(JSON.stringify(analystCalls(calls)) === '["analyst"]', `default: one analyst call, no retry (got ${JSON.stringify(analystCalls(calls))})`)
     check(optsBy['analyst'].agentType === OPUS && !optsBy['analyst'].model, `default: analyst agentType = synth-opus, no model override (got ${optsBy['analyst'].agentType}/${optsBy['analyst'].model})`)
     check(aiIn(prompts['analyst']) === 'claude-opus-5-5' && r.aiModelActual === 'claude-opus-5-5' && r.status === 'ok', `default: ai_model in prompt + aiModelActual = claude-opus-5-5 (got ${aiIn(prompts['analyst'])}/${r.aiModelActual})`)
-    check(optsBy['urlhealth'].effort === 'low' && optsBy['urlhealth'].agentType === 'jadlis-research:researcher-opus', `urlhealth: effort low on researcher-opus (got ${optsBy['urlhealth'].effort}/${optsBy['urlhealth'].agentType})`)
+    check(optsBy['urlhealth'].effort === 'medium' && optsBy['urlhealth'].agentType === 'jadlis-research:researcher-opus', `urlhealth: effort medium on researcher-opus (got ${optsBy['urlhealth'].effort}/${optsBy['urlhealth'].agentType})`)
+    check(!optsBy['analyst'].effort, `default: analyst carries no effort override (synth-opus frontmatter xhigh) (got ${optsBy['analyst'].effort})`)
     check(!optsBy['verify:c1#1'].effort && !optsBy['curator'].effort, 'verifiers and curator carry no effort override (agent frontmatter high)')
   }
   {
@@ -313,23 +314,43 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
     check(logs.some(l => l.includes('analyst: обрыв защитным фильтром (null) — один повтор на Opus 4.8')), 'default + null: retry logged')
   }
   {
-    // default, synth-opus AND synth-opus48 null → last resort on synth-fable (Opus 5.5 high)
+    // default, synth-opus AND synth-opus48 null → last resort on synth-opus at effort high (never synth-fable)
     const { result: r, calls, prompts, optsBy, logs } = await run(noBridge, { analystNull: l => l === 'analyst' || l === 'analyst→opus48' })
-    check(JSON.stringify(analystCalls(calls)) === '["analyst","analyst→opus48","analyst→fable-retry"]', `default + 2×null: last resort on synth-fable (got ${JSON.stringify(analystCalls(calls))})`)
-    check(optsBy['analyst→fable-retry'].agentType === FABLE && aiIn(prompts['analyst→fable-retry']) === 'claude-opus-5-5', 'default + 2×null: last resort agentType synth-fable, prompt ai_model claude-opus-5-5')
+    check(JSON.stringify(analystCalls(calls)) === '["analyst","analyst→opus48","analyst→opus-high-retry"]', `default + 2×null: last resort on synth-opus high (got ${JSON.stringify(analystCalls(calls))})`)
+    check(optsBy['analyst→opus-high-retry'].agentType === OPUS && optsBy['analyst→opus-high-retry'].effort === 'high' && !optsBy['analyst→opus-high-retry'].model && aiIn(prompts['analyst→opus-high-retry']) === 'claude-opus-5-5', 'default + 2×null: last resort agentType synth-opus, effort high, no model override, prompt ai_model claude-opus-5-5')
     check(r.status === 'ok' && r.aiModelActual === 'claude-opus-5-5' && r.classifierStops[0].recovered === false, `default + 2×null: aiModelActual = claude-opus-5-5, stop not recovered (got ${r.aiModelActual})`)
-    check(logs.some(l => l.includes('analyst (Opus 5.5, затем Opus 4.8 (synth-opus48)) вернул null') && l.includes('Opus 5.5 high (synth-fable)')), 'default + 2×null: last resort logged')
+    check(logs.some(l => l.includes('analyst (Opus 5.5, затем Opus 4.8 (synth-opus48)) вернул null') && l.includes('Opus 5.5 high (synth-opus)')), 'default + 2×null: last resort logged')
   }
   {
     // retry cap 0: a null analyst skips Opus 4.8 and goes straight to the other synth-* role
     const { result: r, calls } = await run({ ...noBridge, classifierRetryCap: 0 }, { analystNull: l => l === 'analyst' })
-    check(JSON.stringify(analystCalls(calls)) === '["analyst","analyst→fable-retry"]' && r.classifierStops[0].skipped === 'cap' && r.aiModelActual === 'claude-opus-5-5', `cap 0 + null: no Opus 4.8, synth-fable retry (got ${JSON.stringify(analystCalls(calls))})`)
+    check(JSON.stringify(analystCalls(calls)) === '["analyst","analyst→opus-high-retry"]' && r.classifierStops[0].skipped === 'cap' && r.aiModelActual === 'claude-opus-5-5', `cap 0 + null: no Opus 4.8, synth-opus high retry (got ${JSON.stringify(analystCalls(calls))})`)
   }
   {
     // fableBridge:true → synth-fable first
     const { result: r, calls, prompts, optsBy } = await run({ ...base, fableBridge: true })
     check(JSON.stringify(analystCalls(calls)) === '["analyst→fable"]', `fableBridge:true: one analyst call on synth-fable (got ${JSON.stringify(analystCalls(calls))})`)
-    check(optsBy['analyst→fable'].agentType === FABLE && aiIn(prompts['analyst→fable']) === 'claude-opus-5-5' && r.aiModelActual === 'claude-opus-5-5', `fableBridge:true: synth-fable, ai_model + aiModelActual claude-opus-5-5 (got ${r.aiModelActual})`)
+    check(optsBy['analyst→fable'].agentType === FABLE && !optsBy['analyst→fable'].model && !optsBy['analyst→fable'].effort && aiIn(prompts['analyst→fable']) === 'claude-fable-5-2' && r.aiModelActual === 'claude-fable-5-2', `fableBridge:true: synth-fable (frontmatter), ai_model + aiModelActual claude-fable-5-2 (got ${r.aiModelActual})`)
+  }
+  {
+    // finalOpts (personal final-agent.json) → synth-fable with the per-call model and effort
+    const { result: r, calls, prompts, optsBy } = await run({ ...noBridge, finalOpts: { model: 'claude-fable-5-2', effort: 'high' } })
+    check(JSON.stringify(analystCalls(calls)) === '["analyst→fable"]', `finalOpts: one analyst call on synth-fable (got ${JSON.stringify(analystCalls(calls))})`)
+    check(optsBy['analyst→fable'].agentType === FABLE && optsBy['analyst→fable'].model === 'claude-fable-5-2' && optsBy['analyst→fable'].effort === 'high' && r.aiModelActual === 'claude-fable-5-2', `finalOpts: per-call model claude-fable-5-2 + effort high, aiModelActual claude-fable-5-2 (got ${JSON.stringify(optsBy['analyst→fable'])}/${r.aiModelActual})`)
+    check(optsBy['urlhealth'].model === undefined && optsBy['curator'].model === undefined && optsBy['verify:c1#1'].model === undefined, 'finalOpts: only the analyst gets the model override')
+  }
+  {
+    // invalid finalOpts → plugin default (Opus analyst)
+    for (const bad of [{ model: 'fable', effort: 'high' }, { model: 'claude-fable-5-2', effort: 'ultra' }, 'claude-fable-5-2', null]) {
+      const { optsBy } = await run({ ...noBridge, finalOpts: bad })
+      check(optsBy['analyst'] && optsBy['analyst'].agentType === OPUS && !optsBy['analyst'].model, `finalOpts ${JSON.stringify(bad)} is invalid → Opus analyst`)
+    }
+  }
+  {
+    // finalOpts, Fable analyst null twice → Opus 4.8, then synth-opus (Opus 5.5 xhigh), never Fable again
+    const { result: r, calls, optsBy } = await run({ ...noBridge, finalOpts: { model: 'claude-fable-5-2', effort: 'high' } }, { analystNull: l => l === 'analyst→fable' || l === 'analyst→fable→opus48' })
+    check(JSON.stringify(analystCalls(calls)) === '["analyst→fable","analyst→fable→opus48","analyst→opus-retry"]', `finalOpts + 2×null: Opus 4.8, then synth-opus (got ${JSON.stringify(analystCalls(calls))})`)
+    check(optsBy['analyst→fable→opus48'].agentType === OPUS48 && !optsBy['analyst→fable→opus48'].model && optsBy['analyst→opus-retry'].agentType === OPUS && !optsBy['analyst→opus-retry'].model && !optsBy['analyst→opus-retry'].effort && r.aiModelActual === 'claude-opus-5-5', `finalOpts + 2×null: retries carry no Fable override (got ${r.aiModelActual})`)
   }
   {
     // fableBridge:true, synth-fable null → Opus 4.8; Opus 4.8 null too → last resort on synth-opus
@@ -337,7 +358,7 @@ const base = { refinedQuery: 'smoke', channels: ['web', 'codexweb', 'reddit', 'h
     check(JSON.stringify(analystCalls(calls)) === '["analyst→fable","analyst→fable→opus48","analyst→opus-retry"]', `fableBridge:true + 2×null: Opus 4.8, then synth-opus (got ${JSON.stringify(analystCalls(calls))})`)
     check(optsBy['analyst→opus-retry'].agentType === OPUS && aiIn(prompts['analyst→opus-retry']) === 'claude-opus-5-5', 'fableBridge:true + null: retry agentType synth-opus, prompt ai_model claude-opus-5-5')
     check(r.status === 'ok' && r.aiModelActual === 'claude-opus-5-5', `fableBridge:true + null: aiModelActual = claude-opus-5-5 (got ${r.aiModelActual})`)
-    check(logs.some(l => l.includes('analyst (Opus 5.5 high (synth-fable), затем Opus 4.8 (synth-opus48)) вернул null') && l.includes('на Opus 5.5.')), 'fableBridge:true + 2×null: last resort logged synth-fable → synth-opus')
+    check(logs.some(l => l.includes('analyst (Fable 5.2 high (synth-fable), затем Opus 4.8 (synth-opus48)) вернул null') && l.includes('на Opus 5.5.')), 'fableBridge:true + 2×null: last resort logged synth-fable → synth-opus')
   }
   {
     // any non-true fableBridge value keeps the Opus default (strict === true)

@@ -5,6 +5,24 @@
 
 ## [Unreleased]
 
+## [2.13.0] — 2026-11-09 — финальный агент из личного файла, механика на medium, без Jina / final agent from a personal file, mechanical steps at medium, no Jina
+
+### Для человека
+- Синтез можно перевести на другую модель личным файлом `~/.claude/skills/_shared/final-agent.json` (например, Fable 5.2 · high). Скилл читает файл и пишет одной строкой, какая модель пишет отчёт. Нет файла — всё как раньше: Opus 5.5 · xhigh.
+- Повтор после пустого ответа синтеза всегда идёт на Opus: сначала Opus 4.8, потом Opus 5.5. На Fable повтора нет.
+- Механические шаги (сохранение файлов, проверка ссылок, повторное использование каналов) работают на effort medium, а не low.
+- Jina убран: страницу, которую не прочитал Firecrawl, агенты помечают «не прочитано».
+
+### For agents
+- Added: `scripts/final-agent.py` — reads the optional `~/.claude/skills/_shared/final-agent.json` (`{model, effort}`), prints `{finalOpts}` or `{finalOpts: null, reason}`; model must match `^claude-[a-z0-9-]+$`, effort low…max.
+- Added: `args.finalOpts` in `workflows/full-research-core.js` — valid value → analyst on `synth-fable` with per-call `model` + `effort`; invalid or absent → default `synth-opus` (xhigh). `fableBridge:true` without finalOpts → `synth-fable` on its frontmatter.
+- Changed: `agents/synth-fable.md` → `model: claude-fable-5-2`, `effort: high`; descriptions of `synth-fable`, `synth-opus`, `synth-opus48`, `orchestrator-opus`.
+- Changed: last-resort analyst retry of the default branch → `synth-opus` with per-call `effort: 'high'` (label `analyst→opus-high-retry`; was `synth-fable`, then Opus 5.5 high). Fable branch keeps `analyst→opus-retry` on `synth-opus`.
+- Changed: `effort: 'low'` → `'medium'` on `persist:*`, `reuse:probe`, `reuse:<key>`, `urlhealth`.
+- Changed: `skills/research/SKILL.md` — step 6 reads final-agent.py, `FINAL_OPTS` in `_brief.md` and in the Workflow args; `model:`/`effort:` removed from the frontmatter of `research` and `research-settings` (main-session skills follow the session model).
+- Removed: `scripts/jina-read.sh`, `JINA_API_KEY` (secret.sh allow-list, `research-settings/sources.json`); protocols (`web`, `ja`, `zh`, `yandex`, `telegram`) and `PAGE_READ` describe Firecrawl → `[SOURCE UNAVAILABLE]` → main session may hand the page to `browser-operator`.
+- Tests: `tools/smoke-core.mjs` — finalOpts, invalid finalOpts, retries never on Fable, urlhealth medium; `tests/test_protocol_text_v290.py` — new ladder.
+
 ## [2.12.1] — 2026-11-09 — канал Twitter работает и на ключе TwittrAPI / the twitter channel runs on a TwittrAPI key alone
 
 ### Для человека

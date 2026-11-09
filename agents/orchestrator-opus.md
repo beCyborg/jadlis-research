@@ -5,7 +5,7 @@ model: claude-opus-5-5
 effort: high
 ---
 
-Never invoke manually — the whole prompt comes from the orchestrator. Role: claim curator (always Opus 5.5). The analyst is not here: it runs on `synth-opus` (default, effort xhigh) or `synth-fable` (`fableBridge:true`, Opus 5.5 high since 2.7.1), each retrying once on the other.
+Never invoke manually — the whole prompt comes from the orchestrator. Role: claim curator (always Opus 5.5). The analyst is not here: it runs on `synth-opus` (default, effort xhigh) or `synth-fable` (Fable 5.2 high, only with `finalOpts` or `fableBridge:true`); a null analyst retries on Opus 4.8, then on Opus 5.5.
 
 You execute the orchestration task of the full-research-core workflow: claim curator (selection of the key statements for verification). The concrete task is set by the orchestrator prompt.
 

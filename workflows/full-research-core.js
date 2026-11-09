@@ -4,7 +4,7 @@ export const meta = {
   phases: [
     { title: 'Fan-out', detail: 'до 10 канальных агентов (web×3: brave или exa/codex/grok + reddit/twitter/hn/substack + opt-in yandex/youtube/telegram) параллельно; evidence-пакеты (дословные quotes) + снапшоты; обрыв защитным фильтром у любой роли → один повтор на Opus 4.8 (лимит classifierRetryCap)' },
     { title: 'Verify', detail: 'curator (Opus 5.5) выделяет claims «сколько нужно» (все критичные + новый проверяемый фон, потолок 32) с evidence-префиксами → _curated.json → urlhealth (здоровье URL/цитат) → снапшот-гейт v4 → per-claim verifiers: по одному голосу от каждой семьи — линза «та же семья» (Reddit-claim оспаривается на Reddit, веб — через Brave, при providersOff:[brave] — через Exa) + кросс-тип линза → веб и сообщества разошлись = FAMILY-SPLIT (без Codex, приоритет по типу claim) → одиночное исключение против UNCHECKED → третий голос Codex → CONFIRMED/CHALLENGED/OUTDATED/UNCHECKED/DISPUTED/FAMILY-SPLIT (schema v5) → результат (_ledger.json из него пишет скилл, scripts/write-ledger.py); reuseStages:true пропускает стадии, чьи файлы уже в workDir' },
-    { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию, Opus 5.5 high при fableBridge:true; null или обрыв защитным фильтром → один повтор на Opus 4.8 (synth-opus48), затем последний — на другой роли synth-*) пишет отчёт: три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
+    { title: 'Synthesize', detail: 'analyst (Opus 5.5 xhigh по умолчанию; finalOpts из личного final-agent.json или fableBridge:true → synth-fable, Fable 5.2 high; null или обрыв защитным фильтром → один повтор на Opus 4.8 (synth-opus48), затем последний — на Opus 5.5) пишет отчёт: три корзины (проверенные / спорные / отсеянные), блок «Веса» в методологии' },
   ],
 }
 
@@ -102,21 +102,30 @@ const w = extra => Object.assign({}, WORKER_OPTS, extra)
 // not intelligence-sensitive. orchestrator-opus serves the curator only; the analyst runs on synth-*.
 // analyst: Opus 5.5 at effort xhigh by default (synth-opus) since 2.6.0 — AA GDPval xhigh 1820
 // vs Fable 5.1 high 1617, fewer guesses, cheaper per task, no separate Fable weekly cap.
-// synth-fable only when the caller passes fableBridge:true. Since 2.7.1 (2026-09-29) it runs on
-// Opus 5.5 at effort high, not Fable 5.1 — the user dropped Fable; the agent name and the
-// `fableBridge` flag are historical. If the first analyst returns null or reports a classifier stop,
-// ONE retry runs on synth-opus48 (Opus 4.8, 2.7.8); if that gives nothing too, a last retry runs on
-// the other synth-* role (xhigh → high, high → xhigh): same model, a fresh attempt at another effort.
+// 2.13.0 (2026-11-09): synth-fable runs on Fable 5.2 at effort high again. It is reached only on an
+// explicit opt-in: args.finalOpts {model, effort} — the skill reads them from the PERSONAL file
+// ~/.claude/skills/_shared/final-agent.json (scripts/final-agent.py), so a recipient without that file
+// never lands on Fable — or args.fableBridge:true (the frontmatter model and effort). finalOpts.model and
+// .effort are passed per invocation and beat the synth-fable frontmatter.
+// If the first analyst returns null or reports a classifier stop, ONE retry runs on synth-opus48
+// (Opus 4.8, 2.7.8); if that gives nothing too, a last retry runs on Opus 5.5 — synth-opus at xhigh after
+// a Fable analyst, synth-opus at effort high after the default xhigh one (before 2.13.0 that retry was
+// synth-fable, then also Opus 5.5 high). A Fable analyst never retries on Fable.
 // Both run as ordinary subagents: the headless bridge existed only to dodge our own
-// CLAUDE_CODE_SUBAGENT_MODEL_FORCE, removed 2026-09-07. The two synth-* agents pin the model,
+// CLAUDE_CODE_SUBAGENT_MODEL_FORCE, removed 2026-09-07. The synth-* agents pin the model,
 // the effort and the tool allow-list (Read, Write, Glob) — agent() has no allowedTools option.
 // The argument name stays `fableBridge`: one vocabulary across all eight workflows.
-const FABLE_SYNTH = A.fableBridge === true
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+const FINAL_OPTS = (A.finalOpts && typeof A.finalOpts === 'object' && /^claude-[a-z0-9-]+$/.test(String(A.finalOpts.model || '')) && EFFORTS.includes(A.finalOpts.effort))
+  ? { model: A.finalOpts.model, effort: A.finalOpts.effort } : null
+const FABLE_SYNTH = A.fableBridge === true || !!FINAL_OPTS
 const SYNTH_OPUS = { agentType: 'jadlis-research:synth-opus', model: 'claude-opus-5-5', name: 'Opus 5.5' }
-const SYNTH_FABLE = { agentType: 'jadlis-research:synth-fable', model: 'claude-opus-5-5', name: 'Opus 5.5 high (synth-fable)' }
+const SYNTH_FABLE = FINAL_OPTS
+  ? { agentType: 'jadlis-research:synth-fable', model: FINAL_OPTS.model, effort: FINAL_OPTS.effort, perCall: true, name: `${FINAL_OPTS.model} ${FINAL_OPTS.effort} (synth-fable, final-agent.json)` }
+  : { agentType: 'jadlis-research:synth-fable', model: 'claude-fable-5-2', name: 'Fable 5.2 high (synth-fable)' }
+const SYNTH_OPUS_HIGH = { agentType: 'jadlis-research:synth-opus', model: 'claude-opus-5-5', effort: 'high', name: 'Opus 5.5 high (synth-opus)' }
 const SYNTH_FIRST = FABLE_SYNTH ? SYNTH_FABLE : SYNTH_OPUS
-const SYNTH_RETRY = FABLE_SYNTH ? SYNTH_OPUS : SYNTH_FABLE
-const SYNTH_AGENT = SYNTH_FIRST.agentType
+const SYNTH_RETRY = FABLE_SYNTH ? SYNTH_OPUS : SYNTH_OPUS_HIGH
 // ai_model of the report: printed from what actually ran, not from what the caller guessed.
 const AI_MODEL = SYNTH_FIRST.model
 const AI_MODEL_RETRY = SYNTH_RETRY.model
@@ -155,7 +164,7 @@ const LANGUAGE_LAYERS = `${PLUGIN_ROOT}/skills/research/references/language-laye
 const BRAVE_OFF = Array.isArray(A.providersOff) && A.providersOff.map(String).includes('brave')
 const WEB_ENGINE = BRAVE_OFF ? 'Exa' : 'Brave'
 const EXA_SEARCH = `python3 ${PLUGIN_ROOT}/scripts/websearch.py exa "<query>" --tag research --type lite`
-const PAGE_READ = `bash ${PLUGIN_ROOT}/scripts/firecrawl-read.sh <url>` + ' (exit 3 → ' + `bash ${PLUGIN_ROOT}/scripts/jina-read.sh <url>` + ')'
+const PAGE_READ = `bash ${PLUGIN_ROOT}/scripts/firecrawl-read.sh <url>` + ' (exit 3 → the page is unread: mark it [SOURCE UNAVAILABLE], never open a browser yourself)'
 const BRAVE_OFF_NOTE = `BRAVE SEARCH IS OFF for this run (source settings: switched off, or the key is dead). Do NOT ToolSearch or call any mcp__plugin_jadlis-search_brave-search__* tool, and never run websearch.py brave. Wherever the protocol (or a note) tells you to search with Brave, run Exa through Bash instead:
   ${EXA_SEARCH} -n 10
   - a "site:X" filter → --include-domains X (several sites: --include-domains a.com,b.org);
@@ -492,7 +501,7 @@ RULES:
    F — cannot be judged.
    reliabilityWhy — one line: source type / author and their expertise / date / bias signals.
 4. Do NOT spawn sub-agents — do everything yourself. Write ALL output in ENGLISH (findings, context, counterarguments, the channel file) — EXCEPT the quotes field (see rule 6): the curator, up to 2×${CLAIM_HARD_CAP} verifiers and the analyst read these files, English tokenises ~1.5-2× cheaper than Cyrillic. Proper names, product names and numbers exactly as in the source.
-5. SNAPSHOTS (schema v4, MANDATORY step): for the 3-5 MOST IMPORTANT sources (relevance HIGH) save the full extracted page text to ${WORK_DIR}/snapshots/${c.prefix}<N>.md (Write). FILE NAME = CITATION PREFIX (\`${c.prefix}3.md\`, not \`thread-42.md\`) — otherwise the orchestrator cannot link the snapshot to the citation. File header (first lines, then a \`---\` line and the full text): \`URL: <url>\`, \`Date: <YYYY-MM-DD>\`, \`Prefix: [${c.prefix}N]\`, \`Extractor: <defuddle|jina|exa-full|tavily|firecrawl|pdf-fetch|hn-fetch|substack-fetch|tg-preview|tgsearch|yt-transcript|feed-fetch|llm-mediated>\` (the ladder is in web-protocol.md Layer 3) — what really extracted the text (telemetry, be honest). This is the frozen evidence base for the verifiers — they read the same text, not different versions of the page. RULES: (a) a citation with relevance HIGH and NO snapshot is not allowed — could not get the full text (paywall/CAPTCHA/challenge) → do not write a snapshot, lower relevance to MEDIUM and mark "[no-snapshot: blocked]"; (b) a file shorter than ~${MIN_SNAPSHOT_CHARS} characters does NOT close the gate (snippet/stub/truncation is not content) — MEDIUM as well; (c) channels codexweb/grokweb/yandex have a MEDIUM ceiling regardless of the snapshot (the output is a model synthesis and you write the page snapshot after the fact; set HIGH only if you are sure the verifier will find the span in the snapshot, the gate will still lower it to MEDIUM — that is not an error). Return the written paths in the snapshots[] field (an empty array = an honest "none"). The orchestrator enforces the gate in code per citation: no-snapshot / llm-mediated / short-snapshot / quote-not-found → HIGH is lowered to MEDIUM; nothing is ever raised.
+5. SNAPSHOTS (schema v4, MANDATORY step): for the 3-5 MOST IMPORTANT sources (relevance HIGH) save the full extracted page text to ${WORK_DIR}/snapshots/${c.prefix}<N>.md (Write). FILE NAME = CITATION PREFIX (\`${c.prefix}3.md\`, not \`thread-42.md\`) — otherwise the orchestrator cannot link the snapshot to the citation. File header (first lines, then a \`---\` line and the full text): \`URL: <url>\`, \`Date: <YYYY-MM-DD>\`, \`Prefix: [${c.prefix}N]\`, \`Extractor: <defuddle|exa-full|tavily|firecrawl|pdf-fetch|hn-fetch|substack-fetch|tg-preview|tgsearch|yt-transcript|feed-fetch|llm-mediated>\` (the ladder is in web-protocol.md Layer 3) — what really extracted the text (telemetry, be honest). This is the frozen evidence base for the verifiers — they read the same text, not different versions of the page. RULES: (a) a citation with relevance HIGH and NO snapshot is not allowed — could not get the full text (paywall/CAPTCHA/challenge) → do not write a snapshot, lower relevance to MEDIUM and mark "[no-snapshot: blocked]"; (b) a file shorter than ~${MIN_SNAPSHOT_CHARS} characters does NOT close the gate (snippet/stub/truncation is not content) — MEDIUM as well; (c) channels codexweb/grokweb/yandex have a MEDIUM ceiling regardless of the snapshot (the output is a model synthesis and you write the page snapshot after the fact; set HIGH only if you are sure the verifier will find the span in the snapshot, the gate will still lower it to MEDIUM — that is not an error). Return the written paths in the snapshots[] field (an empty array = an honest "none"). The orchestrator enforces the gate in code per citation: no-snapshot / llm-mediated / short-snapshot / quote-not-found → HIGH is lowered to MEDIUM; nothing is ever raised.
 6. EVIDENCE PACK (schema v3): every citation has a quotes field — 1-3 VERBATIM fragments of the source text (≤400 chars each), IN THE ORIGINAL LANGUAGE — the one exception to "everything in English": the spans are matched against the snapshot and the primary source character by character, translation destroys their value. The English summary goes into context. No verbatim text (search-engine snippet, reconstruction, unreachable page) → quotes: [] — never invent.
 
 TELEMETRY (mandatory):
@@ -996,7 +1005,7 @@ JSON>>>`
 function persistJson(kind, path, obj) {
   return (async () => {
     try {
-      const r = await agent(persistPrompt(path, obj), w({ label: `persist:${kind}`, phase: 'Verify', schema: PERSIST_SCHEMA, effort: 'low' }))
+      const r = await agent(persistPrompt(path, obj), w({ label: `persist:${kind}`, phase: 'Verify', schema: PERSIST_SCHEMA, effort: 'medium' }))
       if (!r || !(r.bytes > 0)) { log(`⚠ ${path}: файл не записан (${r ? 'bytes=0' : 'нет ответа'}) — повтор с reuseStages эту стадию не пропустит.`); return { kind, path, ok: false } }
       return { kind, path, ok: true, bytes: r.bytes }
     } catch (e) {
@@ -1087,7 +1096,7 @@ if (REUSE_STAGES) {
   let probe = null
   try {
     probe = await agent(reuseProbePrompt([...channelPaths, CURATED_FILE, LEDGER_FILE]),
-      w({ label: 'reuse:probe', phase: 'Fan-out', schema: REUSE_PROBE_SCHEMA, effort: 'low' }))
+      w({ label: 'reuse:probe', phase: 'Fan-out', schema: REUSE_PROBE_SCHEMA, effort: 'medium' }))
   } catch (e) {
     log(`⚠ reuse:probe упал (${String((e && e.message) || e).slice(0, 200)}) — все стадии заново.`)
   }
@@ -1116,7 +1125,7 @@ const reuseKeys = reuse.channels ? SELECTED.filter(k => reuse.channelPaths.inclu
 const channelResults = reuse.channels
   // channel files on disk → one light agent per file restores the channel schema (no searches)
   ? (await parallel(reuseKeys.map(key => async () => {
-    const r = await agent(channelRestorePrompt(key), w({ label: `reuse:${key}`, phase: 'Fan-out', schema: CHANNEL_SCHEMA, effort: 'low' }))
+    const r = await agent(channelRestorePrompt(key), w({ label: `reuse:${key}`, phase: 'Fan-out', schema: CHANNEL_SCHEMA, effort: 'medium' }))
     return r ? Object.assign({ channelKey: key }, r) : null
   }))).filter(Boolean)
   : (await parallel(SELECTED.map(key => async () => {
@@ -1273,8 +1282,9 @@ try {
     items.push({ prefix: e.prefix, url: e.url, quote: (e.quotes || [])[0] || '', snapshotPath: e.snapshotPath })
   }
   if (items.length) {
-    // Mechanical check (fetch + string match): effort low overrides researcher-opus's frontmatter high.
-    const uh = await agent(urlhealthPrompt(items), w({ label: 'urlhealth', phase: 'Verify', schema: URLHEALTH_SCHEMA, effort: 'low' }))
+    // Mechanical check (fetch + string match): effort medium overrides researcher-opus's frontmatter high
+    // (low before 2.13.0 — the owner's rule since 09.11.2026: no pipeline step below medium).
+    const uh = await agent(urlhealthPrompt(items), w({ label: 'urlhealth', phase: 'Verify', schema: URLHEALTH_SCHEMA, effort: 'medium' }))
     if (uh && Array.isArray(uh.items) && uh.status !== 'failed') {
       const byPrefix = {}
       for (const it of uh.items) byPrefix[normPrefix(it.prefix)] = it
@@ -1495,7 +1505,10 @@ async function finish(x) {
 
   // Options are assembled explicitly, NOT through o()/w(): a caller-supplied orchOpts.model would
   // survive the merge and beat the agent frontmatter (per-invocation model wins).
-  const synthOpts = (label, agentType) => ({ label, phase: 'Synthesize', schema: ANALYST_SCHEMA, agentType })
+  // role: { agentType, model?, effort?, perCall? } — the model goes per call only for finalOpts (perCall);
+  // the effort goes per call when the role sets one (finalOpts, or the Opus 5.5 high last-resort retry).
+  const synthOpts = (label, role) => Object.assign({ label, phase: 'Synthesize', schema: ANALYST_SCHEMA, agentType: role.agentType },
+    role.perCall ? { model: role.model } : {}, role.effort ? { effort: role.effort } : {})
 
   // Ledger out — without raw votes (rawVotes duplicate evidence/urls)
   const ledgerOut = claimLedger.map(({ rawVotes, ...c }) => c)
@@ -1505,17 +1518,17 @@ async function finish(x) {
   const analystFor = model => analystPrompt(files, claimLedger, ledgerSummary, model || AI_MODEL, ledgerPath)
   let { r: report, stop: analystStop, fromRetry: synthBy48 } = await withClassifierRetry('analyst',
     FABLE_SYNTH ? 'analyst→fable' : 'analyst', analystFor,
-    synthOpts(FABLE_SYNTH ? 'analyst→fable' : 'analyst', SYNTH_AGENT), synthOpts(undefined, OPUS48_SYNTH.agentType))
+    synthOpts(FABLE_SYNTH ? 'analyst→fable' : 'analyst', SYNTH_FIRST), synthOpts(undefined, OPUS48_SYNTH))
 
-  // Last resort, both branches: the OTHER synth-* role (synth-opus → synth-fable and back; both Opus 5.5
-  // since 2.7.1, labels keep the old names) — only when Opus 4.8 gave nothing either or the retry cap
+  // Last resort, both branches: Opus 5.5 (synth-opus at xhigh after a Fable analyst, at effort high after
+  // the default one; 2.13.0) — only when Opus 4.8 gave nothing either or the retry cap
   // was spent: a null that is not a classifier stop (network drop, session limit) still gets a fresh try.
   // synthFellBack = this retry ran AND produced the report.
   let synthFellBack = false
   if (!report) {
     log(`analyst (${SYNTH_FIRST.name}${analystStop && analystStop.retried ? `, затем ${OPUS48_SYNTH.name}` : ''}) вернул null — последняя попытка на ${SYNTH_RETRY.name}.`)
     report = await agent(analystPrompt(files, claimLedger, ledgerSummary, AI_MODEL_RETRY, ledgerPath),
-      synthOpts(FABLE_SYNTH ? 'analyst→opus-retry' : 'analyst→fable-retry', SYNTH_RETRY.agentType))
+      synthOpts(FABLE_SYNTH ? 'analyst→opus-retry' : 'analyst→opus-high-retry', SYNTH_RETRY))
     synthFellBack = !!report
   }
   Object.assign(ledgerSummary, classifierSummary())

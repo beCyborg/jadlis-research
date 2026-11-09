@@ -248,9 +248,9 @@ negative experience, but also in paid-placement posts (see reliability below).
 
 Open catalogs gave 3 relevant peers of 68 candidates in the discovery test — do not use them to find
 channels in either mode:
-- **TGStat** — 403 behind Cloudflare for `curl`/defuddle/plain r.jina.ai; r.jina.ai with
-  `X-Engine: browser` opens categories and tags only (rankings by subscribers, a narrow topic is not
-  there), channel search is a filter form that does not work over GET, post search is paid.
+- **TGStat** — 403 behind Cloudflare for `curl`/defuddle; even a browser render opens categories and
+  tags only (rankings by subscribers, a narrow topic is not there), channel search is a filter form
+  that does not work over GET, post search is paid.
 - **telemetr.me** — shows the catalog without a login but replaces the handle with «адрес по подписке».
 - **tlgrm.ru** — search works only in JS and comes back empty.
 - **lyzem.com** — `curl` search works but the index is tiny («трипваер» — 3 results).

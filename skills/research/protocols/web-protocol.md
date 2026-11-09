@@ -18,7 +18,6 @@ news queries) and the content layer `brave_llm_context`. Domain scoping goes thr
 | `mcp__plugin_jadlis-search_brave-search__brave_llm_context` | Content layer: returns the EXTRACTED CONTENT of pages for a query (not just links); always with `maximum_number_of_tokens` |
 | `mcp__plugin_jadlis-search_brave-search__brave_web_search` | **News / freshness** (`freshness="pw"`/`"pm"`) and keyword top-ups (+`extra_snippets`) |
 | `bash {PLUGIN_ROOT}/scripts/firecrawl-read.sh "<url>"` (Bash; Firecrawl `/v2/scrape`, `proxy:"auto"`, 1 credit per page) | **Default snapshot writer** for HTML: the full text of ONE page (extraction ladder — Layer 3) |
-| `bash {PLUGIN_ROOT}/scripts/jina-read.sh "<url>"` (Bash; r.jina.ai, `JINA_API_KEY` from the Keychain if set) | Fallback HTML rung after Firecrawl; second PDF rung |
 | `mcp__plugin_jadlis-search_firecrawl__firecrawl_scrape` | Only the last PDF rung (`parsers:["pdf"]`, `pdfOptions.maxPages ≤ 20`) and the `waitFor` retry; never for x.com (the plugin hook denies it) |
 
 **CRITICAL:** Before using any tool — load it via ToolSearch if it is unavailable.
@@ -132,12 +131,11 @@ Analyze the Layer 1 results:
 ### Layer 3 — Full-text fetch: the extraction ladder (2-5 URLs: all HIGH candidates + gaps)
 
 The order of the rungs is fixed (bench 2026-11-04 on 60 real research pages, ground truth = a headless
-Chromium render: Jina + Firecrawl took 56 of 57 pages with 0 false accepts — the one miss was a Reddit
-thread no extractor read; the old defuddle-first ladder took 54 with 2 silently truncated bodies.
-Bench 2026-11-09 on 20 more pages: Firecrawl read 20/20, Jina 18/20 — two gov sites answer Jina 403;
-RU median 4 s vs 7 s — so Firecrawl goes first).
+Chromium render: the old defuddle-first ladder took 54 of 57 pages with 2 silently truncated bodies;
+one miss was a Reddit thread no extractor read. Bench 2026-11-09 on 20 more pages: Firecrawl read 20/20,
+RU median 4 s — so Firecrawl is the one HTML rung).
 A rung has closed the page (the body passed the gate below) → do not go further. Write the real rung
-into the snapshot header: `Extractor: <pdf-fetch|jina|firecrawl>`.
+into the snapshot header: `Extractor: <pdf-fetch|firecrawl>`.
 There is no `timeout` utility on macOS — set the time limit with the Bash tool's `timeout` parameter.
 
 **Gate — a body is accepted only if ALL hold:**
@@ -153,33 +151,30 @@ The old «≥ ~1 000 chars» rule let through a base64 loader GIF, a zh-CN copy 
 
 1. **PDF URL** (`.pdf`/`/TXT/PDF/`/`?format=pdf`) — its own ladder, in this order:
    1. `out=$(bash {PLUGIN_ROOT}/scripts/pdf-fetch.sh "<url>")` → `Read "$out"` (0 cr). `exit 2` (PDF_UNREACHABLE/PDF_EMPTY — JS gate, 403 behind Akamai, scan, paywall) → next rung. A scientific article with a DOI → try its Unpaywall OA link with `pdf-fetch.sh` first.
-   2. `bash {PLUGIN_ROOT}/scripts/jina-read.sh "<url>"` (same rules as rung 2 below; 5 of 6 PDFs in the bench).
-   3. Last resort — `firecrawl_scrape` with `parsers:["pdf"]` AND `pdfOptions.maxPages ≤ 20` (the plugin hook lets nothing else through; a 17-page PDF cost 17 credits).
+   2. Last resort — `firecrawl_scrape` with `parsers:["pdf"]` AND `pdfOptions.maxPages ≤ 20` (the plugin hook lets nothing else through; a 17-page PDF cost 17 credits).
    Key numbers may sit only inside raster figures — `pdftotext` then returns the captions without the values; read the cached original `.pdf` with the `pages` parameter. Nothing worked → cite from the snippets with the mark "(reconstructed)".
 2. **HTML — the default: Firecrawl** (`/v2/scrape`, `proxy:"auto"` handles anti-bot pages, `onlyMainContent:true`):
    ```bash
-   bash {PLUGIN_ROOT}/scripts/firecrawl-read.sh "<url>"   # exit 3 = no key, HTTP error or the target refused → rung 3
+   bash {PLUGIN_ROOT}/scripts/firecrawl-read.sh "<url>"   # exit 3 = no key, HTTP error or the target refused → the page is unread (rung 3)
    ```
    Bash `timeout: 120000`. The script finds the endpoint itself (`$FIRECRAWL_API_URL` → the local key
    rotator → `api.firecrawl.dev` with `FIRECRAWL_API_KEY` from the Keychain); without a key it exits 3 at
    once. It refuses PDF and x.com/twitter.com (an AI retelling for 30 credits; tweets — the twitter
-   channel) and retries one 429 itself. **A second 429 → go to rung 3 for this URL, do not loop.**
+   channel) and retries one 429 itself. **A second 429 → the page is unread (rung 3), do not loop.**
    Body fails the gate / challenge text → one retry with `firecrawl_scrape(url, formats=["markdown"],
    onlyMainContent=true, proxy="auto", waitFor=5000)`, then rung 3.
-3. **Fallback HTML rung: r.jina.ai** (renders JS in a browser; reads some pages Firecrawl loses):
-   ```bash
-   eval "$(bash {PLUGIN_ROOT}/scripts/secret.sh --export JINA_API_KEY 2>/dev/null)"   # once per agent; no key is fine
-   bash {PLUGIN_ROOT}/scripts/jina-read.sh "<url>"   # exit 3 = Jina or the target refused → the URL is unavailable
-   ```
-   Bash `timeout: 90000`. **Keyless = ~20 requests/minute per IP**, and the parallel channels share
-   the IP: pause 3–4 s between your Jina calls (`sleep 3` before the next one), never fire them in
-   parallel. RU pages are slow on Jina (median 7–13 s) — that is not a failure. HTTP 429 → do not loop.
+3. **Firecrawl failed → the page is unread.** Mark the URL `[SOURCE UNAVAILABLE]` and the citation
+   "[no-snapshot: blocked]" (MEDIUM at most), as for any unavailable URL. You never open a browser
+   yourself. If the conclusion depends on that page, say so in your result: the main session may hand
+   it to the `browser-operator` subagent. Where `browser-operator` is not installed, the page stays
+   unread and the report says so.
 4. **Reddit URLs — not this ladder.** Every extractor is blocked on reddit.com (the bench miss). A Reddit thread that matters → the reddit channel tools: Reddit MCP `fetch_comments` or `python3 {PLUGIN_ROOT}/scripts/reddit-archive.py comments <id> --compact` (see `reddit-protocol.md`).
 5. **Behind a login** → Playwright MCP only.
 
-**Not in the ladder any more** (bench 2026-11): defuddle (added no page beyond Firecrawl + Jina on 57
-pages and let 2 truncated bodies through as first rung), Exa `contents` (partial pages 3× in 57),
-Tavily keyless (429 at volume and 3 truncated bodies), Crawl4AI (its venv is gone).
+**Not in the ladder any more** (bench 2026-11): defuddle (let 2 truncated bodies through as first
+rung on 57 pages), Exa `contents` (partial pages 3× in 57), Tavily keyless (429 at volume and 3
+truncated bodies), Crawl4AI (its venv is gone), the fallback reader rung after Firecrawl (dropped
+09.11.2026: in 6 days of logs it read zero pages Firecrawl had missed).
 
 No rung produced a body → mark the URL `[SOURCE UNAVAILABLE]`, the citation — MEDIUM at most, "[no-snapshot: blocked]".
 
@@ -245,8 +240,9 @@ returned ~36k characters per call — the cap in Layer 1 is the main saving.
 ## Fallback
 
 1. Exa fails (`exit 2` no key, `STOP … 402`, exit 3/4) → Brave `brave_web_search` (+`extra_snippets`) takes over discovery with keyword queries. On a failure of `brave_llm_context` → continue on Exa + `brave_web_search` and Layer 3. On a failure of `brave_web_search` → retry with a rephrased keyword query + `count=5`. Max 2 retries; a 402 is never retried.
-2. The full text of a page — only via the Layer 3 ladder (PDF: pdf-fetch → r.jina.ai → Firecrawl
-   `parsers:["pdf"]`; HTML: Firecrawl `proxy:"auto"` → r.jina.ai; Reddit → the Reddit tools);
+2. The full text of a page — only via the Layer 3 ladder (PDF: pdf-fetch → Firecrawl
+   `parsers:["pdf"]`; HTML: Firecrawl `proxy:"auto"` → unread, the main session may escalate to
+   `browser-operator`; Reddit → the Reddit tools);
    Playwright MCP — **only for logged-in sessions**.
 3. If all channels fail → record `[WEB SOURCE UNAVAILABLE]` and finish with what you have.
 

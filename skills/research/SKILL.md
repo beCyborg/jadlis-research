@@ -12,8 +12,6 @@ allowed-tools:
   - Workflow
   - mcp__plugin_jadlis-search_brave-search__brave_web_search
 argument-hint: "<query — research topic>"
-model: claude-opus-5-5
-effort: high
 ---
 
 # /research — full research of a topic (hybrid Skill + Workflow)
@@ -265,7 +263,13 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
    (a relative one resolves from the cwd at the moment the agents are spawned: a `cd` of the main
    session before a resume "lost" files at status ok; this also concerns `resumeFromRunId` calls —
    pass the args in full with the same absolute workDir);
-   `VAULT_RESEARCH_DIR = {VAULT_PATH}/Знания/Ресерчи`; `PLUGIN_ROOT = ${CLAUDE_PLUGIN_ROOT}`.
+   `VAULT_RESEARCH_DIR = {VAULT_PATH}/Знания/Ресерчи`; `PLUGIN_ROOT = ${CLAUDE_PLUGIN_ROOT}`;
+   `FINAL_OPTS` = the `finalOpts` field of `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/final-agent.py"` (one JSON
+   line; it reads the OPTIONAL personal file `~/.claude/skills/_shared/final-agent.json` =
+   `{"model":"claude-…","effort":"high"}` and prints `{"finalOpts": {…}}` or `{"finalOpts": null, "reason": …}`).
+   `null` → the plugin default (analyst Opus 5.5 · xhigh). Say it in one Russian line before the gate:
+   «Синтез: claude-fable-5-2 · high (final-agent.json)» or «Синтез: по умолчанию, Opus 5.5 · xhigh
+   (final-agent.json: <reason>)».
 
 7. **Brief → launch gate.** One AskUserQuestion, in Russian, header «Запуск». The question
    restates the whole proposal so it reads without scrolling back: the brief `REFINED_QUERY` (its
@@ -297,6 +301,7 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
       CHANNEL_NOTES: {}                           # = resolve.notes — {channel: text}, verbatim
       PROVIDERS_OFF: []                           # = resolve.providers_off, e.g. [grok]
       SOURCE_DROPPED: []                          # = resolve.dropped — [{channel, reason, detail}]
+      FINAL_OPTS: null                            # = final-agent.py finalOpts, e.g. {model: claude-fable-5-2, effort: high}
       LANGUAGES: [ru]                             # + QUERIES per language if not ru/en
       QUERIES: {}
       SUBSTACK_HANDLES: []
@@ -340,7 +345,8 @@ Workflow({
     date: DATE,
     workDir: WORK_DIR,
     pluginRoot: PLUGIN_ROOT,            // ${CLAUDE_PLUGIN_ROOT} is NOT interpolated in JS — passed as a value
-    vaultPath: VAULT_PATH
+    vaultPath: VAULT_PATH,
+    finalOpts: FINAL_OPTS               // step 6: {model, effort} from final-agent.json, or null — never invent it
   }
 })
 ```
@@ -353,11 +359,12 @@ call does not inherit args — pass them in full. The built-in dry-run defaults 
 `dryRun: true`.
 
 Models inside the workflow: channels, verifiers and curator — Opus 5.5
-(`jadlis-research:researcher-opus` / `jadlis-research:orchestrator-opus`; urlhealth runs at effort low);
+(`jadlis-research:researcher-opus` / `jadlis-research:orchestrator-opus`; urlhealth runs at effort medium);
 analyst — **Opus 5.5 at effort xhigh** (`jadlis-research:synth-opus`) by default.
-`fableBridge: true` in args → analyst on `jadlis-research:synth-fable` instead — since 2.7.1 also
-Opus 5.5, at effort high (name and flag are historical; Fable 5.1 is no longer used). Either way, an
-analyst that returns null is retried ONCE on the other synth-* role (xhigh ↔ high).
+`finalOpts` in args (valid `model` + `effort`, step 6) → analyst on `jadlis-research:synth-fable` with
+that model and effort; `fableBridge: true` without `finalOpts` → synth-fable on its frontmatter
+(Fable 5.2, effort high, 2.13.0). An analyst that returns null is retried on Opus 4.8 (synth-opus48),
+then once more on Opus 5.5 — never on Fable.
 Do NOT pass `aiModel`: the workflow derives the frontmatter value itself and reports the model
 that actually wrote the report in `aiModelActual`.
 
@@ -577,7 +584,8 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      транскриптов нашёл ещё N обрывов без повтора»). No script → skip silently.
    - Gaps (`synthMeta.gaps`): what the research did not cover.
    - Synthesis model: `aiModelActual` — the one that actually wrote the report (Opus 5.5 since
-     2.7.1: xhigh by default, high with `fableBridge: true` or on the last-resort retry;
+     2.7.1: xhigh by default, high on the last-resort retry; the `finalOpts` model — e.g.
+     `claude-fable-5-2` — when step 6 found the personal file, 2.13.0;
      `claude-opus-4-8` when the analyst was re-run after a classifier stop or a null, 2.7.8).
    - Report path: `REPORT_PATH` (vault, `Знания/Ресерчи`).
    - Working directory: `{WORK_DIR}/` (per-source files + draft — the full process).

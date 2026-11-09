@@ -1,6 +1,6 @@
 ---
 name: synth-opus48
-description: "Workflow-only fallback after a safety-classifier stop: full-research-core re-runs the analyst here once, on Opus 4.8 at effort high, when synth-opus/synth-fable returned null or reported a classifier stop; never invoke manually."
+description: "Workflow-only fallback after a safety-classifier stop: full-research-core re-runs the analyst here once, on Opus 4.8 at effort high, when synth-opus (Opus 5.5) or synth-fable (Fable 5.2) returned null or reported a classifier stop; never invoke manually."
 tools: Read, Write, Glob
 model: claude-opus-4-8
 effort: high
