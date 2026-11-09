@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+## [2.12.0] — 2026-11-09 — Firecrawl первым в лестнице текста страницы / Firecrawl first in the page-text ladder
+
+### Для человека
+
+- Снимки страниц для цитат теперь сначала снимает Firecrawl, Jina стала запасной ступенью. На 20 реальных страницах Firecrawl прочитал все 20, Jina — 18, и на русских страницах Firecrawl быстрее.
+- Без ключа Firecrawl лестница сразу идёт в Jina, так что ресёрч работает и без него.
+
+### For agents
+
+- Changed: `web-protocol.md` Layer 3 — HTML rung 2 is `scripts/firecrawl-read.sh`, rung 3 is `scripts/jina-read.sh`; tool table, rate-limit line and Fallback updated; PDF ladder unchanged (pdf-fetch → Jina → Firecrawl `parsers:["pdf"]`).
+- Changed: `workflows/full-research-core.js` — `JINA_READ` → `PAGE_READ` (firecrawl-read.sh, exit 3 → jina-read.sh) in the Brave-off note and the web-verifier lens.
+- Changed: `ja-`, `zh-`, `yandex-`, `telegram-protocol.md` point at the ladder instead of defuddle / r.jina.ai; `sources.json` degrade and Jina texts.
+- Changed: `scripts/` synced from `jadlis-search--v2.5.0` (new `firecrawl-read.sh`, `jina-read.sh` keyless fix).
+- Changed: `tests/test_protocol_text_v290.py` asserts the new rung order.
+- Changed: `.claude-plugin/plugin.json` version 2.11.0 → 2.12.0.
+
 ## [2.11.0] — 2026-11-08 — ресёрч без Brave / research without Brave
 
 ### Для человека

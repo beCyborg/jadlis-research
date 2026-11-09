@@ -1,1 +1,1 @@
-jadlis-search jadlis-search--v2.4.0 846773c77bbc1ea975f0ddb341b4cf36e3fa51c1
+jadlis-search jadlis-search--v2.5.0 05773c11b73fe398f143cd721031553154711bdc

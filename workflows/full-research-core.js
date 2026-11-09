@@ -155,13 +155,13 @@ const LANGUAGE_LAYERS = `${PLUGIN_ROOT}/skills/research/references/language-laye
 const BRAVE_OFF = Array.isArray(A.providersOff) && A.providersOff.map(String).includes('brave')
 const WEB_ENGINE = BRAVE_OFF ? 'Exa' : 'Brave'
 const EXA_SEARCH = `python3 ${PLUGIN_ROOT}/scripts/websearch.py exa "<query>" --tag research --type lite`
-const JINA_READ = `bash ${PLUGIN_ROOT}/scripts/jina-read.sh <url>`
+const PAGE_READ = `bash ${PLUGIN_ROOT}/scripts/firecrawl-read.sh <url>` + ' (exit 3 → ' + `bash ${PLUGIN_ROOT}/scripts/jina-read.sh <url>` + ')'
 const BRAVE_OFF_NOTE = `BRAVE SEARCH IS OFF for this run (source settings: switched off, or the key is dead). Do NOT ToolSearch or call any mcp__plugin_jadlis-search_brave-search__* tool, and never run websearch.py brave. Wherever the protocol (or a note) tells you to search with Brave, run Exa through Bash instead:
   ${EXA_SEARCH} -n 10
   - a "site:X" filter → --include-domains X (several sites: --include-domains a.com,b.org);
   - page content in the result (the llm_context equivalent) → add --contents text --max-chars 4000;
   - news / freshness → add --start YYYY-MM-DD;
-  - the full text of one page → ${JINA_READ}.
+  - the full text of one page → ${PAGE_READ}.
 EXCEPTIONS: Exa does NOT index reddit.com, x.com or twitter.com (0 results, checked 2026-11). Reddit → only the Reddit tools of the protocol (reddit_search / execute_operation) and python3 ${PLUGIN_ROOT}/scripts/reddit-archive.py. X → only twitterapi.sh, there is no web fallback for X. Exa allows about 10 requests/s — at most 5 parallel calls.`
 // Second-level safety: the twitter channel mode is derived from providersOff, not only from a note —
 // if the caller forgot the note, the core supplies the same text itself (see channelPrompt).
@@ -571,7 +571,7 @@ const HN_CMD = `\`${PLUGIN_ROOT}/scripts/hn-fetch.sh search "<query>" --tags sto
 // Open-web search for verifiers: Brave MCP tools, or Exa through Bash when Brave is off (2.11.0).
 // siteSearch(d) — one site, in the claim platform's own language.
 const WEB_TOOLS = BRAVE_OFF
-  ? `Bash: \`${EXA_SEARCH} -n 10\` (page content in the result: add --contents text --max-chars 4000; full text of one page: \`${JINA_READ}\`); Brave Search is OFF this run — never load a Brave tool`
+  ? `Bash: \`${EXA_SEARCH} -n 10\` (page content in the result: add --contents text --max-chars 4000; full text of one page: \`${PAGE_READ}\`); Brave Search is OFF this run — never load a Brave tool`
   : `ToolSearch "select:${BRAVE_TOOLS}"`
 const siteSearch = d => (BRAVE_OFF
   ? `Bash: \`${EXA_SEARCH} -n 10 --include-domains ${d}\``

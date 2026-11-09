@@ -60,8 +60,8 @@ def test_web_exa_lite_default_and_ladder_2026_11():
     assert "not bench-tested" in s and "STOP … 402" in s
     i = s.index("pdf-fetch.sh")
     assert i < s.index("jina-read.sh", i) < s.index('parsers:["pdf"]', i)  # Jina rung via the script (2.10.3)
-    j = s.index("**HTML — the default: r.jina.ai**")
-    assert j < s.index('proxy="auto"', j)
+    j = s.index("**HTML — the default: Firecrawl**")  # Firecrawl first since 2.12.0
+    assert j < s.index("firecrawl-read.sh", j) < s.index("**Fallback HTML rung: r.jina.ai**", j) < s.index("jina-read.sh", j)
     assert "JINA_API_KEY" in s and "429" in s
     # the dropped rungs are named only in the «not in the ladder» note
     assert 'contents "<url>" --full' not in s and "defuddle parse" not in s

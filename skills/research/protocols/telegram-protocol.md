@@ -118,7 +118,7 @@ python3 "$TG" csearch … $IN` passes ONE word and fails with `the following arg
       phrase. A second phrase (≤ 3 per run, slot budget above) only when the first 20 rows were
       mostly off-topic — and then NARROWER, never broader.
    4. **Seed from the web (optional, ≤ 3 Brave calls).** 1-2 `site:t.me <тема>` + 1 «подборка telegram
-      каналов <тема>»; read the 1-2 freshest roundups through r.jina.ai (web-protocol.md Layer 3) and
+      каналов <тема>»; read the 1-2 freshest roundups through the page-text ladder (web-protocol.md Layer 3) and
       replace `\_` with `_` before parsing handles (Markdown escapes them — the parse breaks
       silently). Roundups help most on AI/IT topics and go stale (12 of 70 handles no longer existed).
       AI topics → also seeds from `{PLUGIN_ROOT}/skills/research/references/telegram-seed-handles.md`.
@@ -198,7 +198,7 @@ Search the platform in its own language: use the LANGUAGES / QUERIES block from 
 brave_web_search({ "query": "site:t.me <ТЕМА по-русски>", "count": 15, "extra_snippets": true })
 ```
 2. Channel roundups: `подборка telegram каналов <тема>` (vc.ru / habr — donors of handles); read the
-   page through r.jina.ai and replace `\_` with `_` before parsing handles. Catalogs (TGStat, telemetr,
+   page through the page-text ladder (web-protocol.md Layer 3) and replace `\_` with `_` before parsing handles. Catalogs (TGStat, telemetr,
    tlgrm, lyzem, telegid) — not for discovery, see below.
 3. AI topics → take the relevant ones straight from `{PLUGIN_ROOT}/skills/research/references/telegram-seed-handles.md`.
 
