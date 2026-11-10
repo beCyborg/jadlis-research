@@ -19,16 +19,16 @@ Before Phase A read `references/gotchas.md` — run failure modes (analyst sessi
 
 The heavy part (N channel researchers → per-claim verification with live Brave counter-search, or Exa when Brave is off →
 analyst synthesis) runs in the deterministic workflow **`full-research-core`**. The skill does the
-interactive intake (Phase A: channels + recon + interview → brief in `{WORK_DIR}/_brief.md`; one
-AskUserQuestion = launch gate) and the vault write (vault contract: dedup, wikilinks, daily-note
-entry).
+interactive intake (Phase A: channels + recon + interview → brief in `{WORK_DIR}/_brief.md`; the
+run starts right after the interview, with no confirmation question) and the vault write (vault
+contract: dedup, wikilinks, daily-note entry).
 
 **User query:** `$ARGUMENTS`
 
 **Settings short-circuit.** If `$ARGUMENTS` is exactly `settings` or `настройки` (trimmed, case
 insensitive, nothing else), this is not a research request: answer with the single line
 «Настройки источников: запусти `/jadlis-research:research-settings`» and stop. No recon, no
-launch gate, no workflow.
+interview, no workflow.
 
 Language convention (Plan 2, 2026-09): everything the agents read and write inside the workDir
 (channel files, snapshot headers, curator/verifier/escalation output, the claim ledger) is in
@@ -40,7 +40,7 @@ queries in the Yandex/Telegram protocols, and `quotes[]` in the language of the 
 ## Architecture
 
 ```
-Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md; one AskUserQuestion = launch gate)
+Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md → launch, no confirmation question)
   → Phase B (Workflow full-research-core) → Phase C (WRITE: vault contract)
 ```
 
@@ -48,12 +48,12 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
 
 0. **Session branch — pick exactly one.**
    - **Normal (default).** No plan mode — do not call `EnterPlanMode`. Steps 1-7 run in the
-     session's current mode; the launch gate is the one AskUserQuestion of step 7, the brief goes
-     to `{WORK_DIR}/_brief.md`.
+     session's current mode; the only question to the user is the interview of step 4, then the
+     brief goes to `{WORK_DIR}/_brief.md` and the run starts (step 7).
    - **Brief already approved.** Narrow signals only: the request carries a `## full-research brief`
      section from an approved plan, gives the path to a `_brief.md`, or explicitly asks to launch
      without questions («без вопросов», «интервью и гейт пропусти»). Skip the interview (step 4)
-     and the gate (step 7). Run step 2a only if the brief has no `SELECTED_CHANNELS`; fields the
+     and the brief message of step 7. Run step 2a only if the brief has no `SELECTED_CHANNELS`; fields the
      brief lacks come from the request and steps 5-6. Then do the launch sequence of step 7
      (`mkdir -p`, `_brief.md` — keep a given one as is, launch line, Workflow). If this file was
      opened with Read rather than loaded as a skill, its plugin-root variables stay unsubstituted —
@@ -63,13 +63,13 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
      section to that plan file — leave the rest of the plan as it is, no Context/Evidence frame
      around the brief. The first line under `## full-research brief` is
      `EXEC: read ${CLAUDE_SKILL_DIR}/SKILL.md — step 0 «Brief already approved», then Phase B–C; launch without questions`
-     so the brief survives «clear context» on approval. The gate is the user's approval of the
-     plan: one `ExitPlanMode`, no AskUserQuestion gate. After approval — the launch sequence of
+     so the brief survives «clear context» on approval. The go-ahead is the user's approval of the
+     plan: one `ExitPlanMode`. After approval — the launch sequence of
      step 7. If Workflow then refuses with «scriptPath must be a script path this tool returned»,
      the approval switched the session to `auto` — ask the user to switch back to bypass
      permissions and repeat the same call.
-   - **Headless** (`-p`, AskUserQuestion unavailable): the interview answers come from the prompt,
-     the gate is skipped — write `_brief.md` and launch right away.
+   - **Headless** (`-p`, AskUserQuestion unavailable): the interview answers come from the prompt
+     — write `_brief.md` and launch right away.
 
 1. **Topic.** If `$ARGUMENTS` is empty — ask for the topic via AskUserQuestion (in Russian) and stop.
 
@@ -236,8 +236,8 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
    number; sub-questions must not depend on each other's answers (a chained decomposition loses the
    entity of the early step); 1-3 hypotheses, each with its refuter (an early hypothesis without one
    pulls the evidence its way); do not split sub-questions between channels — channels differ by
-   platform, not by topic. The launch gate (step 7) shows the sub-questions to the user — agent-made
-   decompositions miss more than human-checked ones.
+   platform, not by topic. The launch message (step 7) shows the sub-questions to the user — agent-made
+   decompositions miss more than human-checked ones, and the user can still correct one after the start.
 
 5. **Language slot.** `LANGUAGES` = the languages the channels must search in. Default = the
    language of the query (the core detects ru/en/ja/zh/ko itself). Set it explicitly when the
@@ -267,29 +267,32 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md;
    `FINAL_OPTS` = the `finalOpts` field of `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/final-agent.py"` (one JSON
    line; it reads the OPTIONAL personal file `~/.claude/skills/_shared/final-agent.json` =
    `{"model":"claude-…","effort":"high"}` and prints `{"finalOpts": {…}}` or `{"finalOpts": null, "reason": …}`).
-   `null` → the plugin default (analyst Opus 5.5 · xhigh). Say it in one Russian line before the gate:
+   `null` → the plugin default (analyst Opus 5.5 · xhigh). Say it in one Russian line in the launch message of step 7:
    «Синтез: claude-fable-5-2 · high (final-agent.json)» or «Синтез: по умолчанию, Opus 5.5 · xhigh
    (final-agent.json: <reason>)».
 
-7. **Brief → launch gate.** One AskUserQuestion, in Russian, header «Запуск». The question
-   restates the whole proposal so it reads without scrolling back: the brief `REFINED_QUERY` (its
-   sub-questions and conditions in full, the verbatim question may be shortened), the channels
-   that will run (`SELECTED_CHANNELS`, their number) and `LANGUAGES`, plus dropped channels with a
-   short reason if there are any — e.g. «Запускаю полный ресёрч так? Формулировка: «…». Каналы (6):
-   web, codexweb, reddit, twitter, hackernews, substack; grokweb выключен в настройках. Языки: ru.»
-   Options, in this order:
-   - «Запустить (рекомендую)» — start the run;
-   - «Поправить формулировку» — take the change from the answer's note or «Other» text (none →
-     ask one plain question), update `REFINED_QUERY` and `QUERY_RU`;
-   - «Поправить каналы» — which channels to add or drop: a drop edits `SELECTED_CHANNELS`
-     directly, an addition re-runs the step 2a resolve with the new list.
-   Free text via «Other» is a correction too. After any correction apply it and ask the gate
-   again. **Launch only after the user picks «Запустить»** — no Workflow call before the gate has
-   returned that answer. Settle every value before the question (a platform searched in its own
-   language — step 5): the launch uses exactly what the gate showed, and a change after the
-   answer (language, channel, wording) means asking the gate again.
+7. **Brief → launch (no confirmation question).** Do NOT ask whether the wording or the channels
+   are right, and do not ask «запускать?»: the interview of step 4 was the user's say, a second
+   question after it only repeats it (owner decision 2026-11-10; the AskUserQuestion launch gate
+   of 2.x is removed). In the same turn as the interview answers:
+   - Show the proposal as plain text, in Russian — no AskUserQuestion: the brief `REFINED_QUERY`
+     (its sub-questions and conditions in full, the verbatim question may be shortened), the
+     channels that will run (`SELECTED_CHANNELS`, their number) and `LANGUAGES`, dropped channels
+     with a short reason if there are any, the synthesis line of step 6 — e.g. «Формулировка:
+     «…». Каналы (6): web, codexweb, reddit, twitter, hackernews, substack; grokweb выключен в
+     настройках. Языки: ru.»
+   - Run the launch sequence below at once, without waiting for an answer.
 
-   **Launch sequence** — in the same turn as the answer; the other branches of step 0 reuse it:
+   Settle every value before that message (a platform searched in its own language — step 5):
+   the run uses exactly what the message showed. The only stops before the launch are an empty
+   topic (step 1), `.insufficient == true` (step 2a) and plan mode (step 0).
+   A correction that arrives after the start (wording, channels, language): the user asked to
+   restart → stop the run (`TaskStop` on the workflow task), apply the correction (a channel
+   addition re-runs the step 2a resolve), rewrite `_brief.md` and launch again; the user did not
+   say whether to restart → ask one plain question: restart with the correction, or let the run
+   finish as it is.
+
+   **Launch sequence** — in the same turn as the interview answers; the other branches of step 0 reuse it:
    1. `mkdir -p "{WORK_DIR}" "{VAULT_RESEARCH_DIR}"`.
    2. Write the brief to `{WORK_DIR}/_brief.md` in this shape — it holds every Workflow arg:
 

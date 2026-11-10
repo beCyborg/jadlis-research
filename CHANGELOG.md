@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+## [2.14.0] — 2026-11-10 — запуск сразу после интервью / the run starts right after the interview
+
+### Для человека
+- Вопроса «Запускаю полный ресёрч так?» больше нет. После интервью скилл показывает формулировку с подвопросами, каналы и языки и сразу запускает прогон.
+- Поправить формулировку или каналы можно сообщением после старта: скилл остановит прогон и запустит его заново.
+- Остановки остались там, где без человека нельзя: пустая тема, слишком мало источников, режим плана.
+
+### For agents
+- Removed: the AskUserQuestion launch gate of Phase A step 7 (`skills/research/SKILL.md`). Step 7 now prints the brief as plain text (REFINED_QUERY with sub-questions and conditions, SELECTED_CHANNELS, LANGUAGES, dropped channels, the synthesis line) and runs the launch sequence in the same turn as the interview answers.
+- Added: step 7 rule for a correction after the start — explicit restart request → `TaskStop`, apply, rewrite `_brief.md`, launch again; otherwise one plain question.
+- Changed: step 0 branches (normal, brief already approved, plan mode, headless), the intro and the architecture line no longer mention the gate; plan mode still goes through `ExitPlanMode`.
+- Docs: `docs/tier/README*.md` quick-start paragraph.
+
 ## [2.13.0] — 2026-11-09 — финальный агент из личного файла, механика на medium, без Jina / final agent from a personal file, mechanical steps at medium, no Jina
 
 ### Для человека
