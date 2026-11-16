@@ -29,7 +29,7 @@ Read the pipeline: collection by channels first, then a separate verification ph
 5. **urlhealth + snapshot gate** — MEDIUM ceiling on a weak citation.
 6. **Two verifiers per claim, one per source family** — the first challenges the claim where it was found (from Reddit → on Reddit, from the web → via Brave), the second takes the other family. Web and communities disagree → a "family split": both stories go into the report, priority by claim type (fact → web, experience → communities). A lone exclusion → third vote by Codex (no more than 8 escalations per run).
 7. **Synthesis** — survivors only; dropped = one line with the reason.
-8. **Note in `Знания/Ресерчи/`** — an AI draft until you read it.
+8. **Note in the research folder (`RESEARCH_DIR`, `Знания/Ресерчи/` by default)** — an AI draft until you read it.
 
 ![Two magnifiers over one card: through one it is intact, through the other it is cracked](https://raw.githubusercontent.com/beCyborg/jadlis-hub/main/docs/img/05-full-research-01.webp)
 
@@ -151,7 +151,7 @@ What of this is available right now is shown by `/jadlis-research:research-setti
 
 Sign-ups are free and hand you a key immediately: PubMed at `ncbi.nlm.nih.gov/account/settings/`, Semantic Scholar at `semanticscholar.org/product/api`, OpenAlex at `openalex.org`, CORE at `core.ac.uk/services/api`. Crossref and Unpaywall have no sign-up at all: they only need your own contact address, which is how those APIs know who is knocking.
 
-Where things land: reports go to `VAULT_PATH/Знания/Ресерчи/` (`VAULT_PATH` is set when `research` and `science-research` are installed, `~/Jadlis` by default), the working files of a run to `VAULT_PATH/.full-research/<id>_<slug>/` and `VAULT_PATH/.search-paper/<id>_<slug>/`.
+Where things land: reports go to `VAULT_PATH/RESEARCH_DIR/` (both are set when `research` and `science-research` are installed, `~/Jadlis` and `Знания/Ресерчи` by default), the working files of a run to `VAULT_PATH/.full-research/<id>_<slug>/` and `VAULT_PATH/.search-paper/<id>_<slug>/`.
 
 > [!warning] `GOOGLE_PLACES_API_KEY` — budget cap first
 > The Places API has no hard cap by design: overspending is stopped only by a budget alert that disables billing. Set the cap in the Google Cloud Console **before** the first call. Without the key the place layer falls back to Brave Place on its own — that is the normal path.
@@ -174,7 +174,7 @@ You get: an answer with a source link under each fact and any disagreements betw
 /research should we move the team wiki to a static generator
 ```
 
-You get: an interview first (the opening question is always "which decision will you make from this"), then the skill shows the refined query with its sub-questions and the channels and starts the run at once — there is no separate "launch?" question. The output is a note in `Знания/Ресерчи/` with three buckets (confirmed / disputed / dropped) plus a summary: which channels delivered, how many claims held up, what was dropped and why.
+You get: an interview first (the opening question is always "which decision will you make from this"), then the skill shows the refined query with its sub-questions and the channels and starts the run at once — there is no separate "launch?" question. The output is a note in the research folder with three buckets (confirmed / disputed / dropped) plus a summary: which channels delivered, how many claims held up, what was dropped and why.
 
 **3. A scientific review — `/science-research`**
 

@@ -57,7 +57,8 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md 
      brief lacks come from the request and steps 5-6. Then do the launch sequence of step 7
      (`mkdir -p`, `_brief.md` — keep a given one as is, launch line, Workflow). If this file was
      opened with Read rather than loaded as a skill, its plugin-root variables stay unsubstituted —
-     use `PLUGIN_ROOT` and `VAULT_PATH` from the brief.
+     use `PLUGIN_ROOT`, `VAULT_PATH` and `RESEARCH_DIR` from the brief (a brief without
+     `RESEARCH_DIR` → `Знания/Ресерчи`).
    - **Session already in plan mode** (the user is planning a bigger task; a plan-mode system
      reminder names the plan file). Steps 1-6 as usual. Then APPEND the brief of step 7 as a
      section to that plan file — leave the rest of the plan as it is, no Context/Evidence frame
@@ -263,7 +264,10 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md 
    (a relative one resolves from the cwd at the moment the agents are spawned: a `cd` of the main
    session before a resume "lost" files at status ok; this also concerns `resumeFromRunId` calls —
    pass the args in full with the same absolute workDir);
-   `VAULT_RESEARCH_DIR = {VAULT_PATH}/Знания/Ресерчи`; `PLUGIN_ROOT = ${CLAUDE_PLUGIN_ROOT}`;
+   `RESEARCH_DIR = ${user_config.RESEARCH_DIR}` (the reports folder, relative to the vault root) —
+   **if the value is empty or is left as the literal `${user_config.RESEARCH_DIR}`, use
+   `Знания/Ресерчи`**; strip a leading/trailing `/`;
+   `VAULT_RESEARCH_DIR = {VAULT_PATH}/{RESEARCH_DIR}`; `PLUGIN_ROOT = ${CLAUDE_PLUGIN_ROOT}`;
    `FINAL_OPTS` = the `finalOpts` field of `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/final-agent.py"` (one JSON
    line; it reads the OPTIONAL personal file `~/.claude/skills/_shared/final-agent.json` =
    `{"model":"claude-…","effort":"high"}` and prints `{"finalOpts": {…}}` or `{"finalOpts": null, "reason": …}`).
@@ -312,6 +316,7 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md 
       QUERY_RU: …
       DATE: YYYY-MM-DD
       VAULT_PATH: /abs/path/to/vault              # step 6 value
+      RESEARCH_DIR: Знания/Ресерчи                # step 6 value, relative to VAULT_PATH
       PLUGIN_ROOT: ${CLAUDE_PLUGIN_ROOT}
 
       ## Checklist
@@ -522,7 +527,7 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
    `command grep -rIl "{key}" "{VAULT_RESEARCH_DIR}"` → (3) `obsidian search` only as a fallback
    (flaky, run 2-3×), if Obsidian is open:
    ```bash
-   obsidian search query="{keywords from QUERY_RU}" path="Знания/Ресерчи" limit=5 format=json 2>/dev/null || echo "CLI_UNAVAILABLE"
+   obsidian search query="{keywords from QUERY_RU}" path="{RESEARCH_DIR}" limit=5 format=json 2>/dev/null || echo "CLI_UNAVAILABLE"
    ```
    Remember the note names found. If there is a very close duplicate — decide: supersede / link.
 
@@ -540,7 +545,7 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
 6. **Post-write (daily note).** If Obsidian is open:
    ```bash
    NOTE_NAME=$(basename "{REPORT_PATH}" .md)
-   DAILY=$(obsidian daily:path 2>/dev/null) || DAILY="Периоды/День/$(date +%F).md"
+   DAILY=$(obsidian daily:path 2>/dev/null); case "$DAILY" in *.md) ;; *) DAILY="Периоды/День/$(date +%F).md" ;; esac
    obsidian append path="$DAILY" content="- [[${NOTE_NAME}]] — полное исследование, ожидает ревью" 2>/dev/null || true
    obsidian backlinks file="${NOTE_NAME}" counts 2>/dev/null || true
    # workDir retention (30 days with a link from the vault, 7 without; dry-run only without --yes) and
@@ -590,7 +595,7 @@ The vault write contract — `${CLAUDE_PLUGIN_ROOT}/shared/obsidian-write-contra
      2.7.1: xhigh by default, high on the last-resort retry; the `finalOpts` model — e.g.
      `claude-fable-5-2` — when step 6 found the personal file, 2.13.0;
      `claude-opus-4-8` when the analyst was re-run after a classifier stop or a null, 2.7.8).
-   - Report path: `REPORT_PATH` (vault, `Знания/Ресерчи`).
+   - Report path: `REPORT_PATH` (vault, `{RESEARCH_DIR}`).
    - Working directory: `{WORK_DIR}/` (per-source files + draft — the full process).
    - **Closing line «От тебя:» — only when unverified claims reached the report.** Trigger:
      `ledgerSummary.disputed > 0` or `ledgerSummary.familySplit > 0` (claims with verdict

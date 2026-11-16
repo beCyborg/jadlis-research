@@ -169,7 +169,8 @@ together with the `jadlis-search` plugin. If the Brave key is dead or Brave is s
 the web channel and the verification run on Exa and need `EXA_API_KEY`; with neither Brave nor Exa a run
 does not go. Brave, Exa and Firecrawl are the ones who bill you, so check their pricing with them: I name
 no figures of my own. The report is put
-into the notes folder you specify at install time — that is `VAULT_PATH`, `~/Jadlis` by default.
+into the notes folder you specify at install time — that is `VAULT_PATH`, `~/Jadlis` by default, and inside it
+into `RESEARCH_DIR`, `Знания/Ресерчи` by default.
 
 **How tokens get spent.** A heavy run — dozens of subagents out of your own quota; several runs back
 to back do not fit into one window. It is heavy for exactly the reason that the channels run
