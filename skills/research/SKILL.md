@@ -254,7 +254,7 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md 
    `uuidgen | cut -c1-8` instead); `QUERY_SLUG` (Latin transliteration, ≤40, lowercase, hyphens);
    `QUERY_RU` (short Russian phrasing ≤25 chars); `DATE` = !`date +%Y-%m-%d` (already substituted
    when the skill loads, no Bash needed); `VAULT_PATH = ${user_config.VAULT_PATH}` — **if the value
-   is empty or is left as the literal `${user_config.VAULT_PATH}` (e.g. during a local trial with
+   is empty or still contains the word `user_config` (not substituted, e.g. during a local trial with
    `--plugin-dir`), use `~/Jadlis`**;
    `DATA_DIR = ${CLAUDE_PLUGIN_DATA}` (the same value step 2a passes as `--data-dir`) — **if it is
    empty or is left as the literal `${CLAUDE_PLUGIN_DATA}` (e.g. during a local trial with
@@ -265,7 +265,8 @@ Phase A (INTAKE: channels + recon + interview → brief in {WORK_DIR}/_brief.md 
    session before a resume "lost" files at status ok; this also concerns `resumeFromRunId` calls —
    pass the args in full with the same absolute workDir);
    `RESEARCH_DIR = ${user_config.RESEARCH_DIR}` (the reports folder, relative to the vault root) —
-   **if the value is empty or is left as the literal `${user_config.RESEARCH_DIR}`, use
+   **if the value is empty or still contains the word `user_config` (not substituted — the setting
+   was never saved), use
    `Знания/Ресерчи`**; strip a leading/trailing `/`;
    `VAULT_RESEARCH_DIR = {VAULT_PATH}/{RESEARCH_DIR}`; `PLUGIN_ROOT = ${CLAUDE_PLUGIN_ROOT}`;
    `FINAL_OPTS` = the `finalOpts` field of `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/final-agent.py"` (one JSON
